@@ -1,0 +1,19 @@
+# ~/.bash_profile — login shells. bash reads this INSTEAD of ~/.profile.
+# Byte-identical on every Mac (like ~/.zshrc). PATH logic mirrors ~/.zshenv +
+# ~/.zprofile: macOS runs /usr/libexec/path_helper from /etc/profile for every
+# login shell, which shuffles the system dirs back in front — so Homebrew must
+# be re-asserted HERE (after /etc/profile), or `bash`, `git`, `python3`, …
+# resolve to Apple's frozen system copies.
+[ -x /opt/homebrew/bin/brew ] && eval "$(/opt/homebrew/bin/brew shellenv bash)"
+
+# User-installed CLIs (claude, codex, …) win over everything.
+case ":$PATH:" in
+  *":$HOME/.local/bin:"*) ;;
+  *) PATH="$HOME/.local/bin:$PATH" ;;
+esac
+export PATH
+
+# Interactive login shells (every kitty window / ssh session / tmux pane on
+# macOS is one) get the interactive config too.
+[ -f "$HOME/.bashrc" ] && . "$HOME/.bashrc"
+. "$HOME/.cargo/env"

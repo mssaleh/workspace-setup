@@ -1,0 +1,24 @@
+[user]
+	name = ${GIT_NAME}
+	email = ${GIT_EMAIL}
+[core]
+	pager = delta
+[interactive]
+	diffFilter = delta --color-only
+[delta]
+	navigate = true
+	line-numbers = true
+	hyperlinks = true
+	syntax-theme = Catppuccin Mocha
+[merge]
+	conflictStyle = zdiff3
+[diff]
+	colorMoved = default
+[init]
+	defaultBranch = main
+[credential "https://github.com"]
+	helper =
+	helper = !${GH_BIN} auth git-credential
+[credential "https://gist.github.com"]
+	helper =
+	helper = !${GH_BIN} auth git-credential

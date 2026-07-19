@@ -1,0 +1,33 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "permission": {
+    "bash": {
+      "brew install *": "deny",
+      "brew uninstall *": "deny",
+      "brew reinstall *": "deny",
+      "brew upgrade *": "deny",
+      "brew tap *": "deny",
+      "brew untap *": "deny",
+      "brew services *": "deny",
+      "brew pin *": "deny",
+      "brew unpin *": "deny",
+      "brew link *": "deny",
+      "brew unlink *": "deny",
+      "brew install --cask *": "deny",
+      "brew fetch *": "deny",
+      "brew extract *": "deny",
+      "apt install *": "deny",
+      "apt remove *": "deny",
+      "apt purge *": "deny",
+      "apt upgrade *": "deny",
+      "apt update *": "deny",
+      "apt-get install *": "deny",
+      "apt-get remove *": "deny",
+      "apt-get purge *": "deny",
+      "apt-get upgrade *": "deny",
+      "apt-get update *": "deny",
+      "snap install *": "deny",
+      "snap remove *": "deny"
+    }
+  }
+}

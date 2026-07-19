@@ -1,0 +1,6 @@
+# ~/.zshenv — sourced by every zsh (login, interactive, scripts, subprocesses).
+# Ensures Homebrew and ~/.local/bin are always on PATH. Fixes "command not found" (127).
+typeset -U path PATH
+path=(/opt/homebrew/bin /opt/homebrew/sbin "$HOME/.local/bin" $path)
+export PATH
+. "$HOME/.cargo/env"

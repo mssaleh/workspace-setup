@@ -1,0 +1,10 @@
+# bat config — https://github.com/sharkdp/bat#configuration-file
+# Catppuccin Mocha to match kitty/terminal. Theme file lives in
+# `$(bat --config-dir)/themes/` and is compiled via `bat cache --build`.
+--theme="Catppuccin Mocha"
+
+# Show line numbers, git modification markers, and a file header.
+--style="numbers,changes,header"
+
+# Italics for comments/etc. where the terminal font supports it.
+--italic-text=always

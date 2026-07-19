@@ -1,0 +1,27 @@
+# kitty startup session — your default workspace, opened on launch.
+# Docs: https://sw.kovidgoyal.net/kitty/overview/#startup-sessions
+#
+# Best workflow: arrange the panes/tabs you want, press Cmd+Shift+S to snapshot
+# the live layout to a file, then point `startup_session` in kitty.conf at it.
+# Directives apply to the tab/window currently being built, in order.
+
+layout splits
+
+new_tab home
+cd ~
+launch --title shell
+
+new_tab code
+cd ~
+launch --title work
+launch --location=vsplit --title shell
+
+# ---- Examples you can uncomment / adapt ----
+# new_tab prod
+# cd ~
+# launch --title prod env TERM=xterm-256color ssh user@prod.example.com
+# launch --location=vsplit --title logs env TERM=xterm-256color ssh user@prod.example.com
+#
+# new_tab claude
+# cd ~/projects/myapp
+# launch --title claude claude

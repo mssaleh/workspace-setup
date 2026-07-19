@@ -1,0 +1,19 @@
+# ~/.ssh/config — read automatically by ssh and kitty's ssh kitten.
+# The per-host block below is an example; edit to match your own hosts.
+
+# Example: a Mac mini on a ZeroTier overlay at 10.10.10.12
+# Host mini macmini 10.10.10.12
+#     HostName 10.10.10.12
+#     User ${SSH_USER}
+#     IdentityFile ~/.ssh/id_ed25519
+#     IdentitiesOnly yes
+
+# Defaults for every host. Extended keepalives so sessions (incl. kitten ssh)
+# survive laptop sleep/wake over a stable overlay: SSH-layer probes
+# every 30s, ~3h grace (30 x 360). TCPKeepAlive off so a transient TCP idle
+# doesn't drop us — ServerAlive is the sole arbiter. (mosh/ds survives regardless.)
+Host *
+    AddKeysToAgent yes
+    ServerAliveInterval 30
+    ServerAliveCountMax 360
+    TCPKeepAlive no

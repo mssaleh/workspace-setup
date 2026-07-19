@@ -1,0 +1,214 @@
+# ~/.codex/rules/default.rules — user-level command rules for Codex.
+# Enforces the "no user-level package installs" policy: a coding agent must
+# NOT use Homebrew to install, remove, upgrade, tap, or otherwise mutate
+# user-level packages. Dev dependencies belong in containers with mounted
+# volumes (see the terminal-shell-setup-report §7.8), never in the user home
+# folder. Rules use the Starlark-based prefix_rule() format documented at
+# https://developers.openai.com/codex/agent-configuration/rules
+#
+# Decision precedence (most restrictive wins): forbidden > prompt > allow.
+# Verify with:  codex execpolicy check --pretty --rules ~/.codex/rules/default.rules -- brew install foo
+
+# --- Core install/uninstall/upgrade: forbidden (hard block, no prompt) ---
+
+prefix_rule(
+    pattern = ["brew", "install"],
+    decision = "forbidden",
+    justification = "No user-level package installs via Homebrew. Use a container with a mounted volume for dev dependencies (see setup-report §7.8).",
+    match = [
+        "brew install foo",
+        "brew install --cask font-foo",
+        "brew install foo bar baz",
+    ],
+    not_match = [
+        "brew list",            # not an install
+        "brew info foo",        # not an install
+    ],
+)
+
+prefix_rule(
+    pattern = ["brew", "uninstall"],
+    decision = "forbidden",
+    justification = "No user-level package removal via Homebrew. Manage packages manually, not from a coding agent.",
+    match = ["brew uninstall foo", "brew uninstall --force foo"],
+)
+
+prefix_rule(
+    pattern = ["brew", "reinstall"],
+    decision = "forbidden",
+    justification = "No user-level package reinstallation via Homebrew.",
+    match = ["brew reinstall foo"],
+)
+
+prefix_rule(
+    pattern = ["brew", "upgrade"],
+    decision = "forbidden",
+    justification = "No user-level package upgrades via Homebrew from a coding agent. Run `brew upgrade` manually.",
+    match = ["brew upgrade", "brew upgrade foo", "brew upgrade --all"],
+)
+
+# --- Taps / services / pinning / linking: forbidden ---
+
+prefix_rule(
+    pattern = ["brew", "tap"],
+    decision = "forbidden",
+    justification = "No adding/removing Homebrew taps from a coding agent.",
+    match = ["brew tap user/repo", "brew tap newtap"],
+)
+
+prefix_rule(
+    pattern = ["brew", "untap"],
+    decision = "forbidden",
+    justification = "No removing Homebrew taps from a coding agent.",
+    match = ["brew untap user/repo"],
+)
+
+prefix_rule(
+    pattern = ["brew", "services"],
+    decision = "forbidden",
+    justification = "No user-level daemons via `brew services`. Databases and services belong in containers (see setup-report §7.8).",
+    match = [
+        "brew services start postgresql@18",
+        "brew services stop redis",
+        "brew services restart foo",
+        "brew services run foo",
+    ],
+)
+
+prefix_rule(
+    pattern = ["brew", "pin"],
+    decision = "forbidden",
+    justification = "No pinning Homebrew formulae from a coding agent.",
+    match = ["brew pin foo"],
+)
+
+prefix_rule(
+    pattern = ["brew", "unpin"],
+    decision = "forbidden",
+    justification = "No unpinning Homebrew formulae from a coding agent.",
+    match = ["brew unpin foo"],
+)
+
+prefix_rule(
+    pattern = ["brew", "link"],
+    decision = "forbidden",
+    justification = "No linking Homebrew kegs from a coding agent.",
+    match = ["brew link foo", "brew link --force foo", "brew link --overwrite foo"],
+)
+
+prefix_rule(
+    pattern = ["brew", "unlink"],
+    decision = "forbidden",
+    justification = "No unlinking Homebrew kegs from a coding agent.",
+    match = ["brew unlink foo"],
+)
+
+# --- Fetch / extract (download source for offline install): forbidden ---
+
+prefix_rule(
+    pattern = ["brew", "fetch"],
+    decision = "forbidden",
+    justification = "No fetching Homebrew formula sources from a coding agent (fetch is the first step of an install).",
+    match = ["brew fetch foo", "brew fetch --deps foo"],
+)
+
+prefix_rule(
+    pattern = ["brew", "extract"],
+    decision = "forbidden",
+    justification = "No extracting Homebrew formulae to a tap from a coding agent.",
+    match = ["brew extract foo user/repo"],
+)
+
+# --- Note: read-only brew commands are NOT blocked ---
+# `brew list`, `brew info`, `brew search`, `brew deps`, `brew outdated`, `brew leaves`,
+# `brew --prefix`, `brew config`, `brew doctor`, `brew desc`, `brew uses`, etc. remain
+# allowed — they don't mutate the user-level package state.
+
+# --- Linux: apt / apt-get / snap (same policy, different package manager) ---
+
+prefix_rule(
+    pattern = ["apt", "install"],
+    decision = "forbidden",
+    justification = "No user-level package installs via apt. Use a container with a mounted volume for dev dependencies (see setup-report §7.8).",
+    match = ["apt install foo", "apt install -y foo"],
+)
+
+prefix_rule(
+    pattern = ["apt", "remove"],
+    decision = "forbidden",
+    justification = "No user-level package removal via apt from a coding agent.",
+    match = ["apt remove foo", "apt remove -y foo"],
+)
+
+prefix_rule(
+    pattern = ["apt", "purge"],
+    decision = "forbidden",
+    justification = "No user-level package purge via apt from a coding agent.",
+    match = ["apt purge foo"],
+)
+
+prefix_rule(
+    pattern = ["apt", "upgrade"],
+    decision = "forbidden",
+    justification = "No user-level package upgrades via apt from a coding agent. Run `apt upgrade` manually.",
+    match = ["apt upgrade", "apt upgrade foo"],
+)
+
+prefix_rule(
+    pattern = ["apt", "update"],
+    decision = "forbidden",
+    justification = "No `apt update` from a coding agent (refreshes the package index — run manually).",
+    match = ["apt update"],
+)
+
+prefix_rule(
+    pattern = ["apt-get", "install"],
+    decision = "forbidden",
+    justification = "No user-level package installs via apt-get. Use a container with a mounted volume for dev dependencies.",
+    match = ["apt-get install foo", "apt-get install -y foo"],
+)
+
+prefix_rule(
+    pattern = ["apt-get", "remove"],
+    decision = "forbidden",
+    justification = "No user-level package removal via apt-get from a coding agent.",
+    match = ["apt-get remove foo"],
+)
+
+prefix_rule(
+    pattern = ["apt-get", "purge"],
+    decision = "forbidden",
+    justification = "No user-level package purge via apt-get from a coding agent.",
+    match = ["apt-get purge foo"],
+)
+
+prefix_rule(
+    pattern = ["apt-get", "upgrade"],
+    decision = "forbidden",
+    justification = "No user-level package upgrades via apt-get from a coding agent.",
+    match = ["apt-get upgrade", "apt-get upgrade foo"],
+)
+
+prefix_rule(
+    pattern = ["apt-get", "update"],
+    decision = "forbidden",
+    justification = "No `apt-get update` from a coding agent (refreshes the package index — run manually).",
+    match = ["apt-get update"],
+)
+
+prefix_rule(
+    pattern = ["snap", "install"],
+    decision = "forbidden",
+    justification = "No user-level package installs via snap. Use a container with a mounted volume for dev dependencies.",
+    match = ["snap install foo"],
+)
+
+prefix_rule(
+    pattern = ["snap", "remove"],
+    decision = "forbidden",
+    justification = "No user-level package removal via snap from a coding agent.",
+    match = ["snap remove foo"],
+)
+
+# --- Note: read-only apt/snap commands are NOT blocked ---
+# `apt list`, `apt show`, `apt-cache search`, `dpkg -l`, `snap list`, etc. remain allowed.

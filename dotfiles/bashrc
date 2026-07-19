@@ -1,0 +1,144 @@
+# ~/.bashrc — interactive shells. PATH is set in ~/.bash_profile.
+# The bash twin of ~/.zshrc: same minimal setup, same prompt, same functions,
+# NO command aliases. Byte-identical on every Mac.
+
+# PATH for every bash that reads this file — the twin of ~/.zshenv's job.
+# Non-interactive `ssh host cmd` bypasses ~/.bash_profile but DOES read
+# ~/.bashrc, so Homebrew and ~/.local/bin must be asserted before the
+# interactivity gate below or remote commands get the bare sshd PATH.
+case ":$PATH:" in *":/opt/homebrew/bin:"*) ;; *) PATH="/opt/homebrew/bin:/opt/homebrew/sbin:$PATH" ;; esac
+case ":$PATH:" in *":$HOME/.local/bin:"*)   ;; *) PATH="$HOME/.local/bin:$PATH" ;; esac
+export PATH
+
+# Locale safety net: macOS region "en_AE" has no POSIX locale, so several
+# contexts (Terminal.app, ssh clients that don't send LANG, bare launchd)
+# start bash with no usable locale — brew bash 5.3 then prints
+# "setlocale: … cannot change locale ()" warnings the moment bash-completion
+# (below) probes the locale. Default to a real UTF-8 locale when none is set.
+if [ -z "${LANG:-}" ] && [ -z "${LC_ALL:-}" ]; then
+  export LANG=en_US.UTF-8
+fi
+
+# Non-interactive shells stop here (scp, `ssh host cmd`, scripts, …).
+case $- in *i*) ;; *) return ;; esac
+
+# History — approximates zsh SHARE_HISTORY/IGNORE_ALL_DUPS: big, deduped,
+# appended after every command instead of on shell exit.
+HISTSIZE=100000
+HISTFILESIZE=100000
+HISTCONTROL=ignoreboth:erasedups
+shopt -s histappend
+shopt -s checkwinsize
+
+# Completion. Homebrew tools drop bash completions into
+# /opt/homebrew/etc/bash_completion.d; bash-completion@2 lazy-loads them.
+[ -r /opt/homebrew/etc/profile.d/bash_completion.sh ] && \
+  . /opt/homebrew/etc/profile.d/bash_completion.sh
+
+# ── Prompt & window title: WHICH MACHINE am I on? ───────────────────────────
+# Same rule as ~/.zshrc: the #1 job of the prompt is making local-vs-remote
+# unmistakable. Host badge + cwd + git branch; per-host accent colour.
+case "$HOSTNAME" in
+  *MacBook*|*macbook*)          _host_label='macbook'; _host_color=150 ;;  # green
+  *Mac-mini*|*mac-mini*|*Mini*) _host_label='mini';    _host_color=215 ;;  # peach
+  *)                            _host_label=${HOSTNAME%%.*}; _host_color=245 ;;  # other: grey + real name
+esac
+
+__prompt_git() {
+  local b
+  b=$(git symbolic-ref --short -q HEAD 2>/dev/null || git rev-parse --short HEAD 2>/dev/null)
+  [ -n "$b" ] && printf ' (%s)' "$b"
+}
+PS1="\[\e[1;38;5;${_host_color}m\]${_host_label}\[\e[0m\] \[\e[34m\]\w\[\e[0m\]\[\e[38;5;242m\]\$(__prompt_git)\[\e[0m\] \\$ "
+
+# Terminal/tab title = "<machine>: <dir>" (kitty.conf uses `no-title` so the
+# shell owns it). Also flush history after every command (see History above).
+__set_term_title() { printf '\e]2;%s: %s\a' "$_host_label" "${PWD/#$HOME/\~}"; }
+PROMPT_COMMAND='history -a; __set_term_title'
+
+export EDITOR=nano
+
+# yazi: `y` opens the file manager and cd's to the directory you quit in.
+# Official wrapper: https://yazi-rs.github.io/docs/quick-start
+function y() {
+	local tmp cwd
+	tmp="$(mktemp -t "yazi-cwd.XXXXXX")"
+	command yazi "$@" --cwd-file="$tmp"
+	cwd="$(command cat -- "$tmp" 2>/dev/null)"
+	[ -n "$cwd" ] && [ "$cwd" != "$PWD" ] && [ -d "$cwd" ] && builtin cd -- "$cwd"
+	command rm -f -- "$tmp"
+}
+
+# ds: durable remote session — mosh (survives wifi drop / network roam) + tmux
+# on the remote (survives SSH disconnect; not remote reboot). Usage: ds mini | ds user@host
+# LC_ALL forces a valid UTF-8 locale so mosh doesn't choke on macOS sending
+# LC_CTYPE=UTF-8; the TERM downgrade matches ssh() so remote TUIs render on any host.
+function ds() {
+  local host="$1"
+  if [ -z "$host" ]; then
+    echo "usage: ds <host>" >&2
+    return 2
+  fi
+  if ! command -v mosh >/dev/null 2>&1; then
+    echo "ds: mosh is not installed locally" >&2
+    return 127
+  fi
+  if ! command ssh -o BatchMode=yes -o ConnectTimeout=8 -o ConnectionAttempts=1 "$host" \
+      'command -v mosh-server >/dev/null && command -v tmux >/dev/null' >/dev/null; then
+    echo "ds: cannot reach $host over SSH, or remote is missing mosh-server/tmux" >&2
+    echo "ds: check with: ssh -o ConnectTimeout=8 $host" >&2
+    return 255
+  fi
+  LC_ALL=en_US.UTF-8 TERM=xterm-256color \
+    mosh --ssh="ssh -o ConnectTimeout=8 -o ConnectionAttempts=1" "$host" -- tmux new -A -s main
+}
+
+# ssh: Kitty advertises TERM=xterm-kitty locally. OpenSSH sends that terminal
+# type to remote PTYs, and many hosts do not have its terminfo installed. Keep
+# the local Kitty TERM, but use xterm-256color for SSH by default.
+function ssh() {
+  local _ssh_term="${TERM:-xterm-256color}"
+  case "$_ssh_term" in
+    xterm-kitty|tmux-256color|screen-256color) _ssh_term=xterm-256color ;;
+  esac
+  TERM="$_ssh_term" command ssh "$@"
+}
+
+# s: short compatible SSH command. Usage: s mini | s user@host
+function s() { ssh "$@"; }
+
+# ks: opt in to Kitty's ssh kitten for hosts where you want Kitty integration.
+function ks() { if command -v kitten >/dev/null 2>&1; then kitten ssh "$@"; else ssh "$@"; fi; }
+
+# fzf: fuzzy finder. Ctrl-R fuzzy history · Ctrl-T insert file paths · Alt-C cd
+# into a subdir · `**<Tab>` fuzzy completion. Official bash integration:
+# https://github.com/junegunn/fzf
+if command -v fzf >/dev/null 2>&1; then
+  # Source `fd` (respects .gitignore, includes dotfiles, skips .git) for speed:
+  command -v fd >/dev/null 2>&1 && {
+    export FZF_DEFAULT_COMMAND='fd --hidden --strip-cwd-prefix --exclude .git'
+    export FZF_CTRL_T_COMMAND="$FZF_DEFAULT_COMMAND"
+    export FZF_ALT_C_COMMAND='fd --type=d --hidden --strip-cwd-prefix --exclude .git'
+  }
+  # Layout + Catppuccin Mocha palette (https://github.com/catppuccin/fzf):
+  export FZF_DEFAULT_OPTS="
+    --height=60% --layout=reverse --border=rounded --info=inline
+    --bind=ctrl-/:toggle-preview
+    --color=bg+:#313244,bg:#1e1e2e,spinner:#f5e0dc,hl:#f38ba8
+    --color=fg:#cdd6f4,header:#f38ba8,info:#cba6f7,pointer:#f5e0dc
+    --color=marker:#b4befe,fg+:#cdd6f4,prompt:#cba6f7,hl+:#f38ba8
+    --color=selected-bg:#45475a,border:#585b70,label:#cdd6f4"
+  # Previews: Ctrl-T shows files via bat / dirs via eza; Alt-C shows the tree;
+  # Ctrl-R shows the full command (toggle with Ctrl-/).
+  export FZF_CTRL_T_OPTS="--preview '(bat --color=always --style=numbers {} || eza --tree --color=always {}) 2>/dev/null | head -200'"
+  export FZF_ALT_C_OPTS="--preview 'eza --tree --color=always {} 2>/dev/null | head -200'"
+  export FZF_CTRL_R_OPTS="--preview 'echo {}' --preview-window=down:3:hidden:wrap --bind=ctrl-/:toggle-preview"
+  # fzf's keybindings assume a real terminal; skip them in non-TTY shells
+  # such as automated `bash -ic` SSH checks.
+  if [ -t 0 ] && [ -t 1 ]; then
+    eval "$(fzf --bash)"
+    eval "$(zoxide init bash)"
+  fi
+fi
+
+. "$HOME/.cargo/env"

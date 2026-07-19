@@ -1,0 +1,4 @@
+[build]
+cpus = 11
+memory = "18432mb"
+rosetta = true

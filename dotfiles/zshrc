@@ -1,0 +1,168 @@
+# ~/.zshrc — interactive shell. PATH is set in ~/.zshenv.
+
+# History
+HISTFILE="$HOME/.zsh_history"
+HISTSIZE=100000
+SAVEHIST=100000
+setopt SHARE_HISTORY HIST_IGNORE_ALL_DUPS HIST_IGNORE_SPACE HIST_REDUCE_BLANKS INC_APPEND_HISTORY
+setopt INTERACTIVE_COMMENTS
+
+# Completion. Homebrew tools ship completions in site-functions, which must be
+# on fpath BEFORE compinit runs (this is what fixes `_eza: function not found`).
+fpath=(/opt/homebrew/share/zsh/site-functions $fpath)
+autoload -Uz compinit && compinit
+zstyle ':completion:*' matcher-list 'm:{a-zA-Z}={A-Za-z}'
+zstyle ':completion:*' menu select
+
+# Completions for tools that don't drop a static _foo file into site-functions.
+# Everything is guarded with `command -v` so this same block is safe on any host
+# (a host lacking a given tool just self-skips that line). All must run AFTER compinit (above).
+#   kitty/kitten completions are set up automatically by kitty's shell
+#   integration (shell_integration enabled in kitty.conf ships a static _kitty
+#   on fpath) — the documented method. We deliberately do NOT
+#   `source <(kitten __complete__ setup zsh)`: that internal command is redundant
+#   here and can leak a colored warning onto stdout that breaks `source` with a
+#   "bad pattern: <esc>[33mkitten…" error. https://sw.kovidgoyal.net/kitty/shell-integration/
+#   `y` is the yazi cd-on-quit wrapper (below) — complete it exactly like yazi:
+command -v yazi   >/dev/null 2>&1 && compdef y=yazi
+#   _gnu_generic = flag completion parsed from `--help`, for tools that ship no
+#   zsh completion. For `delta` it also overrides zsh's wrong default binding to
+#   the ancient SCCS `_sccs`:
+for _c in delta lazygit node; do command -v $_c >/dev/null 2>&1 && compdef _gnu_generic $_c; done
+unset _c
+
+# ── Prompt & window title: WHICH MACHINE am I on? ───────────────────────────
+# The #1 job of this prompt is to make local-vs-remote unmistakable. A remote
+# shell renders its OWN prompt over SSH, so putting the host here means: SSH to
+# the mini shows "mini", and `exit` visibly drops you back to "macbook". Each
+# host gets a stable accent colour so the machines are distinct at a glance.
+# This file is byte-identical on every machine; the block below derives the
+# label + colour from $HOST at startup, so there are no per-machine edits.
+case "$HOST" in
+  *MacBook*|*macbook*)          _host_label='macbook'; _host_color=150 ;;  # green
+  *Mac-mini*|*mac-mini*|*Mini*) _host_label='mini';    _host_color=215 ;;  # peach
+  *)                            _host_label='%m';      _host_color=245 ;;  # other host: grey + real name
+esac
+
+# Working directory + git branch, prefixed with the host badge.
+autoload -Uz vcs_info
+zstyle ':vcs_info:git:*' formats ' (%b)'
+setopt PROMPT_SUBST
+PROMPT="%B%F{$_host_color}${_host_label}%f%b %F{blue}%~%f%F{242}\${vcs_info_msg_0_}%f %# "
+
+# Terminal/tab title = "<machine>: <dir>" — shows in kitty's title bar, tab bar
+# and the Cmd+` window switcher. kitty.conf sets `shell_integration ... no-title`
+# so kitty won't overwrite this. OSC 2 sets the title; print -P expands %~.
+function _set_term_title() { print -Pn "\e]2;${_host_label}: %~\a"; }
+precmd_functions+=(vcs_info _set_term_title)
+
+export EDITOR=nano
+
+# yazi: `y` opens the file manager and cd's to the directory you quit in.
+# Official wrapper: https://yazi-rs.github.io/docs/quick-start
+function y() {
+	local tmp="$(mktemp -t "yazi-cwd.XXXXXX")" cwd
+	command yazi "$@" --cwd-file="$tmp"
+	IFS= read -r -d '' cwd < "$tmp"
+	[ "$cwd" != "$PWD" ] && [ -d "$cwd" ] && builtin cd -- "$cwd"
+	command rm -f -- "$tmp"
+}
+
+# ds: durable remote session — mosh (survives wifi drop / network roam) + tmux
+# on the remote (survives SSH disconnect; not remote reboot). Usage: ds mini | ds user@host
+# LC_ALL forces a valid UTF-8 locale so mosh doesn't choke on macOS sending
+# LC_CTYPE=UTF-8; the TERM downgrade matches ssh() so remote TUIs render on any host.
+function ds() {
+  local host="$1"
+  if [ -z "$host" ]; then
+    print -u2 "usage: ds <host>"
+    return 2
+  fi
+  if ! command -v mosh >/dev/null 2>&1; then
+    print -u2 "ds: mosh is not installed locally"
+    return 127
+  fi
+  if ! ssh -o BatchMode=yes -o ConnectTimeout=8 -o ConnectionAttempts=1 "$host" \
+      'command -v mosh-server >/dev/null && command -v tmux >/dev/null' >/dev/null; then
+    print -u2 "ds: cannot reach $host over SSH, or remote is missing mosh-server/tmux"
+    print -u2 "ds: check with: ssh -o ConnectTimeout=8 $host"
+    return 255
+  fi
+  LC_ALL=en_US.UTF-8 TERM=xterm-256color \
+    mosh --ssh="ssh -o ConnectTimeout=8 -o ConnectionAttempts=1" "$host" -- tmux new -A -s main
+}
+
+# ssh: Kitty advertises TERM=xterm-kitty locally. OpenSSH sends that terminal
+# type to remote PTYs, and many hosts do not have its terminfo installed. Keep
+# the local Kitty TERM, but use xterm-256color for SSH by default.
+function ssh() {
+  local _ssh_term="${TERM:-xterm-256color}"
+  case "$_ssh_term" in
+    xterm-kitty|tmux-256color|screen-256color) _ssh_term=xterm-256color ;;
+  esac
+  TERM="$_ssh_term" command ssh "$@"
+}
+
+# s: short compatible SSH command. Usage: s mini | s user@host
+function s() { ssh "$@"; }
+
+# ks: opt in to Kitty's ssh kitten for hosts where you want Kitty integration.
+function ks() { if command -v kitten >/dev/null 2>&1; then kitten ssh "$@"; else ssh "$@"; fi; }
+
+# fzf: fuzzy finder. Ctrl-R fuzzy history · Ctrl-T insert file paths · Alt-C cd
+# into a subdir · `**<Tab>` fuzzy completion. Official zsh integration (defines
+# the key-binding widgets + completion):  https://github.com/junegunn/fzf
+if command -v fzf >/dev/null 2>&1; then
+  # Source `fd` (respects .gitignore, includes dotfiles, skips .git) for speed:
+  command -v fd >/dev/null 2>&1 && {
+    export FZF_DEFAULT_COMMAND='fd --hidden --strip-cwd-prefix --exclude .git'
+    export FZF_CTRL_T_COMMAND="$FZF_DEFAULT_COMMAND"
+    export FZF_ALT_C_COMMAND='fd --type=d --hidden --strip-cwd-prefix --exclude .git'
+  }
+  # Layout + Catppuccin Mocha palette (https://github.com/catppuccin/fzf):
+  export FZF_DEFAULT_OPTS="
+    --height=60% --layout=reverse --border=rounded --info=inline
+    --bind=ctrl-/:toggle-preview
+    --color=bg+:#313244,bg:#1e1e2e,spinner:#f5e0dc,hl:#f38ba8
+    --color=fg:#cdd6f4,header:#f38ba8,info:#cba6f7,pointer:#f5e0dc
+    --color=marker:#b4befe,fg+:#cdd6f4,prompt:#cba6f7,hl+:#f38ba8
+    --color=selected-bg:#45475a,border:#585b70,label:#cdd6f4"
+  # Previews: Ctrl-T shows files via bat / dirs via eza; Alt-C shows the tree;
+  # Ctrl-R shows the full command (toggle with Ctrl-/).
+  export FZF_CTRL_T_OPTS="--preview '(bat --color=always --style=numbers {} || eza --tree --color=always {}) 2>/dev/null | head -200'"
+  export FZF_ALT_C_OPTS="--preview 'eza --tree --color=always {} 2>/dev/null | head -200'"
+  export FZF_CTRL_R_OPTS="--preview 'echo {}' --preview-window=down:3:hidden:wrap --bind=ctrl-/:toggle-preview"
+  # fzf's zsh keybindings assume a real terminal; skip them in non-TTY shells
+  # such as automated `zsh -ic` SSH checks.
+  if [[ -t 0 && -t 1 ]]; then
+    source <(fzf --zsh)
+    eval "$(zoxide init zsh)"
+  fi
+fi
+
+# Plugins (Homebrew, sourced — not aliases). Syntax-highlighting must be last.
+[ -r /opt/homebrew/share/zsh-autosuggestions/zsh-autosuggestions.zsh ] && \
+  source /opt/homebrew/share/zsh-autosuggestions/zsh-autosuggestions.zsh
+[ -r /opt/homebrew/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh ] && \
+  source /opt/homebrew/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+
+# ── Linux-style navigation keys ────────────────────────────────────────────
+# Make Home / End / forward-Delete work at the shell prompt like they do on
+# Linux, regardless of $TERM. We bind the escape sequences every common
+# terminal emits (xterm normal + application cursor mode + vt/linux + rxvt) so
+# this is correct in kitty, Terminal.app, iTerm, tmux and over ssh. Page Up/Down
+# have no per-line meaning in a shell, so they fall through to the terminal's
+# scrollback (kitty: Shift+PageUp/Down) — same as Linux.
+bindkey '^[[H'    beginning-of-line     # Home  (xterm)
+bindkey '^[OH'    beginning-of-line     # Home  (application cursor mode)
+bindkey '^[[1~'   beginning-of-line     # Home  (vt / linux console)
+bindkey '^[[7~'   beginning-of-line     # Home  (rxvt)
+bindkey '^[[F'    end-of-line           # End   (xterm)
+bindkey '^[OF'    end-of-line           # End   (application cursor mode)
+bindkey '^[[4~'   end-of-line           # End   (vt / linux console)
+bindkey '^[[8~'   end-of-line           # End   (rxvt)
+bindkey '^[[3~'   delete-char           # forward-Delete
+bindkey '^[[3;5~' kill-word             # Ctrl+Delete → delete word to the right
+# Word jumps to match Linux Ctrl+Left / Ctrl+Right:
+bindkey '^[[1;5D' backward-word         # Ctrl+Left
+bindkey '^[[1;5C' forward-word          # Ctrl+Right
