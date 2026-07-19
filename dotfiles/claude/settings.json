@@ -1,8 +1,4 @@
 {
-  "statusLine": {
-    "type": "command",
-    "command": "${BASH_BIN} ${HOME}/.claude/statusline-command.sh"
-  },
   "permissions": {
     "deny": [
       "Bash(brew install *)",
@@ -23,12 +19,15 @@
       "Bash(apt remove *)",
       "Bash(apt purge *)",
       "Bash(apt upgrade *)",
+      "Bash(apt update *)",
       "Bash(apt-get install *)",
       "Bash(apt-get remove *)",
       "Bash(apt-get purge *)",
       "Bash(apt-get upgrade *)",
+      "Bash(apt-get update *)",
       "Bash(snap install *)",
-      "Bash(snap remove *)"
+      "Bash(snap remove *)",
+      "Bash(snap refresh *)"
     ]
   }
 }

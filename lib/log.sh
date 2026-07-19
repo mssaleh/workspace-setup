@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # lib/log.sh — logging helpers for setup.sh. Sourced by setup.sh.
 
-setup_color() { :; }
+# setup_color <name>: print the ANSI escape for a color/bold/reset, or a no-op
+# when output isn't a TTY (and FORCE_COLOR isn't set). Defined once below.
 if [[ -t 2 ]] || [[ -n "${FORCE_COLOR:-}" ]]; then
   setup_color() {
     case "$1" in

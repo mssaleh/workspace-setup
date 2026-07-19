@@ -13,6 +13,7 @@
 #   GIT_EMAIL  — your email for git commits           (default: "you@example.com")
 #   SKIP_FONT  — set to 1 to skip the Nerd Font + kitty install stage
 #   SKIP_SSH   — set to 1 to skip SSH key generation
+#   SKIP_DOCKER — set to 1 to skip the Docker Engine install stage (Linux only)
 #   FORCE_COLOR — set to 1 to force colored output even when not a TTY
 
 set -euo pipefail
@@ -36,12 +37,17 @@ repo_dir() {
 
 # ── Bootstrap from curl|bash ──────────────────────────────────────────────
 # If BASH_SOURCE is empty (piped via curl), clone the repo to a temp dir first.
+# Register a cleanup trap so the cloned temp copy is removed when the script
+# exits (success or failure). When run from a real clone, no trap is needed.
 if [[ -z "${BASH_SOURCE[0]:-}" ]] || [[ ! -f "$(dirname "${BASH_SOURCE[0]:-$0}")/lib/log.sh" ]]; then
   REPO_URL="${REPO_URL:-https://github.com/mssaleh/workspace-setup.git}"
   REPO_DIR="$(mktemp -d)/workspace-setup"
   info "Cloning $REPO_URL to $REPO_DIR…"
   git clone --depth 1 "$REPO_URL" "$REPO_DIR" || fail "could not clone repo"
   cd "$REPO_DIR"
+  # Trap only fires for the curl|bash path; on exit, remove the temp parent.
+  _setup_cleanup() { rm -rf "$(dirname "$REPO_DIR")"; }
+  trap '_setup_cleanup' EXIT
 fi
 
 # ── Source library files ─────────────────────────────────────────────────
@@ -57,6 +63,8 @@ fi
 . "$(repo_dir)/scripts/stage_bootstrap.sh"
 # shellcheck disable=SC1091
 . "$(repo_dir)/scripts/stage_packages.sh"
+# shellcheck disable=SC1091
+. "$(repo_dir)/scripts/stage_docker.sh"
 # shellcheck disable=SC1091
 . "$(repo_dir)/scripts/stage_dotfiles.sh"
 # shellcheck disable=SC1091
@@ -78,6 +86,9 @@ main() {
 
   stage "bootstrap: package manager + base tools" stage_bootstrap
   stage "packages: cross-platform CLI toolbox"     stage_packages
+  if [[ -z "${SKIP_DOCKER:-}" ]]; then
+    stage "docker: official Docker Engine (Linux)"    stage_docker
+  fi
   stage "toolchains: rustup + uv + agent CLIs"      stage_toolchains
   stage "dotfiles: symlink farm into \$HOME"       stage_dotfiles
   if [[ -z "${SKIP_SSH:-}" ]]; then
@@ -98,7 +109,7 @@ Next steps (manual, not automated by design):
        gh auth login
   3. Edit ~/.ssh/config to add your hosts (the file has an example Host block).
   4. Restart your shell (or source ~/.bashrc / ~/.zshrc) to pick up the new config.
-  5. Install Claude Code / Codex CLIs if the script couldn't (npm install -g @anthropic-ai/claude-code)
+   5. Install Claude Code / Codex CLIs if the script couldn't: curl -fsSL https://claude.ai/install.sh | bash
 
 Report bugs at: https://github.com/mssaleh/workspace-setup/issues
 NEXT

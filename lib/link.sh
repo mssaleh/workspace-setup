@@ -18,10 +18,12 @@ link_file() {
   if [[ -L "$dst" ]] && [[ "$(readlink -f "$dst")" == "$(readlink -f "$src")" ]]; then
     return 0
   fi
-  # Backup existing regular file
+  # Backup existing regular file. Include PID in the suffix so two backups
+  # made in the same second don't collide (date +%s alone collides on rapid
+  # re-runs).
   if [[ -f "$dst" ]] && [[ ! -L "$dst" ]]; then
     local bak
-    bak="${dst}.bak.$(date +%s)"
+    bak="${dst}.bak.$(date +%s).$$"
     mv "$dst" "$bak"
     warn "backed up existing $dst → $bak"
   fi

@@ -18,16 +18,23 @@ stage_bootstrap() {
       warn "Xcode CLI tools installation may require accepting a dialog. Re-run after it finishes."
     fi
   else
-    # Linux: apt is pre-installed on Ubuntu/Debian. Ensure curl + git are present
-    # (needed by the rest of the script).
+    # Linux: apt is pre-installed on Ubuntu/Debian. Ensure curl + git are
+    # present (needed by the rest of the script). `apt update` takes no -y.
+    # APT_ENV is set by detect_pkgmgr in lib/os.sh; if it's empty (e.g. the
+    # bootstrap runs before detect_pkgmgr — shouldn't happen since setup.sh
+    # calls detect_pkgmgr before any stage, but be defensive), fall back to
+    # inline env vars.
+    if [[ -z "${APT_ENV+x}" ]]; then
+      APT_ENV=(env "DEBIAN_FRONTEND=noninteractive" "NEEDRESTART_MODE=a" "APT_LISTCHANGES_FRONTEND=none")
+    fi
     if ! command -v curl >/dev/null 2>&1; then
       info "installing curl…"
-      sudo "$PKGMGR" update -y >/dev/null 2>&1 || true
-      sudo "$PKGMGR" install -y curl
+      sudo "${APT_ENV[@]}" "$PKGMGR" update >/dev/null 2>&1 || true
+      sudo "${APT_ENV[@]}" "$PKGMGR" install -y curl
     fi
     if ! command -v git >/dev/null 2>&1; then
       info "installing git…"
-      sudo "$PKGMGR" install -y git
+      sudo "${APT_ENV[@]}" "$PKGMGR" install -y git
     fi
     ok "curl + git available"
   fi

@@ -1,26 +1,70 @@
 # ~/.bashrc — interactive shells. PATH is set in ~/.bash_profile.
 # The bash twin of ~/.zshrc: same minimal setup, same prompt, same functions,
-# NO command aliases. Byte-identical on every Mac.
+# NO command aliases. Byte-identical on every machine (Mac + Linux).
+
+# Helper: source the first readable file from the list. Used for OS-aware
+# sourcing (try Homebrew path first, fall back to Linux path).
+_source_first() {
+  local f
+  for f in "$@"; do
+    if [[ -r "$f" ]]; then
+      . "$f"
+      return 0
+    fi
+  done
+  return 1
+}
 
 # PATH for every bash that reads this file — the twin of ~/.zshenv's job.
 # Non-interactive `ssh host cmd` bypasses ~/.bash_profile but DOES read
 # ~/.bashrc, so Homebrew and ~/.local/bin must be asserted before the
 # interactivity gate below or remote commands get the bare sshd PATH.
-case ":$PATH:" in *":/opt/homebrew/bin:"*) ;; *) PATH="/opt/homebrew/bin:/opt/homebrew/sbin:$PATH" ;; esac
-case ":$PATH:" in *":$HOME/.local/bin:"*)   ;; *) PATH="$HOME/.local/bin:$PATH" ;; esac
-export PATH
-
-# Locale safety net: macOS region "en_AE" has no POSIX locale, so several
-# contexts (Terminal.app, ssh clients that don't send LANG, bare launchd)
-# start bash with no usable locale — brew bash 5.3 then prints
-# "setlocale: … cannot change locale ()" warnings the moment bash-completion
-# (below) probes the locale. Default to a real UTF-8 locale when none is set.
-if [ -z "${LANG:-}" ] && [ -z "${LC_ALL:-}" ]; then
-  export LANG=en_US.UTF-8
+# OS-aware: $BREW_PREFIX is exported by the provisioner (lib/os.sh). When
+# absent (dotfiles used without the provisioner), fall back to `brew --prefix`
+# so this works on macOS and Linuxbrew alike. On systems with no brew at all,
+# the dir-test skips the prepend (no phantom PATH entries).
+: "${BREW_PREFIX:=$(command -v brew >/dev/null 2>&1 && brew --prefix)}"
+if [[ -n "$BREW_PREFIX" && -d "$BREW_PREFIX/bin" ]]; then
+  case ":$PATH:" in *":$BREW_PREFIX/bin:"*) ;; *) PATH="$BREW_PREFIX/bin:$BREW_PREFIX/sbin:$PATH" ;; esac
 fi
+case ":$PATH:" in *":$HOME/.local/bin:"*)   ;; *) PATH="$HOME/.local/bin:$PATH" ;; esac
+export PATH BREW_PREFIX
+
+# Locale safety net: ensure a UTF-8-capable LANG is set.
+# macOS: region "en_AE" has no POSIX locale, so several contexts (Terminal.app,
+#   ssh clients that don't send LANG, bare launchd) start bash with no usable
+#   locale — brew bash 5.3 then prints "setlocale: … cannot change locale ()"
+#   warnings the moment bash-completion (below) probes the locale.
+# Linux: a fresh `sudo -i` shell, an SSH session with a stripped env, or a
+#   minimal container can land with LANG=C / LANG=POSIX (ASCII-only — breaks
+#   git, less, python, mosh-server refuses to start) or LANG= (empty).
+# Default to en_US.UTF-8 (universally available, locale-neutral for CLI work)
+# unless the current LANG is already UTF-8-capable. en_US.UTF-8 specifically
+# (not C.UTF-8) because the `ds` mosh wrapper forces LC_ALL=en_US.UTF-8 and
+# mosh-server exits 1 if that locale isn't generated.
+case "${LANG:-}" in
+  *.UTF-8|*.utf8) : ;;                                   # already UTF-8 → leave it
+  *) export LANG=en_US.UTF-8 ;;                          # unset/empty/C/POSIX → upgrade
+esac
 
 # Non-interactive shells stop here (scp, `ssh host cmd`, scripts, …).
 case $- in *i*) ;; *) return ;; esac
+
+# SSH agent socket — on Linux the systemd user ssh-agent.socket exposes its
+# socket at $XDG_RUNTIME_DIR/openssh_agent, but it's set in the systemd user
+# manager environment, not automatically in every shell. Set it here if unset
+# so the agent is actually used. Guarded on `[[ -z $SSH_AUTH_SOCK ]]` so that
+# `ssh -A` agent forwarding into this host is NOT clobbered (the forwarded
+# socket comes through sshd, which sets SSH_AUTH_SOCK itself). macOS doesn't
+# need this — launchd sets SSH_AUTH_SOCK for every shell via the system agent.
+if [[ -z "${SSH_AUTH_SOCK:-}" && -n "${XDG_RUNTIME_DIR:-}" ]] && [[ "$(uname -s)" != Darwin ]]; then
+  if [[ -S "$XDG_RUNTIME_DIR/openssh_agent" ]]; then
+    export SSH_AUTH_SOCK="$XDG_RUNTIME_DIR/openssh_agent"
+  elif [[ -S "$XDG_RUNTIME_DIR/ssh-agent.socket" ]]; then
+    # Arch / some other distros use this name
+    export SSH_AUTH_SOCK="$XDG_RUNTIME_DIR/ssh-agent.socket"
+  fi
+fi
 
 # History — approximates zsh SHARE_HISTORY/IGNORE_ALL_DUPS: big, deduped,
 # appended after every command instead of on shell exit.
@@ -31,9 +75,16 @@ shopt -s histappend
 shopt -s checkwinsize
 
 # Completion. Homebrew tools drop bash completions into
-# /opt/homebrew/etc/bash_completion.d; bash-completion@2 lazy-loads them.
-[ -r /opt/homebrew/etc/profile.d/bash_completion.sh ] && \
-  . /opt/homebrew/etc/profile.d/bash_completion.sh
+# $BREW_PREFIX/etc/bash_completion.d; bash-completion@2 lazy-loads them.
+# On Linux, the path is /usr/share/bash-completion/bash_completion (apt's
+# bash-completion package). Source whichever exists via _source_first.
+if [[ -n "${BREW_PREFIX:-}" ]]; then
+  _source_first "$BREW_PREFIX/etc/profile.d/bash_completion.sh" \
+                /usr/share/bash-completion/bash_completion \
+                /etc/bash_completion
+else
+  _source_first /usr/share/bash-completion/bash_completion /etc/bash_completion
+fi
 
 # ── Prompt & window title: WHICH MACHINE am I on? ───────────────────────────
 # Same rule as ~/.zshrc: the #1 job of the prompt is making local-vs-remote
@@ -60,9 +111,10 @@ export EDITOR=nano
 
 # yazi: `y` opens the file manager and cd's to the directory you quit in.
 # Official wrapper: https://yazi-rs.github.io/docs/quick-start
+# (mktemp: use $TMPDIR + XXXXXX template — portable across macOS and Linux.)
 function y() {
 	local tmp cwd
-	tmp="$(mktemp -t "yazi-cwd.XXXXXX")"
+	tmp="$(mktemp "${TMPDIR:-/tmp}/yazi-cwd.XXXXXX")"
 	command yazi "$@" --cwd-file="$tmp"
 	cwd="$(command cat -- "$tmp" 2>/dev/null)"
 	[ -n "$cwd" ] && [ "$cwd" != "$PWD" ] && [ -d "$cwd" ] && builtin cd -- "$cwd"

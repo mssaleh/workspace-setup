@@ -5,7 +5,7 @@
 #   DISTRO    — "ubuntu" / "debian" / "fedora" / "arch" / "macos" (best-effort)
 #   PKGMGR    — "brew" / "apt" / "apt-get" / "dnf" / "pacman"
 #   BREW_PREFIX — "/opt/homebrew" (macOS arm64) or "/home/linuxbrew/.linuxbrew" (Linux)
-#   APT_LIST  — array of packages to install via the system package manager
+#   APT_ENV   — env vars to prefix sudo apt-get with for non-interactive installs
 # Sourced by setup.sh.
 
 detect_os() {
@@ -46,33 +46,22 @@ detect_pkgmgr() {
     fail "No supported package manager found (looked for brew, apt-get, apt, dnf, pacman)."
   fi
   export PKGMGR BREW_PREFIX
-}
 
-# pkg_install <pkg1> [pkg2] ... — install packages via the system package manager.
-pkg_install() {
-  case "$PKGMGR" in
-    brew)
-      brew install "$@"
-      ;;
-    apt|apt-get)
-      sudo "$PKGMGR" update -y >/dev/null 2>&1 || true
-      sudo "$PKGMGR" install -y "$@"
-      ;;
-    dnf)
-      sudo dnf install -y "$@"
-      ;;
-    pacman)
-      sudo pacman -S --noconfirm "$@"
-      ;;
-    *) fail "pkg_install: unknown PKGMGR=$PKGMGR" ;;
-  esac
-}
-
-# pkg_install_cask <cask> — macOS-only; install a Homebrew cask. No-op on Linux.
-pkg_install_cask() {
-  if [[ "$OS_KIND" == macos ]]; then
-    brew install --cask "$@"
+  # On Debian/Ubuntu, apt/dpkg can prompt during postinst scripts (tzdata
+  # timezone, locales language picker, keyboard-configuration, etc.) and
+  # will hang a non-TTY SSH session. sudo's env_reset strips env vars by
+  # default, so we must pass them via `sudo env VAR=val ...` (or sudo's
+  # `VAR=val cmd` form). DEBIAN_FRONTEND=noninteractive covers debconf
+  # prompts; NEEDRESTART_MODE=a covers Ubuntu 24.04+'s needrestart "restart
+  # services?" dialog (separate mechanism, not debconf). APT_LISTCHANGES_FRONTEND=none
+  # covers apt-listchanges. These are transient (per-command), not written
+  # to /etc/apt/apt.conf.d/, so they don't affect the user's future apt runs.
+  if [[ "$PKGMGR" == apt || "$PKGMGR" == apt-get ]]; then
+    APT_ENV=(env "DEBIAN_FRONTEND=noninteractive" "NEEDRESTART_MODE=a" "APT_LISTCHANGES_FRONTEND=none")
+  else
+    APT_ENV=()
   fi
+  export APT_ENV
 }
 
 # pkg_installed <pkg> — return 0 if installed, 1 if not.
@@ -83,4 +72,11 @@ pkg_installed() {
     dnf) dnf list installed "$1" >/dev/null 2>&1 ;;
     pacman) pacman -Qi "$1" >/dev/null 2>&1 ;;
   esac
+}
+
+# apt_update — refresh the apt package index non-interactively. No-op on non-apt.
+apt_update() {
+  if [[ "$PKGMGR" == apt || "$PKGMGR" == apt-get ]]; then
+    sudo "${APT_ENV[@]}" "$PKGMGR" update
+  fi
 }

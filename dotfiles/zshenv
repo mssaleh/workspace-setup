@@ -1,6 +1,22 @@
 # ~/.zshenv — sourced by every zsh (login, interactive, scripts, subprocesses).
 # Ensures Homebrew and ~/.local/bin are always on PATH. Fixes "command not found" (127).
+# OS-aware: $BREW_PREFIX is exported by the provisioner (lib/os.sh). When absent
+# (e.g. dotfiles used on a machine not provisioned by workspace-setup), fall back
+# to `brew --prefix` so this file works on both macOS and Linuxbrew without edits.
 typeset -U path PATH
-path=(/opt/homebrew/bin /opt/homebrew/sbin "$HOME/.local/bin" $path)
-export PATH
-. "$HOME/.cargo/env"
+: "${BREW_PREFIX:=$(command -v brew >/dev/null 2>&1 && brew --prefix)}"
+[[ -z "$BREW_PREFIX" || -d "$BREW_PREFIX/bin" ]] && path=("$BREW_PREFIX/bin" "$BREW_PREFIX/sbin" $path)
+path=("$HOME/.local/bin" $path)
+export PATH BREW_PREFIX
+
+# Locale safety net — same logic as ~/.bashrc (see there for the full rationale).
+# zsh doesn't emit the macOS bash-completion setlocale warning, but the
+# Linux LANG=C / LANG=POSIX / LANG= cases break git/less/python/mosh-server
+# uniformly across shells, so zsh needs the guard too on Linux. On macOS this
+# is a no-op when LANG is already a UTF-8 locale (the common case).
+case "${LANG:-}" in
+  *.UTF-8|*.utf8) : ;;
+  *) export LANG=en_US.UTF-8 ;;
+esac
+
+. "$HOME/.cargo/env" 2>/dev/null

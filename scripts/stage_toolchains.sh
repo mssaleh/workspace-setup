@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# scripts/stage_toolchains.sh — install rustup + uv (self-managed, not via brew/apt).
-# Idempotent: skips if already installed.
+# scripts/stage_toolchains.sh — install rustup + uv + coding-agent CLIs.
+# All self-managed (not via brew/apt) so they update independently of the
+# system package manager. Idempotent: skips if already installed.
 
 stage_toolchains() {
   # --- rustup ---
@@ -30,28 +31,44 @@ stage_toolchains() {
     export PATH="$HOME/.local/bin:$PATH"
   fi
 
-  # --- coding-agent CLIs (claude, codex) — install if missing ---
-  # These are npm-based installers that drop binaries in ~/.local/bin.
-  if ! command -v claude >/dev/null 2>&1; then
-    info "installing Claude Code CLI…"
-    # Claude Code's installer; if npm is present this works, otherwise it falls back.
-    if command -v npm >/dev/null 2>&1; then
-      npm install -g @anthropic-ai/claude-code 2>/dev/null || warn "claude install failed — install manually"
-    else
-      warn "npm not found; install Claude Code manually after Node is on PATH"
-    fi
+  # --- Claude Code (Anthropic) — official native installer ---
+  # The native installer (https://claude.ai/install.sh) is the recommended
+  # method per https://docs.anthropic.com/en/docs/claude-code/setup. It
+  # installs to ~/.local/bin/claude (a symlink into
+  # ~/.local/share/claude/versions/) and auto-updates in the background.
+  # Alternative supported methods (NOT used here): Homebrew cask
+  # (`brew install --cask claude-code`), npm (`npm install -g @anthropic-ai/claude-code`,
+  # requires Node 22+, does NOT auto-update), apt/dnf/apk repos. See the docs
+  # page for the full list — the native installer is the recommended one.
+  if command -v claude >/dev/null 2>&1; then
+    ok "claude already installed ($(claude --version 2>/dev/null || echo 'present'))"
   else
-    ok "claude already installed"
+    info "installing Claude Code (official native installer)…"
+    if curl -fsSL https://claude.ai/install.sh | bash 2>/dev/null; then
+      ok "claude installed via native installer → ~/.local/bin/claude"
+    else
+      warn "Claude Code native installer failed — install manually: curl -fsSL https://claude.ai/install.sh | bash"
+      warn "  alternatives: https://docs.anthropic.com/en/docs/claude-code/setup (Homebrew cask, apt/dnf/apk, npm)"
+    fi
+    export PATH="$HOME/.local/bin:$PATH"
   fi
 
-  if ! command -v codex >/dev/null 2>&1; then
-    info "installing OpenAI Codex CLI…"
-    if command -v npm >/dev/null 2>&1; then
-      npm install -g @openai/codex 2>/dev/null || warn "codex install failed — install manually"
-    else
-      warn "npm not found; install Codex manually after Node is on PATH"
-    fi
+  # --- OpenAI Codex CLI — official native installer ---
+  # The native installer (https://chatgpt.com/codex/install.sh) is the
+  # recommended method per https://github.com/openai/codex#installing-and-running-codex-cli.
+  # It installs to ~/.local/bin/codex. Alternative supported methods (NOT used
+  # here): Homebrew cask (`brew install --cask codex`), npm
+  # (`npm install -g @openai/codex`), GitHub release binaries.
+  if command -v codex >/dev/null 2>&1; then
+    ok "codex already installed ($(codex --version 2>/dev/null || echo 'present'))"
   else
-    ok "codex already installed"
+    info "installing OpenAI Codex CLI (official native installer)…"
+    if curl -fsSL https://chatgpt.com/codex/install.sh | sh 2>/dev/null; then
+      ok "codex installed via native installer → ~/.local/bin/codex"
+    else
+      warn "Codex native installer failed — install manually: curl -fsSL https://chatgpt.com/codex/install.sh | sh"
+      warn "  alternatives: https://github.com/openai/codex (Homebrew cask, npm, GitHub releases)"
+    fi
+    export PATH="$HOME/.local/bin:$PATH"
   fi
 }

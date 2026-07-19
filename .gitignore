@@ -27,3 +27,4 @@ known_hosts
 authorized_keys
 *.env
 .env
+terminal-shell-setup-report.md

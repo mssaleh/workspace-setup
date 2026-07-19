@@ -1,5 +1,16 @@
 # ~/.zshrc — interactive shell. PATH is set in ~/.zshenv.
 
+# SSH agent socket — see ~/.bashrc for the full rationale. zsh needs the same
+# guard because the systemd user ssh-agent.socket sets SSH_AUTH_SOCK in the
+# user manager environment, not in every shell. macOS doesn't need this.
+if [[ -z "${SSH_AUTH_SOCK:-}" && -n "${XDG_RUNTIME_DIR:-}" ]] && [[ "$(uname -s)" != Darwin ]]; then
+  if [[ -S "$XDG_RUNTIME_DIR/openssh_agent" ]]; then
+    export SSH_AUTH_SOCK="$XDG_RUNTIME_DIR/openssh_agent"
+  elif [[ -S "$XDG_RUNTIME_DIR/ssh-agent.socket" ]]; then
+    export SSH_AUTH_SOCK="$XDG_RUNTIME_DIR/ssh-agent.socket"
+  fi
+fi
+
 # History
 HISTFILE="$HOME/.zsh_history"
 HISTSIZE=100000
@@ -7,9 +18,14 @@ SAVEHIST=100000
 setopt SHARE_HISTORY HIST_IGNORE_ALL_DUPS HIST_IGNORE_SPACE HIST_REDUCE_BLANKS INC_APPEND_HISTORY
 setopt INTERACTIVE_COMMENTS
 
-# Completion. Homebrew tools ship completions in site-functions, which must be
-# on fpath BEFORE compinit runs (this is what fixes `_eza: function not found`).
-fpath=(/opt/homebrew/share/zsh/site-functions $fpath)
+# Completion. Homebrew tools ship completions in $BREW_PREFIX/share/zsh/site-functions,
+# which must be on fpath BEFORE compinit runs (this is what fixes `_eza: function not found`).
+# On Linux, the system zsh completions live in /usr/share/zsh/site-functions (already on
+# the default fpath), and bash-completion-equivalent tools ship their own _foo files there
+# via apt. $BREW_PREFIX is exported by ~/.zshenv (with a `brew --prefix` fallback).
+if [[ -n "${BREW_PREFIX:-}" && -d "$BREW_PREFIX/share/zsh/site-functions" ]]; then
+  fpath=("$BREW_PREFIX/share/zsh/site-functions" $fpath)
+fi
 autoload -Uz compinit && compinit
 zstyle ':completion:*' matcher-list 'm:{a-zA-Z}={A-Za-z}'
 zstyle ':completion:*' menu select
@@ -60,11 +76,15 @@ export EDITOR=nano
 
 # yazi: `y` opens the file manager and cd's to the directory you quit in.
 # Official wrapper: https://yazi-rs.github.io/docs/quick-start
+# (mktemp: use $TMPDIR + XXXXXX template — portable across macOS and Linux.
+# `mktemp -t <template>` has different semantics on macOS vs Linux; this form
+# works identically on both.)
 function y() {
-	local tmp="$(mktemp -t "yazi-cwd.XXXXXX")" cwd
+	local tmp cwd
+	tmp="$(mktemp "${TMPDIR:-/tmp}/yazi-cwd.XXXXXX")"
 	command yazi "$@" --cwd-file="$tmp"
-	IFS= read -r -d '' cwd < "$tmp"
-	[ "$cwd" != "$PWD" ] && [ -d "$cwd" ] && builtin cd -- "$cwd"
+	IFS= read -r -d '' cwd < "$tmp" 2>/dev/null || cwd=""
+	[ -n "$cwd" ] && [ "$cwd" != "$PWD" ] && [ -d "$cwd" ] && builtin cd -- "$cwd"
 	command rm -f -- "$tmp"
 }
 
@@ -141,10 +161,20 @@ if command -v fzf >/dev/null 2>&1; then
 fi
 
 # Plugins (Homebrew, sourced — not aliases). Syntax-highlighting must be last.
-[ -r /opt/homebrew/share/zsh-autosuggestions/zsh-autosuggestions.zsh ] && \
-  source /opt/homebrew/share/zsh-autosuggestions/zsh-autosuggestions.zsh
-[ -r /opt/homebrew/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh ] && \
-  source /opt/homebrew/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+# OS-aware: on Homebrew they live under $BREW_PREFIX/share/<plugin>/; on Linux
+# distros that ship them as packages (Debian/Ubuntu: zsh-autosuggestions,
+# zsh-syntax-highlighting) they live in /usr/share/zsh-<plugin>/.
+_zsh_plugin() {
+  local name="$1" file="$2"
+  local brew_path="${BREW_PREFIX:-/opt/homebrew}/share/$name/$file"
+  local linux_path="/usr/share/$name/$file"
+  [[ -r "$brew_path" ]]  && { source "$brew_path";  return 0; }
+  [[ -r "$linux_path" ]] && { source "$linux_path"; return 0; }
+  return 1
+}
+_zsh_plugin zsh-autosuggestions zsh-autosuggestions.zsh
+_zsh_plugin zsh-syntax-highlighting zsh-syntax-highlighting.zsh  # must be last
+unset -f _zsh_plugin
 
 # ── Linux-style navigation keys ────────────────────────────────────────────
 # Make Home / End / forward-Delete work at the shell prompt like they do on

@@ -1,4 +1,8 @@
+# Apple Container builder VM resources. Templated at install time by
+# stage_dotfiles.sh: ${CPUS} and ${MEM_MB} are replaced with values derived
+# from the host (75% of RAM, capped at 18 GB; all CPUs). Edit the generated
+# ~/.config/container/config.toml to tune — this template is the source.
 [build]
-cpus = 11
-memory = "18432mb"
+cpus = ${CPUS}
+memory = "${MEM_MB}mb"
 rosetta = true

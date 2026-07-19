@@ -1,10 +1,11 @@
 # ~/.ssh/config — read automatically by ssh and kitty's ssh kitten.
 # The per-host block below is an example; edit to match your own hosts.
 
-# Example: a Mac mini on a ZeroTier overlay at 10.10.10.12
+# Example: a host on a ZeroTier overlay at 10.10.10.12. Uncomment and edit
+# the User line (replace "your-user" with your remote username).
 # Host mini macmini 10.10.10.12
 #     HostName 10.10.10.12
-#     User ${SSH_USER}
+#     User your-user
 #     IdentityFile ~/.ssh/id_ed25519
 #     IdentitiesOnly yes
 
