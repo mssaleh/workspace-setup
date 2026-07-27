@@ -20,9 +20,21 @@ repo_dir() { printf '%s\n' "$REPO_DIR"; }
 . "$TEST_ROOT/lib/config.sh"
 # shellcheck disable=SC1091
 . "$TEST_ROOT/scripts/stage_dotfiles.sh"
+# shellcheck disable=SC1091
+. "$TEST_ROOT/scripts/stage_postflight.sh"
 
 stage_dotfiles
 [[ "$CONFIG_CONFLICT_COUNT" == 0 ]]
+
+# Both agents must find the skill in their own home, and its helper script must
+# stay executable so an agent can actually run it.
+for agent_home in "$HOME/.claude" "$HOME/.codex"; do
+  [[ -f "$agent_home/skills/apple-container-amd64/SKILL.md" ]]
+  grep -Fq 'name: apple-container-amd64' "$agent_home/skills/apple-container-amd64/SKILL.md"
+  [[ -x "$agent_home/skills/apple-container-amd64/scripts/optimize-builder.sh" ]]
+done
+postflight_agent_skills
+[[ "$POSTFLIGHT_FAILURES" == 0 ]]
 first_mutations=$((CONFIG_INSTALLED_COUNT + CONFIG_MIGRATED_COUNT + CONFIG_UPGRADED_COUNT + CONFIG_MERGED_COUNT))
 ((first_mutations > 0))
 
@@ -75,5 +87,26 @@ git config -f "$HOME/.gitconfig" --unset init.defaultBranch
 stage_dotfiles
 [[ "$(git config -f "$HOME/.gitconfig" --get init.defaultBranch)" == main ]]
 [[ "$(config_sha256 "$redirected_gitconfig")" == "$redirected_before" ]]
+
+# A host that shares one skill store between agents through its own directory
+# links keeps that layout: the copies converge onto the shared file instead of
+# replacing the links or reporting a conflict.
+SHARED_HOME="$TEST_TMP/shared-home"
+HOME="$SHARED_HOME"
+export HOME
+shared_store="$SHARED_HOME/.agents/skills/apple-container-amd64"
+mkdir -p "$shared_store/scripts" "$SHARED_HOME/.claude/skills" "$SHARED_HOME/.codex/skills"
+cp "$TEST_ROOT/dotfiles/agents/skills/apple-container-amd64/SKILL.md" "$shared_store/SKILL.md"
+cp "$TEST_ROOT/dotfiles/agents/skills/apple-container-amd64/scripts/optimize-builder.sh" \
+  "$shared_store/scripts/optimize-builder.sh"
+ln -s "$shared_store" "$SHARED_HOME/.claude/skills/apple-container-amd64"
+ln -s "$shared_store" "$SHARED_HOME/.codex/skills/apple-container-amd64"
+CONFIG_CONFLICT_COUNT=0
+stage_dotfiles
+[[ "$CONFIG_CONFLICT_COUNT" == 0 ]]
+[[ -L "$SHARED_HOME/.claude/skills/apple-container-amd64" ]]
+[[ -L "$SHARED_HOME/.codex/skills/apple-container-amd64" ]]
+[[ -x "$shared_store/scripts/optimize-builder.sh" ]]
+[[ "$(find "$SHARED_HOME" -name optimize-builder.sh -type f | wc -l | tr -d ' ')" == 1 ]]
 
 printf 'dotfiles stage tests: ok\n'

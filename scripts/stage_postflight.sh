@@ -112,6 +112,28 @@ postflight_configs() {
   fi
 }
 
+postflight_agent_skills() {
+  # Skills are installed only where the runtime they describe is the one in use.
+  [[ "$OS_KIND" == macos && -z "${SKIP_CONTAINER:-}" ]] || return 0
+
+  local bad=() agent_home skill_md skill_script
+  for agent_home in "$HOME/.claude" "$HOME/.codex"; do
+    skill_md="$agent_home/skills/apple-container-amd64/SKILL.md"
+    skill_script="$agent_home/skills/apple-container-amd64/scripts/optimize-builder.sh"
+    if [[ ! -f "$skill_md" ]] || ! grep -Fq 'name: apple-container-amd64' "$skill_md"; then
+      bad+=("$skill_md")
+    fi
+    if [[ ! -x "$skill_script" ]]; then
+      bad+=("$skill_script")
+    fi
+  done
+  if ((${#bad[@]} == 0)); then
+    postflight_pass "Apple Container agent skill is readable by Claude Code and Codex"
+  else
+    postflight_fail "agent skill files missing or not executable: ${bad[*]}"
+  fi
+}
+
 postflight_packages() {
   local missing=() pkg
   if [[ "$PKGMGR" == brew ]]; then
@@ -365,6 +387,7 @@ stage_postflight() {
   POSTFLIGHT_FAILURES=0
 
   postflight_configs
+  postflight_agent_skills
   postflight_packages
   postflight_shell_paths
   postflight_upstream_tools

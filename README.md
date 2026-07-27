@@ -28,7 +28,7 @@ Apple Container requires Apple silicon and macOS 26 or later. On an older/Intel 
 | **packages** | Installs the cross-platform CLI toolbox: `eza`, `fd`, `bat`, `fzf`, `zoxide`, `yazi`, `git`, `git-delta` (`delta`), `lazygit`, `gh`, `tmux`, `mosh`, `rsync`, `rclone`, `nmap`, `jq`, `yq`, `pandoc`, `7zz` (`7z`), `node`, `uv`, `ruff`, `helm`, `kubectl`, `cosign`, `ffmpeg`, `poppler` (`poppler-utils`), `nano`, `himalaya`, `ncdu`, `shellcheck`, `pre-commit`, … |
 | **docker** | Linux only: installs the official **Docker Engine** + **Docker Compose v2** from download.docker.com. A complete, responsive official installation is a no-op on rerun. |
 | **toolchains** | Installs upstream **rustup**, Astral's standalone **uv/uvx** (plus its receipt), native Claude Code and Codex CLIs, and upstream opencode on Linux. The separate Homebrew `uv` formula remains an intentional backup. |
-| **configuration** | Converges ordinary files under `$HOME`; repairs old links into temporary checkouts, atomically upgrades exact known historical versions, semantically merges supported JSON/TOML/Git formats, and preserves ambiguous user-owned content. |
+| **configuration** | Converges ordinary files under `$HOME`; repairs old links into temporary checkouts, atomically upgrades exact known historical versions, semantically merges supported JSON/TOML/Git formats, preserves ambiguous user-owned content, and installs the coding-agent skills into each agent home. |
 | **containers** | macOS only: installs Apple Container from the signed package on Apple's GitHub release, ensures Rosetta, and starts it with kernel installation enabled. `container-compose` is supplied separately by Homebrew. |
 | **ssh** | Generates an ed25519 keypair if none exists, locks down `~/.ssh` permissions (700 dir, 600 files), wires up the SSH agent (macOS: Keychain; Linux: systemd user unit). Does **not** push to GitHub — run `gh auth login` manually. |
 | **fonts + terminal** | Installs JetBrainsMono Nerd Font and Kitty via Kitty's upstream installer on both platforms, then creates the standard `~/.local/bin/{kitty,kitten}` links. On macOS it also installs Maccy/LibreOffice and imports Apple Terminal defaults once. |
@@ -105,6 +105,20 @@ The script installs or narrowly merges denylists for all three coding agents so 
 
 Read-only commands (`brew list`, `apt show`, `snap list`, etc.) are not blocked.
 
+## Coding-agent skills
+
+Claude Code and Codex both discover skills at `<agent-home>/skills/<name>/`, so the setup converges one source tree into both agent homes:
+
+| Skill | Installed to | When |
+|---|---|---|
+| `apple-container-amd64` | `~/.claude/skills/` and `~/.codex/skills/` | macOS, unless `SKIP_CONTAINER=1` |
+
+It teaches both agents the runtime this host actually has: Apple's `container` CLI with Rosetta-translated `linux/amd64` builds, the `$HOME`-only build-context rule, the real `config.toml` schema, and when `container-compose` is and isn't the right tool. It is deliberately **not** installed on Linux, where this setup provisions Docker Engine and the skill's "never emit `docker` commands" instruction would be wrong.
+
+The bundled `scripts/optimize-builder.sh` resizes the builder VM and preserves the `[registry]` section that `~/.config/container/config.toml` is provisioned with, so running it does not put the host out of postflight compliance.
+
+If your machine shares a single skill store across agents (e.g. `~/.agents/skills/` with per-agent directory links), that layout is preserved — the files converge through the link onto the shared copy.
+
 ## Tests
 
 ```bash
@@ -141,6 +155,8 @@ workspace-setup/
 │   ├── ssh/config                 # example Host block + keepalive defaults
 │   ├── claude/settings.json       # permissions.deny denylist
 │   ├── codex/rules/default.rules  # Starlark prefix_rule() denylist
+│   ├── agents/skills/             # skills converged into every agent home
+│   │   └── apple-container-amd64/ # SKILL.md + scripts/optimize-builder.sh
 │   └── config/                    # kitty/, bat/, yazi/, gh/, opencode/, container/
 │       └── container/config.toml # templated: ${CPUS}, ${MEM_MB} → host-scaled
 ├── tests/                          # convergence + clean-shell PATH regression tests

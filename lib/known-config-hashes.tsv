@@ -3,6 +3,10 @@
 # Historical hashes live only in the disposable payload. They let a later run
 # distinguish an unmodified file previously shipped by this project from a
 # user-edited file without leaving a receipt or marker on the machine.
+#
+# Assets adopted from an existing machine (currently the agent skill) also list
+# the pristine pre-adoption version, so a host that already carries it upgrades
+# instead of being reported as an unresolvable user edit.
 dotfiles/bash_profile	4e3f479dd68a6043f77942de766e718879eb3efade1bb5cc1f7dd474c9fa7c42
 dotfiles/bash_profile	817557a5e216fdd832e50a03f9280c05e1542b1b53b1be0fd71e39b17104e615
 dotfiles/bash_profile	d78ffb4864393b67a0ca0c7f4320bd7121b1fc41ef6b3983d2d5de15ed516311
@@ -43,3 +47,6 @@ dotfiles/zshenv	1e7b4a3368c9703ec9f735cd3b5a7a49e603963d3f678d8abf712224c16bc0bd
 dotfiles/zshenv	f010e9e381687405e1d051470f00439f2b16b35b41ea89c090f38c7a19f2fc8e
 dotfiles/zshrc	f3eaef6479e811d5c1b407443f33353401d3031421474ef542f9c5ee3a23c9ce
 dotfiles/zshrc	c86c0279d6ad2293bde099a5c4c04ebf5997dc330e383098bea296def2041e76
+dotfiles/agents/skills/apple-container-amd64/SKILL.md	8c2549072c8037ce3c5b79d332cd1a4a012762c3becb49bf0650b07ee39a8a6c
+dotfiles/agents/skills/apple-container-amd64/scripts/optimize-builder.sh	e96f803e744c161a684a5d6b3608d0a5cfe5e010d395789b033a12a3a2208f0d
+dotfiles/agents/skills/apple-container-amd64/scripts/optimize-builder.sh	ee909f9cb4cedfc088477553abd375c3c326be0f9c03ed7840513c5119c3e6e3

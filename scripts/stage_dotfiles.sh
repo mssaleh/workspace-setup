@@ -150,6 +150,29 @@ install_repo_config() {
   install_regular_file "$repo/$relative" "$dst" "$relative" "$mode" "$merge_fn"
 }
 
+# Claude Code and Codex both discover skills at <agent-home>/skills/<name>/,
+# so one source tree is converged into each agent home as ordinary files. A host
+# that already shares a single skill store through its own directory link keeps
+# that layout: the copy lands on the shared file through the link.
+install_agent_skill() {
+  local repo="$1" skill="$2"
+  local src_root="$repo/dotfiles/agents/skills/$skill"
+  local agent_dir file relative mode
+  if [[ ! -d "$src_root" ]]; then
+    warn "agent skill source does not exist: $src_root"
+    return 1
+  fi
+  for agent_dir in "$HOME/.claude/skills/$skill" "$HOME/.codex/skills/$skill"; do
+    while IFS= read -r -d '' file; do
+      relative=${file#"$src_root/"}
+      mode=0644
+      [[ -x "$file" ]] && mode=0755
+      install_regular_file "$file" "$agent_dir/$relative" \
+        "dotfiles/agents/skills/$skill/$relative" "$mode"
+    done < <(find "$src_root" -type f -print0)
+  done
+}
+
 git_config_set_default() {
   local dst="$1" key="$2" value="$3"
   if ! git config -f "$dst" --get "$key" >/dev/null 2>&1; then
@@ -328,6 +351,13 @@ stage_dotfiles() {
     "$HOME/.claude/settings.json" 0644 merge_claude_settings
   install_repo_config "$repo" dotfiles/codex/rules/default.rules \
     "$HOME/.codex/rules/default.rules"
+
+  # The Apple Container skill is only correct where Apple Container is the
+  # runtime. A Linux host of this setup runs Docker Engine, and the skill
+  # explicitly instructs agents never to emit docker commands.
+  if [[ "$OS_KIND" == macos && -z "${SKIP_CONTAINER:-}" ]]; then
+    install_agent_skill "$repo" apple-container-amd64
+  fi
 
   mkdir -p "$HOME/.ssh"
   chmod 0700 "$HOME/.ssh"
