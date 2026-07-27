@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+TEST_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+bash "$TEST_ROOT/tests/test_config_convergence.sh"
+bash "$TEST_ROOT/tests/test_provider_manifest.sh"
+bash "$TEST_ROOT/tests/test_package_aliases.sh"
+bash "$TEST_ROOT/tests/test_toolchain_providers.sh"
+bash "$TEST_ROOT/tests/test_dotfiles_stage.sh"
+bash "$TEST_ROOT/tests/test_shell_paths.sh"
+bash "$TEST_ROOT/tests/test_postflight.sh"
+bash "$TEST_ROOT/tests/test_linux_postflight.sh"
+bash "$TEST_ROOT/tests/test_streamed_bootstrap.sh"

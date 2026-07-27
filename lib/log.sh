@@ -30,7 +30,13 @@ stage() {
   local name="$1" fn="$2"
   setup_color bold; printf '\n── %s ──\n' "$name"; setup_color reset
   local start; start=$(date +%s)
+  local status
   "$fn"
+  status=$?
+  if ((status != 0)); then
+    warn "$name failed"
+    return "$status"
+  fi
   local elapsed=$(( $(date +%s) - start ))
   ok "$name done (${elapsed}s)"
 }

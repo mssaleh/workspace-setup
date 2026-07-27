@@ -2,7 +2,7 @@
 # Enforces the "no user-level package installs" policy: a coding agent must
 # NOT use Homebrew to install, remove, upgrade, tap, or otherwise mutate
 # user-level packages. Dev dependencies belong in containers with mounted
-# volumes (see the terminal-shell-setup-report §7.8), never in the user home
+# volumes, never as user-level package-manager services or scattered home data.
 # folder. Rules use the Starlark-based prefix_rule() format documented at
 # https://developers.openai.com/codex/agent-configuration/rules
 #
@@ -14,7 +14,7 @@
 prefix_rule(
     pattern = ["brew", "install"],
     decision = "forbidden",
-    justification = "No user-level package installs via Homebrew. Use a container with a mounted volume for dev dependencies (see setup-report §7.8).",
+    justification = "No user-level package installs via Homebrew. Use a container with a mounted volume for dev dependencies.",
     match = [
         "brew install foo",
         "brew install --cask font-foo",
@@ -66,7 +66,7 @@ prefix_rule(
 prefix_rule(
     pattern = ["brew", "services"],
     decision = "forbidden",
-    justification = "No user-level daemons via `brew services`. Databases and services belong in containers (see setup-report §7.8).",
+    justification = "No user-level daemons via `brew services`. Databases and services belong in containers.",
     match = [
         "brew services start postgresql@18",
         "brew services stop redis",
@@ -129,7 +129,7 @@ prefix_rule(
 prefix_rule(
     pattern = ["apt", "install"],
     decision = "forbidden",
-    justification = "No user-level package installs via apt. Use a container with a mounted volume for dev dependencies (see setup-report §7.8).",
+    justification = "No user-level package installs via apt. Use a container with a mounted volume for dev dependencies.",
     match = ["apt install foo", "apt install -y foo"],
 )
 

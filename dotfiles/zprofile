@@ -1,14 +1,10 @@
-# Homebrew: re-prepend $BREW_PREFIX/{bin,sbin} for login shells. macOS's
-# path_helper (run from /etc/zprofile, after ~/.zshenv) re-prioritises the
-# system dirs, pushing Homebrew behind /bin — so `bash` and other tools would
-# resolve to Apple's frozen versions. This is Homebrew's own documented line.
-# It's what makes `bash` = Homebrew's 5.x. On Linux, path_helper doesn't run,
-# so this line is a no-op (the brew shellenv is still safe to eval).
-# $BREW_PREFIX is exported by ~/.zshenv (with a `brew --prefix` fallback).
-if [[ -x "$BREW_PREFIX/bin/brew" ]]; then
+# macOS path_helper runs before this user login file and may put system paths
+# back in front. Reassert the same deterministic order as ~/.zshenv.
+typeset -U path PATH
+path=(/usr/local/bin /usr/local/sbin $path)
+if [[ -n "${BREW_PREFIX:-}" && -x "$BREW_PREFIX/bin/brew" ]]; then
   eval "$("$BREW_PREFIX/bin/brew" shellenv zsh)"
+  path=("$BREW_PREFIX/bin" "$BREW_PREFIX/sbin" $path)
 fi
-
-# >>> Codex installer >>>
-export PATH="$HOME/.local/bin:$PATH"
-# <<< Codex installer <<<
+path=("$HOME/.local/bin" $path)
+export PATH BREW_PREFIX

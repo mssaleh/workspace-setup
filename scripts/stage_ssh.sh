@@ -40,7 +40,7 @@ stage_ssh() {
       use_passphrase=yes
     elif [[ "$OS_KIND" == macos ]]; then
       # On macOS, Keychain + FileVault protect the on-disk key; passphrase-less
-      # is a reasonable tradeoff and matches the existing report baseline.
+      # is the selected workstation baseline.
       use_passphrase=no
     fi
 
@@ -65,7 +65,7 @@ stage_ssh() {
     ok "SSH keypair already present"
   fi
 
-  # --- Lock down permissions (the report's §6.1 discipline) ---
+  # --- Lock down permissions ---
   chmod 600 "$HOME/.ssh/id_ed25519"      2>/dev/null || true
   chmod 600 "$HOME/.ssh/id_ed25519.pub" 2>/dev/null || true
   chmod 600 "$HOME/.ssh/config"          2>/dev/null || true

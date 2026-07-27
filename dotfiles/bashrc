@@ -1,4 +1,5 @@
-# ~/.bashrc — interactive shells. PATH is set in ~/.bash_profile.
+# shellcheck shell=bash
+# ~/.bashrc — shared PATH setup plus interactive shell behavior.
 # The bash twin of ~/.zshrc: same minimal setup, same prompt, same functions,
 # NO command aliases. Byte-identical on every machine (Mac + Linux).
 
@@ -19,16 +20,60 @@ _source_first() {
 # Non-interactive `ssh host cmd` bypasses ~/.bash_profile but DOES read
 # ~/.bashrc, so Homebrew and ~/.local/bin must be asserted before the
 # interactivity gate below or remote commands get the bare sshd PATH.
-# OS-aware: $BREW_PREFIX is exported by the provisioner (lib/os.sh). When
-# absent (dotfiles used without the provisioner), fall back to `brew --prefix`
-# so this works on macOS and Linuxbrew alike. On systems with no brew at all,
-# the dir-test skips the prepend (no phantom PATH entries).
-: "${BREW_PREFIX:=$(command -v brew >/dev/null 2>&1 && brew --prefix)}"
-if [[ -n "$BREW_PREFIX" && -d "$BREW_PREFIX/bin" ]]; then
-  case ":$PATH:" in *":$BREW_PREFIX/bin:"*) ;; *) PATH="$BREW_PREFIX/bin:$BREW_PREFIX/sbin:$PATH" ;; esac
+# A bare sshd PATH cannot find Apple Silicon Homebrew, so probe its standard
+# absolute locations as well as command -v. Intel macOS and Linuxbrew are also
+# covered. Never synthesize /bin from an empty prefix.
+_find_brew_bin() {
+  local candidate path_brew
+  local -a candidates
+  case "$(uname -s):$(uname -m)" in
+    Darwin:arm64|Darwin:aarch64) candidates=(/opt/homebrew/bin/brew /usr/local/bin/brew) ;;
+    Darwin:*)                   candidates=(/usr/local/bin/brew /opt/homebrew/bin/brew) ;;
+    *)                          candidates=(/home/linuxbrew/.linuxbrew/bin/brew /usr/local/bin/brew /opt/homebrew/bin/brew) ;;
+  esac
+  for candidate in "${candidates[@]}"; do
+    [[ -x "$candidate" ]] && { printf '%s\n' "$candidate"; return 0; }
+  done
+  path_brew=$(type -P brew 2>/dev/null || true)
+  [[ -n "$path_brew" && -x "$path_brew" ]] && { printf '%s\n' "$path_brew"; return 0; }
+  return 1
+}
+
+# Remove an existing occurrence before prepending, so a rerun/source repairs
+# ordering instead of merely noticing that a lower-priority entry exists.
+_path_prepend() {
+  local wanted="$1" entry new_path="" old_ifs="$IFS"
+  local -a path_parts
+  [[ -d "$wanted" ]] || return 0
+  IFS=:
+  read -r -a path_parts <<< "${PATH:-}"
+  IFS="$old_ifs"
+  for entry in "${path_parts[@]}"; do
+    [[ "$entry" == "$wanted" ]] && continue
+    new_path="${new_path}${new_path:+:}${entry}"
+  done
+  PATH="$wanted${new_path:+:$new_path}"
+}
+
+[[ -f "$HOME/.cargo/env" ]] && . "$HOME/.cargo/env"
+
+# Apple and other conventional signed packages install CLIs here. sshd's bare
+# macOS PATH omits both directories, so assert them before Homebrew.
+_path_prepend /usr/local/sbin
+_path_prepend /usr/local/bin
+
+_brew_bin=$(_find_brew_bin 2>/dev/null || true)
+if [[ -n "$_brew_bin" ]]; then
+  BREW_PREFIX=$("$_brew_bin" --prefix 2>/dev/null || true)
+  if [[ -n "$BREW_PREFIX" ]]; then
+    _path_prepend "$BREW_PREFIX/sbin"
+    _path_prepend "$BREW_PREFIX/bin"
+  fi
 fi
-case ":$PATH:" in *":$HOME/.local/bin:"*)   ;; *) PATH="$HOME/.local/bin:$PATH" ;; esac
+_path_prepend "$HOME/.local/bin"
 export PATH BREW_PREFIX
+unset _brew_bin
+unset -f _find_brew_bin _path_prepend
 
 # Locale safety net: ensure a UTF-8-capable LANG is set.
 # macOS: region "en_AE" has no POSIX locale, so several contexts (Terminal.app,
@@ -192,5 +237,3 @@ if command -v fzf >/dev/null 2>&1; then
     eval "$(zoxide init bash)"
   fi
 fi
-
-. "$HOME/.cargo/env"

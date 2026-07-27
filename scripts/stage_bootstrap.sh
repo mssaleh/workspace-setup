@@ -4,12 +4,14 @@
 
 stage_bootstrap() {
   if [[ "$OS_KIND" == macos ]]; then
-    if command -v brew >/dev/null 2>&1; then
-      ok "brew already installed"
+    if find_brew >/dev/null 2>&1; then
+      refresh_brew_environment
+      ok "brew already installed at $BREW_BIN"
     else
       info "installing Homebrew…"
       /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-      eval "$("$BREW_PREFIX/bin/brew" shellenv bash)"
+      refresh_brew_environment
+      [[ -x "$BREW_BIN" ]] || fail "Homebrew installer completed but brew was not found"
     fi
     # Xcode CLI tools (brew needs them; the installer prompts if missing)
     if ! xcode-select -p >/dev/null 2>&1; then

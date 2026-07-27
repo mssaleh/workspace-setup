@@ -1,57 +1,53 @@
 #!/usr/bin/env bash
-# scripts/stage_fonts_terminal.sh — install JetBrainsMono Nerd Font + kitty (if missing).
-# macOS: cask + Apple Terminal "Clear Dark" profile. Linux: Nerd Font from
-# GitHub release into ~/.local/share/fonts (so kitty's powerline tab bar and
-# yazi icons render), then kitty. The container runtime (Docker Engine on
-# Linux, Apple container on macOS) is installed by stage_docker.sh, not here.
+# scripts/stage_fonts_terminal.sh — fonts, terminal defaults, and upstream kitty.
 
-stage_fonts_terminal() {
-  if [[ "$OS_KIND" == macos ]]; then
-    # JetBrainsMono Nerd Font (cask)
-    if brew list --cask font-jetbrains-mono-nerd-font >/dev/null 2>&1; then
-      ok "JetBrainsMono Nerd Font already installed"
-    else
-      info "installing JetBrainsMono Nerd Font (cask)…"
-      brew install --cask font-jetbrains-mono-nerd-font
+install_brew_cask_if_missing() {
+  local cask="$1" existing_artifact=""
+  if "$BREW_BIN" list --cask "$cask" >/dev/null 2>&1; then
+    ok "$cask already installed"
+  else
+    case "$cask" in
+      maccy)       existing_artifact=/Applications/Maccy.app ;;
+      libreoffice) existing_artifact=/Applications/LibreOffice.app ;;
+    esac
+    if [[ -n "$existing_artifact" && -e "$existing_artifact" ]]; then
+      warn "preserving an existing non-Homebrew application at $existing_artifact"
+      return 0
     fi
+    info "installing $cask (Homebrew cask)…"
+    "$BREW_BIN" install --cask "$cask"
+  fi
+}
 
-    # Maccy clipboard manager
-    if brew list --cask maccy >/dev/null 2>&1; then
-      ok "maccy already installed"
-    else
-      info "installing maccy (clipboard manager cask)…"
-      brew install --cask maccy
-    fi
+ensure_cli_symlink() {
+  local target="$1" link="$2"
+  mkdir -p "$(dirname "$link")"
+  if [[ -L "$link" && -e "$link" && "$link" -ef "$target" ]]; then
+    return 0
+  fi
+  if [[ -e "$link" && ! -L "$link" ]]; then
+    warn "preserving user-owned executable at $link; expected link to $target"
+    return 0
+  fi
+  if [[ -L "$link" ]]; then
+    warn "preserving user-owned link $link → $(readlink "$link"); expected $target"
+    return 0
+  fi
+  ln -s "$target" "$link"
+  info "linked $link → $target"
+}
 
-    # LibreOffice (the one GUI office app in the report's baseline).
-    # Skip with SKIP_LIBREOFFICE=1 if you don't need an office suite.
-    if [[ -z "${SKIP_LIBREOFFICE:-}" ]]; then
-      if brew list --cask libreoffice >/dev/null 2>&1; then
-        ok "libreoffice already installed"
-      else
-        info "installing libreoffice (cask)…"
-        brew install --cask libreoffice
-      fi
-    fi
+install_terminal_profile_if_missing() {
+  if defaults read com.apple.Terminal 'Window Settings' 2>/dev/null \
+      | grep -Eq '^[[:space:]]*"?Clear Dark"?[[:space:]]*='; then
+    ok "Apple Terminal profile 'Clear Dark' already exists"
+    return 0
+  fi
 
-    # Apple Terminal defaults: a "Clear Dark"-ish profile.
-    # We write a proper .terminal plist file and `open` it — that's the
-    # supported mechanism: Terminal.app reads the plist, installs the profile
-    # (creating or overwriting "Clear Dark"), and sets it as default. Writing
-    # directly via `defaults write ... -dict-add` with an XML *string* value
-    # silently stores a string, not a dict, and Terminal ignores it.
-    #
-    # The plist here sets only the scalar keys with plain types (string/int/
-    # real/bool). Color and font keys require opaque NSKeyedArchiver-encoded
-    # NSData blobs that can't be generated inline without running Foundation,
-    # so we omit them — Terminal keeps whatever colors the imported-or-default
-    # "Clear Dark" profile already has. To customize the font (SF Mono) and
-    # exact colors, open Terminal → Settings → Profile → Font/Color after
-    # running this script; those changes persist in the profile.
-    info "applying Apple Terminal defaults (Clear Dark profile)…"
-    local term_profile="$HOME/.config/terminal/Clear Dark.terminal"
-    mkdir -p "$(dirname "$term_profile")"
-    cat > "$term_profile" <<'PROFILE'
+  local tmp_dir term_profile
+  tmp_dir=$(mktemp -d "${TMPDIR:-/tmp}/terminal-profile.XXXXXX") || return 1
+  term_profile="$tmp_dir/Clear Dark.terminal"
+  cat > "$term_profile" <<'PROFILE'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -69,17 +65,63 @@ stage_fonts_terminal() {
 </dict>
 </plist>
 PROFILE
-    # `open -b com.apple.Terminal <profile.terminal>` installs the profile and
-    # opens a Terminal window using it. We then make it the default profile.
-    # This is best-effort: if Terminal is running with locked settings it may
-    # not pick up the change until restart — surface that as a warning.
-    open -b com.apple.Terminal "$term_profile" 2>/dev/null || \
-      warn "could not import Terminal profile via 'open' (apply manually: Terminal → Settings → Import → $term_profile)"
-    # Give Terminal a moment to register the profile, then set it as default.
+  if open -b com.apple.Terminal "$term_profile" 2>/dev/null; then
     sleep 1
-    defaults write com.apple.Terminal "Default Window Settings"  "Clear Dark" 2>/dev/null || true
-    defaults write com.apple.Terminal "Startup Window Settings" "Clear Dark" 2>/dev/null || true
-    ok "Apple Terminal defaults applied (profile: $term_profile)"
+    defaults write com.apple.Terminal 'Default Window Settings' 'Clear Dark' 2>/dev/null || true
+    defaults write com.apple.Terminal 'Startup Window Settings' 'Clear Dark' 2>/dev/null || true
+    ok "Apple Terminal profile imported"
+  else
+    warn "could not import the Apple Terminal profile in this session"
+  fi
+  rm -rf "$tmp_dir"
+}
+
+install_kitty_upstream() {
+  local kitty_bin kitten_bin
+  if [[ "$OS_KIND" == macos ]]; then
+    kitty_bin=/Applications/kitty.app/Contents/MacOS/kitty
+    kitten_bin=/Applications/kitty.app/Contents/MacOS/kitten
+  else
+    kitty_bin="$HOME/.local/kitty.app/bin/kitty"
+    kitten_bin="$HOME/.local/kitty.app/bin/kitten"
+  fi
+
+  if [[ ! -x "$kitty_bin" || ! -x "$kitten_bin" ]]; then
+    info "installing kitty with its upstream binary installer…"
+    curl -fsSL https://sw.kovidgoyal.net/kitty/installer.sh | sh /dev/stdin launch=n
+  else
+    ok "kitty application already installed"
+  fi
+
+  [[ -x "$kitty_bin" && -x "$kitten_bin" ]] || \
+    fail "kitty installer completed without the expected application binaries"
+  ensure_cli_symlink "$kitty_bin" "$HOME/.local/bin/kitty"
+  ensure_cli_symlink "$kitten_bin" "$HOME/.local/bin/kitten"
+}
+
+stage_fonts_terminal() {
+  if [[ "$OS_KIND" == macos ]]; then
+    local cask
+    for cask in "${PACKAGES_BREW_CASK[@]}"; do
+      [[ "$cask" == libreoffice && -n "${SKIP_LIBREOFFICE:-}" ]] && continue
+      install_brew_cask_if_missing "$cask"
+    done
+
+    # Apple Terminal defaults: a "Clear Dark"-ish profile.
+    # We write a proper .terminal plist file and `open` it — that's the
+    # supported mechanism: Terminal.app reads the plist, installs the profile
+    # (creating or overwriting "Clear Dark"), and sets it as default. Writing
+    # directly via `defaults write ... -dict-add` with an XML *string* value
+    # silently stores a string, not a dict, and Terminal ignores it.
+    #
+    # The plist here sets only the scalar keys with plain types (string/int/
+    # real/bool). Color and font keys require opaque NSKeyedArchiver-encoded
+    # NSData blobs that can't be generated inline without running Foundation,
+    # so we omit them — Terminal keeps whatever colors the imported-or-default
+    # "Clear Dark" profile already has. To customize the font (SF Mono) and
+    # exact colors, open Terminal → Settings → Profile → Font/Color after
+    # running this script; those changes persist in the profile.
+    install_terminal_profile_if_missing
     warn "font + colors not set by this script — configure manually in Terminal → Settings → Profile (SF Mono recommended to match kitty)"
 
   else  # Linux
@@ -132,20 +174,5 @@ PROFILE
     fi
   fi
 
-  # kitty — install on macOS (cask) or Linux (curl installer)
-  if command -v kitty >/dev/null 2>&1; then
-    ok "kitty already installed"
-  else
-    if [[ "$OS_KIND" == macos ]]; then
-      info "installing kitty (cask)…"
-      brew install --cask kitty
-    else
-      info "installing kitty (curl installer)…"
-      curl -L https://sw.kovidgoyal.net/kitty/installer.sh | sh /dev/stdin
-      # Symlink into ~/.local/bin so `kitty` and `kitten` work from any shell
-      mkdir -p ~/.local/bin
-      ln -sfn "$HOME/.local/kitty.app/bin/kitty"   ~/.local/bin/kitty
-      ln -sfn "$HOME/.local/kitty.app/bin/kitten"  ~/.local/bin/kitten
-    fi
-  fi
+  install_kitty_upstream
 }

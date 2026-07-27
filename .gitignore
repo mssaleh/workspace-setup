@@ -9,7 +9,7 @@ Thumbs.db
 .vscode/
 .idea/
 
-# Backups created by the link script
+# Local backup files
 *.bak.*
 
 # Local test artifacts

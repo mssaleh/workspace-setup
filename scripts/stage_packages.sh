@@ -1,61 +1,76 @@
 #!/usr/bin/env bash
 # scripts/stage_packages.sh — install the cross-platform CLI toolbox.
-# Mirrors the report's §7 inventory. Idempotent: skips already-installed packages.
+# Installs the declared provider inventory. Idempotent: skips installed packages.
 #
 # Strategy:
-#   - Homebrew (macOS): one batch install of PACKAGES_BREW. Homebrew is the
-#     preferred package manager on macOS; every tool here is verified at
-#     formulae.brew.sh to be in the official homebrew-core/cask taps.
-#   - apt (Linux): PACKAGES_APT covers everything in Ubuntu 26.04 (resolute)
-#     default repos (verified at packages.ubuntu.com — 22 of 23 tools are
-#     there). Tools that aren't in apt at all (ruff, himalaya, yazi) are
-#     installed via their official installers into ~/.local/bin.
+#   - Homebrew (macOS): one batch install of PACKAGES_BREW after adding the
+#     explicitly declared third-party taps in the provider manifest.
+#   - apt (Linux): PACKAGES_APT covers the toolbox available from the selected
+#     Ubuntu/Debian release's default repositories. Tools that aren't there
+#     are installed through their explicitly declared upstream providers into
+#     user-standard locations.
 #     kubectl + helm have OFFICIAL apt repos (pkgs.k8s.io + packages.buildkite.com)
 #     and are installed via those, not GitHub binaries — see stage_docker.sh's
 #     pattern. They're handled in this stage for grouping, not in stage_docker.
 
-# Package names differ between brew and apt. Define both lists.
-PACKAGES_BREW=(
-  bash bash-completion@2 zsh-autosuggestions zsh-syntax-highlighting coreutils
-  eza fd bat zoxide yazi fzf chafa
-  git git-delta lazygit git-filter-repo pre-commit gh shellcheck
-  mosh tmux rsync rclone nmap wget
-  jq yq pandoc sevenzip
-  node uv ruff
-  helm kubernetes-cli cosign
-  ffmpeg poppler nano
-  himalaya ncdu smartmontools pkgconf
-)
+# Package/provider lists are declared once in lib/manifest.sh. Keeping the
+# ownership decision out of the stage makes omissions and accidental provider
+# changes visible in one source-only manifest.
 
-# apt equivalents — packages that exist in Ubuntu 26.04 (resolute) default
-# repos (main + universe), verified at packages.ubuntu.com. Ubuntu 26.04 is
-# much better-stocked than 24.04: git-delta, 7zip (provides 7zz!), lazygit,
-# cosign, gh, pre-commit, git-filter-repo, shellcheck, eza, chafa, jq, mosh,
-# pandoc, bat, zoxide, fzf, rclone, nmap, etc. are ALL in default repos.
-# zsh is NOT installed on Linux — system bash only (Ubuntu 26.04 ships bash 5.x).
-PACKAGES_APT=(
-  bash-completion coreutils
-  fd-find bat zoxide fzf
-  git lazygit gh shellcheck
-  git-filter-repo pre-commit git-delta
-  tmux rsync rclone nmap wget curl
-  jq yq pandoc 7zip
-  nodejs npm
-  ffmpeg poppler-utils nano
-  ncdu smartmontools xsel pkg-config
-  ca-certificates gnupg lsb-release
-  # eza/chafa/cosign are in 26.04 universe; on 24.04 cosign needs GitHub release
-  eza chafa cosign
-  # mosh is in main on Ubuntu; install via the batch, not separately
-  mosh
-)
+ensure_local_command_alias() {
+  local alias_name="$1" provider_name="$2" provider_path dst
+  command -v "$alias_name" >/dev/null 2>&1 && return 0
+  provider_path=$(command -v "$provider_name" 2>/dev/null || true)
+  [[ -n "$provider_path" ]] || return 0
+  dst="$HOME/.local/bin/$alias_name"
+
+  if [[ -e "$dst" || -L "$dst" ]]; then
+    warn "preserving existing command path that cannot provide '$alias_name': $dst"
+    return 0
+  fi
+
+  ln -s "$provider_path" "$dst"
+  info "linked $alias_name → $provider_name"
+}
+
+install_executable_if_path_free() {
+  local src="$1" dst="$2" label="$3" dir base tmp
+  if [[ -x "$dst" ]]; then
+    return 0
+  fi
+  if [[ -e "$dst" || -L "$dst" ]]; then
+    warn "preserving existing path that blocks the $label artifact: $dst"
+    return 0
+  fi
+  dir=$(dirname "$dst")
+  base=$(basename "$dst")
+  mkdir -p "$dir"
+  tmp=$(mktemp "$dir/.${base}.install.XXXXXX") || return 1
+  if ! cp "$src" "$tmp" || ! chmod 0755 "$tmp" || ! mv "$tmp" "$dst"; then
+    rm -f "$tmp"
+    return 1
+  fi
+}
 
 stage_packages() {
   local missing=()
   local pkg
+  mkdir -p "$HOME/.local/bin"
+  export PATH="$HOME/.local/bin:$PATH"
 
   if [[ "$PKGMGR" == brew ]]; then
+    local tap
+    for tap in "${BREW_TAPS[@]}"; do
+      if "$BREW_BIN" tap | grep -Fxq "$tap"; then
+        :
+      else
+        info "adding required Homebrew tap: $tap"
+        "$BREW_BIN" tap "$tap"
+      fi
+    done
+
     for pkg in "${PACKAGES_BREW[@]}"; do
+      [[ "$pkg" == container-compose && -n "${SKIP_CONTAINER:-}" ]] && continue
       if pkg_installed "$pkg"; then
         : # already installed
       else
@@ -64,7 +79,7 @@ stage_packages() {
     done
     if ((${#missing[@]})); then
       info "installing ${#missing[@]} missing brew packages…"
-      brew install "${missing[@]}"
+      "$BREW_BIN" install "${missing[@]}"
     else
       ok "all brew packages already installed"
     fi
@@ -99,8 +114,8 @@ stage_packages() {
 
     # 1. apt-installable packages (only those actually in the default repos).
     #    Filter out packages that aren't in this Ubuntu version's repos so a
-    #    missing name doesn't fail the whole batch (defensive — on 26.04 all
-    #    of PACKAGES_APT should be present, but 24.04 may be missing cosign).
+    #    missing name doesn't fail the whole batch; availability varies by
+    #    Ubuntu/Debian release.
     local apt_pkgs=()
     for pkg in "${PACKAGES_APT[@]}"; do
       if apt-cache show "$pkg" >/dev/null 2>&1; then
@@ -123,12 +138,16 @@ stage_packages() {
     #    apt repo is the officially recommended package-manager path. The repo
     #    path pins a minor version (v1.36 here); bump to track new minors.
     #    Uses the new keyrings pattern (signed-by=, NOT apt-key).
-    if ! command -v kubectl >/dev/null 2>&1; then
+    if dpkg -s kubectl >/dev/null 2>&1 && command -v kubectl >/dev/null 2>&1; then
+      ok "kubectl official apt package already installed"
+    elif command -v kubectl >/dev/null 2>&1; then
+      warn "preserving kubectl from an unrecognized provider at $(command -v kubectl)"
+    else
       info "adding kubectl apt repo (pkgs.k8s.io, v1.36 stable)…"
       sudo "${APT_ENV[@]}" "$PKGMGR" install -y apt-transport-https ca-certificates curl gnupg >/dev/null 2>&1 || true
       sudo install -m 0755 -d /etc/apt/keyrings
       if curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.36/deb/Release.key 2>/dev/null \
-        | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg 2>/dev/null; then
+        | sudo gpg --batch --yes --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg 2>/dev/null; then
         sudo chmod 644 /etc/apt/keyrings/kubernetes-apt-keyring.gpg
         echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.36/deb /' \
           | sudo tee /etc/apt/sources.list.d/kubernetes.list >/dev/null
@@ -138,8 +157,6 @@ stage_packages() {
       else
         warn "kubectl: could not download GPG key from pkgs.k8s.io — skipping"
       fi
-    else
-      ok "kubectl already installed"
     fi
 
     # 3. helm — official apt repo (packages.buildkite.com). Not in Ubuntu default
@@ -147,7 +164,11 @@ stage_packages() {
     #    https://helm.sh/docs/intro/install/, the Buildkite-hosted apt repo is
     #    the current official path (the old baltocdn.com repo is deprecated).
     #    Uses generic "any/ any" suite — works on any Debian/Ubuntu.
-    if ! command -v helm >/dev/null 2>&1; then
+    if dpkg -s helm >/dev/null 2>&1 && command -v helm >/dev/null 2>&1; then
+      ok "helm official apt package already installed"
+    elif command -v helm >/dev/null 2>&1; then
+      warn "preserving helm from an unrecognized provider at $(command -v helm)"
+    else
       info "adding helm apt repo (packages.buildkite.com)…"
       sudo "${APT_ENV[@]}" "$PKGMGR" install -y curl gpg apt-transport-https >/dev/null 2>&1 || true
       local helm_key; helm_key=$(mktemp)
@@ -168,12 +189,11 @@ stage_packages() {
         warn "helm: could not download GPG key from packages.buildkite.com — skipping"
       fi
       rm -f "$helm_key"
-    else
-      ok "helm already installed"
     fi
 
-# 4. Tools NOT in apt at all — install via their official installers.
-#    Each is idempotent: skipped if the binary is already on PATH.
+    # 4. Tools NOT in apt at all — install via their official providers.
+    #    Exact user-path artifacts are probed so another same-named command on
+    #    PATH cannot accidentally satisfy the declared provider.
     mkdir -p "$HOME/.local/bin"
     local uname_m; uname_m=$(uname -m)
     local rust_triple=""
@@ -185,41 +205,58 @@ stage_packages() {
 
     if [[ -n "$rust_triple" ]]; then
       # --- ruff (Astral Python linter/formatter, not in apt) — flat URL ---
-      if ! command -v ruff >/dev/null 2>&1; then
+      if [[ -x "$HOME/.local/bin/ruff" ]]; then
+        ok "ruff upstream artifact already installed"
+      elif [[ -e "$HOME/.local/bin/ruff" || -L "$HOME/.local/bin/ruff" ]]; then
+        warn "preserving existing path that blocks the upstream ruff artifact: $HOME/.local/bin/ruff"
+      else
         local tmp; tmp=$(mktemp -d)
         info "installing ruff (GitHub release)…"
         if curl -fsSL "https://github.com/astral-sh/ruff/releases/latest/download/ruff-${rust_triple}.tar.gz" \
-          -o "$tmp/ruff.tar.gz" 2>/dev/null; then
-          tar -xzf "$tmp/ruff.tar.gz" -C "$tmp" 2>/dev/null
-          cp "$tmp/ruff-${rust_triple}/ruff" "$HOME/.local/bin/ruff"
-          chmod +x "$HOME/.local/bin/ruff"
+            -o "$tmp/ruff.tar.gz" 2>/dev/null \
+            && tar -xzf "$tmp/ruff.tar.gz" -C "$tmp" 2>/dev/null \
+            && install_executable_if_path_free \
+              "$tmp/ruff-${rust_triple}/ruff" "$HOME/.local/bin/ruff" ruff; then
           ok "ruff installed → ~/.local/bin/ruff"
         else
-          warn "ruff download failed (skipped)"
+          warn "ruff download or installation failed (skipped)"
         fi
         rm -rf "$tmp"
       fi
 
       # --- yazi (TUI file manager, not in apt) — flat URL, .zip archive ---
-      if ! command -v yazi >/dev/null 2>&1; then
+      if [[ -x "$HOME/.local/bin/yazi" && -x "$HOME/.local/bin/ya" ]]; then
+        ok "yazi upstream artifacts already installed"
+      elif { [[ ! -e "$HOME/.local/bin/yazi" && ! -L "$HOME/.local/bin/yazi" ]] \
+          || [[ ! -e "$HOME/.local/bin/ya" && ! -L "$HOME/.local/bin/ya" ]]; }; then
         local tmp; tmp=$(mktemp -d)
         info "installing yazi (GitHub release)…"
         if curl -fsSL "https://github.com/sxyazi/yazi/releases/latest/download/yazi-${rust_triple}.zip" \
-          -o "$tmp/yazi.zip" 2>/dev/null; then
-          unzip -o "$tmp/yazi.zip" -d "$tmp" >/dev/null 2>&1
-          cp "$tmp/yazi-${rust_triple}/yazi" "$HOME/.local/bin/yazi"
-          cp "$tmp/yazi-${rust_triple}/ya" "$HOME/.local/bin/ya"
-          chmod +x "$HOME/.local/bin/yazi" "$HOME/.local/bin/ya"
+            -o "$tmp/yazi.zip" 2>/dev/null \
+            && unzip -o "$tmp/yazi.zip" -d "$tmp" >/dev/null 2>&1 \
+            && install_executable_if_path_free \
+              "$tmp/yazi-${rust_triple}/yazi" "$HOME/.local/bin/yazi" yazi \
+            && install_executable_if_path_free \
+              "$tmp/yazi-${rust_triple}/ya" "$HOME/.local/bin/ya" yazi; then
           ok "yazi installed → ~/.local/bin/yazi"
         else
-          warn "yazi download failed (skipped)"
+          warn "yazi download or installation failed (skipped)"
         fi
         rm -rf "$tmp"
+      else
+        [[ -x "$HOME/.local/bin/yazi" ]] || \
+          warn "preserving existing path that blocks the upstream yazi artifact: $HOME/.local/bin/yazi"
+        [[ -x "$HOME/.local/bin/ya" ]] || \
+          warn "preserving existing path that blocks the upstream yazi helper: $HOME/.local/bin/ya"
       fi
     fi
 
     # --- himalaya (CLI email client, not in apt) — official install script ---
-    if ! command -v himalaya >/dev/null 2>&1; then
+    if [[ -x "$HOME/.local/bin/himalaya" ]]; then
+      ok "himalaya upstream artifact already installed"
+    elif [[ -e "$HOME/.local/bin/himalaya" || -L "$HOME/.local/bin/himalaya" ]]; then
+      warn "preserving existing path that blocks the upstream himalaya artifact: $HOME/.local/bin/himalaya"
+    else
       info "installing himalaya (official install script)…"
       if curl -fsSL https://raw.githubusercontent.com/pimalaya/himalaya/master/install.sh 2>/dev/null \
         | PREFIX="$HOME/.local" sh 2>/dev/null; then
@@ -229,29 +266,17 @@ stage_packages() {
       fi
     fi
 
-    # --- uv (Astral self-install) — also installed in stage_toolchains,
-    #     but if the brew/apt `uv` package isn't present, ensure the
-    #     self-install is the PATH-winner. stage_toolchains handles this. ---
-    : # handled in stage_toolchains.sh
+    # uv is owned by Astral's standalone installer in stage_toolchains.sh, so
+    # it is deliberately absent from this stage on both platforms.
 
     # --- apt name aliases: some apt packages install binaries under a different
     #     name than what the dotfiles or muscle memory expect. Create symlinks
     #     in ~/.local/bin/ so they're on PATH without requiring a bash alias. ---
-    mkdir -p "$HOME/.local/bin"
     # fd-find package provides `fdfind`, dotfiles call `fd`
-    if ! command -v fd >/dev/null 2>&1 && command -v fdfind >/dev/null 2>&1; then
-      ln -sfn "$(command -v fdfind)" "$HOME/.local/bin/fd"
-      info "linked fd → fdfind"
-    fi
+    ensure_local_command_alias fd fdfind
     # bat package provides `batcat`, dotfiles call `bat`
-    if ! command -v bat >/dev/null 2>&1 && command -v batcat >/dev/null 2>&1; then
-      ln -sfn "$(command -v batcat)" "$HOME/.local/bin/bat"
-      info "linked bat → batcat"
-    fi
+    ensure_local_command_alias bat batcat
     # 7zip package provides `7z`, but the official 7-Zip binary is `7zz`
-    if ! command -v 7zz >/dev/null 2>&1 && command -v 7z >/dev/null 2>&1; then
-      ln -sfn "$(command -v 7z)" "$HOME/.local/bin/7zz"
-      info "linked 7zz → 7z"
-    fi
+    ensure_local_command_alias 7zz 7z
   fi
 }

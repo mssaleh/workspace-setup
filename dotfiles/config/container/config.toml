@@ -6,3 +6,6 @@
 cpus = ${CPUS}
 memory = "${MEM_MB}mb"
 rosetta = true
+
+[registry]
+domain = "docker.io"

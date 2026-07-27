@@ -1,20 +1,19 @@
 #!/usr/bin/env bash
 # scripts/stage_docker.sh — install the official Docker Engine + Docker
 # Compose v2 on Linux (Ubuntu/Debian). macOS skips this stage (uses Apple's
-# native `container` CLI instead — see stage_fonts_terminal.sh / report §7.7).
+# native `container` CLI instead — see stage_container.sh).
 #
 # Idempotent: re-running is safe. The apt repo + key writes overwrite in
 # place; apt install is a no-op if already at the latest version; usermod
 # -aG docker is idempotent (the -a appends, won't duplicate).
 #
-# Source: https://docs.docker.com/engine/install/ubuntu/ (verified against
-# download.docker.com/linux/ubuntu/dists/resolute/ as of 2026-07; the resolute
-# suite went live 2026-07-18, two days before this code was written).
+# Sources: https://docs.docker.com/engine/install/ubuntu/ and
+# https://docs.docker.com/engine/install/debian/.
 
 stage_docker() {
   # macOS uses Apple's native `container` CLI — skip Docker Engine entirely.
   if [[ "$OS_KIND" == macos ]]; then
-    info "macOS: skipping Docker Engine (Apple's native 'container' CLI is used instead — see stage_fonts_terminal.sh)"
+    info "macOS: skipping Docker Engine (Apple Container is handled by stage_container.sh)"
     return 0
   fi
 
@@ -25,8 +24,41 @@ stage_docker() {
     return 0
   fi
 
+  # A complete official install is already converged. Avoid rewriting apt
+  # sources/keys or running package transactions on every setup rerun.
+  local official_ready=1 docker_pkg
+  for docker_pkg in docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin; do
+    dpkg -s "$docker_pkg" >/dev/null 2>&1 || official_ready=0
+  done
+  if ((official_ready)); then
+    if ! systemctl is-active --quiet docker 2>/dev/null; then
+      sudo systemctl enable --now docker 2>/dev/null || true
+    fi
+    if sudo docker info >/dev/null 2>&1 \
+        && sudo docker compose version >/dev/null 2>&1; then
+      if id -nG "$USER" 2>/dev/null | grep -qw docker; then
+        ok "$USER already in docker group"
+      else
+        sudo usermod -aG docker "$USER"
+        warn "re-login or run 'newgrp docker' for docker group membership to take effect"
+      fi
+      ok "official Docker Engine + Compose v2 already installed and responsive"
+      return 0
+    fi
+  fi
+
+  local docker_repo_os
+  case "$DISTRO" in
+    ubuntu) docker_repo_os=ubuntu ;;
+    debian) docker_repo_os=debian ;;
+    *)
+      warn "Docker Engine stage supports Ubuntu/Debian; detected DISTRO=$DISTRO"
+      return 1
+      ;;
+  esac
+
   # --- 1. Pre-clean conflicting packages (Docker docs canonical command) ---
-  # Removes Ubuntu's own docker.io, the EOL docker-compose v1, docker-doc,
+  # Removes the distro's docker.io, the EOL docker-compose v1, docker-doc,
   # podman-docker, and the standalone containerd/runc (replaced by containerd.io).
   # `apt remove` is harmless if none are installed. We swallow the exit code
   # because apt errors if the package list is empty (the `|| true` handles it).
@@ -47,26 +79,29 @@ stage_docker() {
   sudo "${APT_ENV[@]}" "$PKGMGR" update >/dev/null 2>&1 || true
   sudo "${APT_ENV[@]}" "$PKGMGR" install -y ca-certificates curl >/dev/null 2>&1 || true
   sudo install -m 0755 -d /etc/apt/keyrings
-  if ! sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc 2>/dev/null; then
+  if ! sudo curl -fsSL "https://download.docker.com/linux/$docker_repo_os/gpg" -o /etc/apt/keyrings/docker.asc 2>/dev/null; then
     warn "could not download Docker GPG key (download.docker.com unreachable?) — skipping Docker Engine"
     return 1
   fi
   sudo chmod a+r /etc/apt/keyrings/docker.asc
 
   # --- 3. Add the apt repository (deb822 .sources format — official 2026 form) ---
-  # The suite is the Ubuntu codename (e.g. "resolute" for 26.04, "noble" for
-  # 24.04). We resolve it from /etc/os-release's UBUNTU_CODENAME (falls back to
-  # VERSION_CODENAME for non-Ubuntu Debian-family). Architecture is resolved
+  # The suite is the Ubuntu/Debian codename. Architecture is resolved
   # via `dpkg --print-architecture` so the same script works on amd64 and arm64.
-  # The resolute suite publishes amd64, arm64, armhf, s390x, ppc64el; we only
-  # need amd64/arm64 for this script's host arch.
-  local codename; codename=$(
+  # This setup supports the amd64 and arm64 workstation/server architectures.
+  local codename
+  codename=$(
     # shellcheck source=/dev/null
     # shellcheck disable=SC1091
-    . /etc/os-release 2>/dev/null && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}"
+    . /etc/os-release 2>/dev/null
+    if [[ "$docker_repo_os" == ubuntu ]]; then
+      echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}"
+    else
+      echo "$VERSION_CODENAME"
+    fi
   )
   if [[ -z "$codename" ]]; then
-    warn "could not determine Ubuntu codename from /etc/os-release — skipping Docker Engine"
+    warn "could not determine distro codename from /etc/os-release — skipping Docker Engine"
     return 1
   fi
   local arch; arch=$(dpkg --print-architecture 2>/dev/null)
@@ -75,10 +110,10 @@ stage_docker() {
     return 1
   fi
 
-  info "adding Docker apt repo (deb822 format) for $codename / $arch…"
+  info "adding Docker $docker_repo_os apt repo (deb822 format) for $codename / $arch…"
   sudo tee /etc/apt/sources.list.d/docker.sources >/dev/null <<EOF
 Types: deb
-URIs: https://download.docker.com/linux/ubuntu
+URIs: https://download.docker.com/linux/$docker_repo_os
 Suites: $codename
 Components: stable
 Architectures: $arch
@@ -100,7 +135,7 @@ EOF
   fi
   if ! sudo "${APT_ENV[@]}" "$PKGMGR" install -y \
       docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin; then
-    warn "Docker Engine install failed — install manually: https://docs.docker.com/engine/install/ubuntu/"
+    warn "Docker Engine install failed — see https://docs.docker.com/engine/install/$docker_repo_os/"
     return 1
   fi
 
@@ -157,7 +192,7 @@ EOF
   Next steps:
     1. Re-login or run:  newgrp docker   (so you can run docker without sudo)
     2. Try:  docker run --rm hello-world
-    3. Databases-in-containers pattern (see report §7.8):
+    3. Databases-in-containers pattern:
          docker run -d --name pg-dev -p 5432:5432 -v pg-dev-data:/var/lib/postgresql/data -e POSTGRES_PASSWORD=dev postgres:18
 
 SUMMARY

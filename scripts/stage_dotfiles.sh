@@ -1,123 +1,337 @@
 #!/usr/bin/env bash
-# scripts/stage_dotfiles.sh — symlink the repo's dotfiles/ into $HOME.
-# Idempotent via link_file (lib/link.sh). Templates .gitconfig from gitconfig.template.
+# scripts/stage_dotfiles.sh — converge ordinary configuration files into HOME.
+#
+# The payload can disappear immediately after setup: no target is linked back
+# to the repository. Unknown user-owned files are preserved, while JSON/TOML
+# formats with a safely expressible policy use narrow semantic merges.
+# shellcheck disable=SC2034,SC2016 # cross-file globals; child-shell expressions
+
+# Both ~/.bashrc and ~/.bash_profile are judged by the same observable result:
+# sourcing the candidate from a bare sshd-style PATH must resolve the declared
+# provider artifacts. ~/.bash_profile satisfies it by sourcing ~/.bashrc, but a
+# user file that asserts the same PATH itself is equally compliant.
+bash_path_semantically_compliant() {
+  local _src="$1" dst="$2" _mode="$3" expected_brew=""
+  [[ "$OS_KIND" == macos ]] && expected_brew="$BREW_BIN"
+  if env -i HOME="$HOME" USER="${USER:-$(id -un)}" \
+      EXPECTED_BREW="$expected_brew" PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+      /bin/bash --noprofile --norc -c '
+        . "$1"
+        [[ "$(command -v uv 2>/dev/null)" == "$HOME/.local/bin/uv" ]]
+        [[ "$(command -v rustup 2>/dev/null)" == "$HOME/.cargo/bin/rustup" ]]
+        [[ -z "$EXPECTED_BREW" || "$(command -v brew 2>/dev/null)" == "$EXPECTED_BREW" ]]
+      ' bash "$dst" >/dev/null 2>&1; then
+    CONFIG_MERGE_ACTION=unchanged
+    return 0
+  fi
+  return 1
+}
+
+profile_path_semantically_compliant() {
+  local _src="$1" dst="$2" _mode="$3"
+  if env -i HOME="$HOME" USER="${USER:-$(id -un)}" PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+      /bin/sh -c '. "$1"; [ "$(command -v uv 2>/dev/null)" = "$HOME/.local/bin/uv" ] && [ "$(command -v rustup 2>/dev/null)" = "$HOME/.cargo/bin/rustup" ]' \
+      sh "$dst" >/dev/null 2>&1; then
+    CONFIG_MERGE_ACTION=unchanged
+    return 0
+  fi
+  return 1
+}
+
+zsh_path_semantically_compliant() {
+  local _src="$1" dst="$2" _mode="$3"
+  if env -i HOME="$HOME" USER="${USER:-$(id -un)}" EXPECTED_BREW="$BREW_BIN" \
+      PATH=/usr/bin:/bin:/usr/sbin:/sbin /bin/zsh -dfc '
+        [[ "$1" == "$HOME/.zshenv" ]] || source "$HOME/.zshenv"
+        source "$1"
+        [[ "$(command -v uv 2>/dev/null)" == "$HOME/.local/bin/uv" ]]
+        [[ "$(command -v rustup 2>/dev/null)" == "$HOME/.cargo/bin/rustup" ]]
+        [[ "$(command -v brew 2>/dev/null)" == "$EXPECTED_BREW" ]]
+      ' zsh "$dst" >/dev/null 2>&1; then
+    CONFIG_MERGE_ACTION=unchanged
+    return 0
+  fi
+  return 1
+}
+
+zshrc_semantically_compliant() {
+  local _src="$1" dst="$2" _mode="$3"
+  if env -i HOME="$HOME" USER="${USER:-$(id -un)}" PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+      /bin/zsh -dfc '
+        source "$HOME/.zshenv"
+        source "$1"
+        [[ "$EDITOR" == nano ]]
+        (( $+functions[y] && $+functions[ds] && $+functions[ssh] && $+functions[s] && $+functions[ks] ))
+      ' zsh "$dst" >/dev/null 2>&1; then
+    CONFIG_MERGE_ACTION=unchanged
+    return 0
+  fi
+  return 1
+}
+
+merge_claude_settings() {
+  local src="$1" dst="$2" mode="$3" tmp
+  command -v jq >/dev/null 2>&1 || return 1
+  jq empty "$src" >/dev/null 2>&1 || return 1
+  jq empty "$dst" >/dev/null 2>&1 || return 1
+  tmp=$(mktemp "${TMPDIR:-/tmp}/claude-settings.XXXXXX") || return 1
+  if ! jq -s '
+      .[0] as $old | .[1] as $new |
+      $old |
+      .permissions = (($old.permissions // {}) + {
+        deny: ((($old.permissions.deny // []) + ($new.permissions.deny // [])) | unique)
+      })
+    ' "$dst" "$src" > "$tmp"; then
+    rm -f "$tmp"
+    return 1
+  fi
+  if cmp -s "$tmp" "$dst"; then
+    CONFIG_MERGE_ACTION=unchanged
+  else
+    config_atomic_replace "$tmp" "$dst" "$mode" || { rm -f "$tmp"; return 1; }
+    CONFIG_MERGE_ACTION=merged
+  fi
+  rm -f "$tmp"
+}
+
+merge_opencode_settings() {
+  local src="$1" dst="$2" mode="$3" tmp
+  command -v jq >/dev/null 2>&1 || return 1
+  jq empty "$src" >/dev/null 2>&1 || return 1
+  jq empty "$dst" >/dev/null 2>&1 || return 1
+  tmp=$(mktemp "${TMPDIR:-/tmp}/opencode-settings.XXXXXX") || return 1
+  if ! jq -s '
+      .[0] as $old | .[1] as $new |
+      $old |
+      if has("$schema") then . else . + {"$schema": $new["$schema"]} end |
+      .permission = (($old.permission // {}) + {
+        bash: (($old.permission.bash // {}) + ($new.permission.bash // {}))
+      })
+    ' "$dst" "$src" > "$tmp"; then
+    rm -f "$tmp"
+    return 1
+  fi
+  if cmp -s "$tmp" "$dst"; then
+    CONFIG_MERGE_ACTION=unchanged
+  else
+    config_atomic_replace "$tmp" "$dst" "$mode" || { rm -f "$tmp"; return 1; }
+    CONFIG_MERGE_ACTION=merged
+  fi
+  rm -f "$tmp"
+}
+
+# Preserve user-tuned CPU/memory values. The only automatic semantic migration
+# is adding the registry default introduced after the original setup.
+merge_container_config() {
+  local _src="$1" dst="$2" mode="$3" tmp
+  grep -Eq '^\[build\][[:space:]]*$' "$dst" || return 1
+  grep -Eq '^[[:space:]]*cpus[[:space:]]*=' "$dst" || return 1
+  grep -Eq '^[[:space:]]*memory[[:space:]]*=' "$dst" || return 1
+  grep -Eq '^[[:space:]]*rosetta[[:space:]]*=' "$dst" || return 1
+
+  if grep -Eq '^\[registry\][[:space:]]*$' "$dst"; then
+    # A custom registry is a legitimate user preference. If the section is
+    # complete, the existing file is already semantically compliant.
+    grep -Eq '^[[:space:]]*domain[[:space:]]*=' "$dst" || return 1
+    CONFIG_MERGE_ACTION=unchanged
+    return 0
+  fi
+
+  tmp=$(mktemp "${TMPDIR:-/tmp}/container-config.XXXXXX") || return 1
+  cp "$dst" "$tmp"
+  printf '\n[registry]\ndomain = "docker.io"\n' >> "$tmp"
+  config_atomic_replace "$tmp" "$dst" "$mode" || { rm -f "$tmp"; return 1; }
+  rm -f "$tmp"
+  CONFIG_MERGE_ACTION=merged
+}
+
+install_repo_config() {
+  local repo="$1" relative="$2" dst="$3" mode="${4:-0644}" merge_fn="${5:-}"
+  install_regular_file "$repo/$relative" "$dst" "$relative" "$mode" "$merge_fn"
+}
+
+git_config_set_default() {
+  local dst="$1" key="$2" value="$3"
+  if ! git config -f "$dst" --get "$key" >/dev/null 2>&1; then
+    git config -f "$dst" "$key" "$value"
+    GIT_CONFIG_CHANGED=1
+  fi
+}
+
+git_config_set_value() {
+  local dst="$1" key="$2" value="$3" current
+  current=$(git config -f "$dst" --get "$key" 2>/dev/null || true)
+  if [[ "$current" != "$value" ]]; then
+    git config -f "$dst" "$key" "$value"
+    GIT_CONFIG_CHANGED=1
+  fi
+}
+
+stage_git_config() {
+  local repo="$1" dst="$HOME/.gitconfig" gh_bin git_name git_email tmp
+  local name_was_set=0 email_was_set=0
+  [[ ${GIT_NAME+x} ]] && name_was_set=1
+  [[ ${GIT_EMAIL+x} ]] && email_was_set=1
+
+  gh_bin=$(command -v gh 2>/dev/null || printf '%s' /usr/bin/gh)
+  git_name="${GIT_NAME:-$(git config --global user.name 2>/dev/null || true)}"
+  git_email="${GIT_EMAIL:-$(git config --global user.email 2>/dev/null || true)}"
+  git_name="${git_name:-Your Name}"
+  git_email="${git_email:-you@example.com}"
+
+  if [[ -L "$dst" ]] && ! config_is_legacy_link "$dst" "$repo/setup.sh"; then
+    config_record_conflict "$dst"
+    warn "  refusing to write through a non-setup ~/.gitconfig symlink"
+    return 0
+  fi
+
+  if [[ -L "$dst" && -e "$dst" ]]; then
+    if [[ -f "$dst" ]]; then
+      config_atomic_replace "$dst" "$dst" 0644
+      CONFIG_MIGRATED_COUNT=$((CONFIG_MIGRATED_COUNT + 1))
+      info "detached legacy ~/.gitconfig link while preserving its content"
+    else
+      config_record_conflict "$dst"
+      warn "  legacy ~/.gitconfig link resolves to a non-file object"
+      return 0
+    fi
+  fi
+
+  if [[ ! -e "$dst" || -L "$dst" ]]; then
+    tmp=$(mktemp "${TMPDIR:-/tmp}/gitconfig.XXXXXX") || return 1
+    git config -f "$tmp" user.name "$git_name"
+    git config -f "$tmp" user.email "$git_email"
+    git config -f "$tmp" core.pager delta
+    git config -f "$tmp" interactive.diffFilter 'delta --color-only'
+    git config -f "$tmp" delta.navigate true
+    git config -f "$tmp" delta.line-numbers true
+    git config -f "$tmp" delta.hyperlinks true
+    git config -f "$tmp" delta.syntax-theme 'Catppuccin Mocha'
+    git config -f "$tmp" merge.conflictStyle zdiff3
+    git config -f "$tmp" diff.colorMoved default
+    git config -f "$tmp" init.defaultBranch main
+    git config -f "$tmp" --add credential.https://github.com.helper ''
+    git config -f "$tmp" --add credential.https://github.com.helper "!$gh_bin auth git-credential"
+    git config -f "$tmp" --add credential.https://gist.github.com.helper ''
+    git config -f "$tmp" --add credential.https://gist.github.com.helper "!$gh_bin auth git-credential"
+    install_regular_file "$tmp" "$dst" generated/gitconfig 0644
+    rm -f "$tmp"
+  fi
+
+  [[ -f "$dst" && ! -L "$dst" ]] || return 0
+  if ! git config -f "$dst" --list >/dev/null 2>&1; then
+    config_record_conflict "$dst"
+    warn "  ~/.gitconfig is not parseable; no semantic merge was attempted"
+    return 0
+  fi
+
+  GIT_CONFIG_CHANGED=0
+  if (( name_was_set )); then
+    git_config_set_value "$dst" user.name "$git_name"
+  else
+    git_config_set_default "$dst" user.name "$git_name"
+  fi
+  if (( email_was_set )); then
+    git_config_set_value "$dst" user.email "$git_email"
+  else
+    git_config_set_default "$dst" user.email "$git_email"
+  fi
+  git_config_set_default "$dst" core.pager delta
+  git_config_set_default "$dst" interactive.diffFilter 'delta --color-only'
+  git_config_set_default "$dst" delta.navigate true
+  git_config_set_default "$dst" delta.line-numbers true
+  git_config_set_default "$dst" delta.hyperlinks true
+  git_config_set_default "$dst" delta.syntax-theme 'Catppuccin Mocha'
+  git_config_set_default "$dst" merge.conflictStyle zdiff3
+  git_config_set_default "$dst" diff.colorMoved default
+  git_config_set_default "$dst" init.defaultBranch main
+
+  local credential_key helper
+  for credential_key in \
+    credential.https://github.com.helper \
+    credential.https://gist.github.com.helper; do
+    helper="!$gh_bin auth git-credential"
+    if ! git config -f "$dst" --get-all "$credential_key" 2>/dev/null | grep -Fxq "$helper"; then
+      git config -f "$dst" --add "$credential_key" "$helper"
+      GIT_CONFIG_CHANGED=1
+    fi
+  done
+  if (( GIT_CONFIG_CHANGED )); then
+    CONFIG_MERGED_COUNT=$((CONFIG_MERGED_COUNT + 1))
+    info "merged missing baseline settings into ~/.gitconfig"
+  fi
+}
+
+stage_container_config() {
+  local repo="$1" cpus mem_mb tmp dst="$HOME/.config/container/config.toml"
+  cpus=$(sysctl -n hw.ncpu 2>/dev/null || printf '%s' 8)
+  mem_mb=$(($(sysctl -n hw.memsize 2>/dev/null || printf '%s' 0) / 1024 / 1024))
+  mem_mb=$((mem_mb * 3 / 4))
+  ((mem_mb > 18432)) && mem_mb=18432
+  ((mem_mb < 4096)) && mem_mb=4096
+
+  tmp=$(mktemp "${TMPDIR:-/tmp}/container-config.XXXXXX") || return 1
+  sed -e "s|\${CPUS}|$cpus|g" -e "s|\${MEM_MB}|$mem_mb|g" \
+    "$repo/dotfiles/config/container/config.toml" > "$tmp"
+  install_regular_file "$tmp" "$dst" generated/container-config 0644 merge_container_config
+  case "$CONFIG_LAST_ACTION" in
+    installed|migrated|upgraded|merged) CONTAINER_CONFIG_CHANGED=1 ;;
+  esac
+  rm -f "$tmp"
+}
 
 stage_dotfiles() {
-  local repo; repo="$(repo_dir)"
+  local repo
+  repo=$(repo_dir)
 
-  # --- shell configs (directly in $HOME) ---
-  # bash is the only shell on Linux (system bash — Ubuntu 26.04 ships bash 5.x,
-  # no need for Homebrew bash or zsh). macOS keeps zsh as part of the twin-shell
-  # discipline from the report, so zsh dotfiles are linked on macOS only.
-  link_file "$repo/dotfiles/bashrc"        "$HOME/.bashrc"
-  link_file "$repo/dotfiles/bash_profile"  "$HOME/.bash_profile"
-  link_file "$repo/dotfiles/profile"       "$HOME/.profile"
+  install_repo_config "$repo" dotfiles/bashrc "$HOME/.bashrc" 0644 bash_path_semantically_compliant
+  install_repo_config "$repo" dotfiles/bash_profile "$HOME/.bash_profile" 0644 bash_path_semantically_compliant
+  install_repo_config "$repo" dotfiles/profile "$HOME/.profile" 0644 profile_path_semantically_compliant
   if [[ "$OS_KIND" == macos ]]; then
-    link_file "$repo/dotfiles/zshenv"      "$HOME/.zshenv"
-    link_file "$repo/dotfiles/zprofile"    "$HOME/.zprofile"
-    link_file "$repo/dotfiles/zshrc"       "$HOME/.zshrc"
+    install_repo_config "$repo" dotfiles/zshenv "$HOME/.zshenv" 0644 zsh_path_semantically_compliant
+    install_repo_config "$repo" dotfiles/zprofile "$HOME/.zprofile" 0644 zsh_path_semantically_compliant
+    install_repo_config "$repo" dotfiles/zshrc "$HOME/.zshrc" 0644 zshrc_semantically_compliant
   fi
-  link_file "$repo/dotfiles/inputrc"       "$HOME/.inputrc"
-  link_file "$repo/dotfiles/tmux.conf"     "$HOME/.tmux.conf"
+  install_repo_config "$repo" dotfiles/inputrc   "$HOME/.inputrc"
+  install_repo_config "$repo" dotfiles/tmux.conf "$HOME/.tmux.conf"
 
-  # --- git config (templated with user identity) ---
-  if [[ -f "$HOME/.gitconfig" ]] && [[ ! -L "$HOME/.gitconfig" ]]; then
-    warn "existing ~/.gitconfig is a regular file; leaving it in place (not overwriting)"
-  else
-    # Resolve the gh binary path for the credential helper
-    local gh_bin
-    gh_bin=$(command -v gh 2>/dev/null || echo "/usr/bin/gh")
-    GIT_NAME="${GIT_NAME:-$(git config --global user.name 2>/dev/null || echo 'Your Name')}"
-    GIT_EMAIL="${GIT_EMAIL:-$(git config --global user.email 2>/dev/null || echo 'you@example.com')}"
-    GH_BIN="$gh_bin"
-    export GIT_NAME GIT_EMAIL GH_BIN
-    # envsubst the template into place (not a symlink — it's generated).
-    # Fallback when envsubst isn't available (macOS without Homebrew gettext):
-    # use sed with a rare separator (\x00 can't appear in text, but pipe is
-    # safe for paths/names/emails) and escape the sed-special chars &, \, and
-    # the separator in the replacement so names like "AT&T" or "A|B" don't
-    # break the substitution.
-    if command -v envsubst >/dev/null 2>&1; then
-      envsubst < "$repo/dotfiles/gitconfig.template" > "$HOME/.gitconfig"
-    else
-      esc_sed() { printf '%s' "$1" | sed -e 's/[\\&|]/\\&/g'; }
-      local gn ge gb
-      gn=$(esc_sed "$GIT_NAME"); ge=$(esc_sed "$GIT_EMAIL"); gb=$(esc_sed "$GH_BIN")
-      sed -e "s|\${GIT_NAME}|$gn|g" \
-          -e "s|\${GIT_EMAIL}|$ge|g" \
-          -e "s|\${GH_BIN}|$gb|g" \
-          "$repo/dotfiles/gitconfig.template" > "$HOME/.gitconfig"
-    fi
-    info "generated ~/.gitconfig (user: $GIT_NAME <$GIT_EMAIL>)"
+  stage_git_config "$repo"
+
+  install_repo_config "$repo" dotfiles/config/kitty/kitty.conf \
+    "$HOME/.config/kitty/kitty.conf"
+  install_repo_config "$repo" dotfiles/config/kitty/current-theme.conf \
+    "$HOME/.config/kitty/current-theme.conf"
+  install_repo_config "$repo" dotfiles/config/kitty/ssh.conf \
+    "$HOME/.config/kitty/ssh.conf"
+  install_repo_config "$repo" dotfiles/config/kitty/startup.session \
+    "$HOME/.config/kitty/startup.session"
+
+  install_repo_config "$repo" dotfiles/config/bat/config \
+    "$HOME/.config/bat/config"
+  install_repo_config "$repo" 'dotfiles/config/bat/themes/Catppuccin Mocha.tmTheme' \
+    "$HOME/.config/bat/themes/Catppuccin Mocha.tmTheme"
+
+  install_repo_config "$repo" dotfiles/config/yazi/yazi.toml \
+    "$HOME/.config/yazi/yazi.toml"
+  install_repo_config "$repo" dotfiles/config/yazi/keymap.toml \
+    "$HOME/.config/yazi/keymap.toml"
+  install_repo_config "$repo" dotfiles/config/gh/config.yml \
+    "$HOME/.config/gh/config.yml"
+  install_repo_config "$repo" dotfiles/config/opencode/opencode.jsonc \
+    "$HOME/.config/opencode/opencode.jsonc" 0644 merge_opencode_settings
+
+  if [[ "$OS_KIND" == macos && -z "${SKIP_CONTAINER:-}" ]]; then
+    stage_container_config "$repo"
   fi
 
-  # --- ~/.config/ subdirs (link individual files, not whole dirs) ---
-  # Linking the whole dir would make runtime writes (gh auth, kitten themes,
-  # yazi state, opencode sessions) land inside the repo and show up as git
-  # diffs. Instead, link only the files we want to version; the tool keeps
-  # ownership of the rest of its config dir.
-  mkdir -p "$HOME/.config"
-  # kitty
-  mkdir -p "$HOME/.config/kitty"
-  link_file "$repo/dotfiles/config/kitty/kitty.conf"         "$HOME/.config/kitty/kitty.conf"
-  link_file "$repo/dotfiles/config/kitty/current-theme.conf" "$HOME/.config/kitty/current-theme.conf"
-  link_file "$repo/dotfiles/config/kitty/ssh.conf"           "$HOME/.config/kitty/ssh.conf"
-  link_file "$repo/dotfiles/config/kitty/startup.session"    "$HOME/.config/kitty/startup.session"
-  # bat
-  mkdir -p "$HOME/.config/bat/themes"
-  link_file "$repo/dotfiles/config/bat/config"                          "$HOME/.config/bat/config"
-  link_file "$repo/dotfiles/config/bat/themes/Catppuccin Mocha.tmTheme" "$HOME/.config/bat/themes/Catppuccin Mocha.tmTheme"
-  # yazi
-  mkdir -p "$HOME/.config/yazi"
-  link_file "$repo/dotfiles/config/yazi/yazi.toml"   "$HOME/.config/yazi/yazi.toml"
-  link_file "$repo/dotfiles/config/yazi/keymap.toml" "$HOME/.config/yazi/keymap.toml"
-  # gh — link only the static config.yml (NOT hosts.yml, which holds the token
-  # and is written by `gh auth login`). The user owns ~/.config/gh/hosts.yml.
-  mkdir -p "$HOME/.config/gh"
-  link_file "$repo/dotfiles/config/gh/config.yml" "$HOME/.config/gh/config.yml"
-  # opencode — link only the static opencode.jsonc (opencode writes
-  # sessions/state under ~/.config/opencode/ which we don't want in the repo).
-  mkdir -p "$HOME/.config/opencode"
-  link_file "$repo/dotfiles/config/opencode/opencode.jsonc" "$HOME/.config/opencode/opencode.jsonc"
+  install_repo_config "$repo" dotfiles/claude/settings.json \
+    "$HOME/.claude/settings.json" 0644 merge_claude_settings
+  install_repo_config "$repo" dotfiles/codex/rules/default.rules \
+    "$HOME/.codex/rules/default.rules"
 
-  # --- Apple Container config (macOS-only) ---
-  # Single-file link; the tool doesn't write to this dir at runtime.
-  if [[ "$OS_KIND" == macos ]]; then
-    mkdir -p "$HOME/.config/container"
-    # Templated from gitconfig-style placeholder so the builder VM resources
-    # scale to the host (drop the report's hardcoded 11 CPUs / 18 GB).
-    local cpus mem_mb
-    if [[ "$OS_KIND" == macos ]]; then
-      cpus=$(sysctl -n hw.ncpu 2>/dev/null || echo 8)
-      # Reserve ~25% of RAM for the host: use 75% of total, capped at 18 GB.
-      mem_mb=$(($(sysctl -n hw.memsize 2>/dev/null || echo 0) / 1024 / 1024))
-      mem_mb=$(( mem_mb * 3 / 4 ))
-      (( mem_mb > 18432 )) && mem_mb=18432
-      (( mem_mb < 4096 )) && mem_mb=4096
-    fi
-    if command -v envsubst >/dev/null 2>&1; then
-      CPUS="$cpus" MEM_MB="$mem_mb" envsubst < "$repo/dotfiles/config/container/config.toml" \
-        > "$HOME/.config/container/config.toml"
-    else
-      # sed fallback: cpus/mem are integers, so no escaping needed — but use
-      # the same esc_sed helper as the gitconfig path for consistency.
-      sed -e "s|\${CPUS}|$cpus|g" -e "s|\${MEM_MB}|$mem_mb|g" \
-        "$repo/dotfiles/config/container/config.toml" > "$HOME/.config/container/config.toml"
-    fi
-    info "generated ~/.config/container/config.toml (cpus=$cpus mem=${mem_mb}mb)"
-  fi
-
-  # --- coding-agent configs (link, don't overwrite the whole dir) ---
-  mkdir -p "$HOME/.claude"
-  link_file "$repo/dotfiles/claude/settings.json" "$HOME/.claude/settings.json"
-  mkdir -p "$HOME/.codex/rules"
-  link_file "$repo/dotfiles/codex/rules/default.rules" "$HOME/.codex/rules/default.rules"
-
-  # --- SSH config (link; the file itself has no secrets — the host block is commented) ---
   mkdir -p "$HOME/.ssh"
-  chmod 700 "$HOME/.ssh"
-  link_file "$repo/dotfiles/ssh/config" "$HOME/.ssh/config"
-  chmod 600 "$HOME/.ssh/config"
+  chmod 0700 "$HOME/.ssh"
+  install_repo_config "$repo" dotfiles/ssh/config "$HOME/.ssh/config" 0600
 
-  ok "dotfiles linked"
+  ok "configuration: installed=$CONFIG_INSTALLED_COUNT migrated=$CONFIG_MIGRATED_COUNT upgraded=$CONFIG_UPGRADED_COUNT merged=$CONFIG_MERGED_COUNT unchanged=$CONFIG_UNCHANGED_COUNT conflicts=$CONFIG_CONFLICT_COUNT"
 }

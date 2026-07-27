@@ -1,24 +1,7 @@
-# ~/.bash_profile — login shells. bash reads this INSTEAD of ~/.profile.
-# Byte-identical on every machine (Mac + Linux). PATH logic mirrors ~/.zshenv +
-# ~/.zprofile: macOS runs /usr/libexec/path_helper from /etc/profile for every
-# login shell, which shuffles the system dirs back in front — so Homebrew must
-# be re-asserted HERE (after /etc/profile), or `bash`, `git`, `python3`, …
-# resolve to Apple's frozen system copies. On Linux, path_helper doesn't run,
-# so this is a no-op; the brew shellenv is still safe to eval.
-# $BREW_PREFIX is exported by ~/.bashrc (with a `brew --prefix` fallback)
-# which is sourced below; resolve it ourselves in case bashrc hasn't run yet.
-: "${BREW_PREFIX:=$(command -v brew >/dev/null 2>&1 && brew --prefix)}"
-[ -x "$BREW_PREFIX/bin/brew" ] && eval "$("$BREW_PREFIX/bin/brew" shellenv bash)"
-export BREW_PREFIX
-
-# User-installed CLIs (claude, codex, …) win over everything.
-case ":$PATH:" in
-  *":$HOME/.local/bin:"*) ;;
-  *) PATH="$HOME/.local/bin:$PATH" ;;
-esac
-export PATH
-
-# Interactive login shells (every kitty window / ssh session / tmux pane on
-# macOS is one) get the interactive config too.
+# shellcheck shell=bash
+# ~/.bash_profile — login shells.
+#
+# bash reads this instead of ~/.profile. ~/.bashrc owns the shared PATH logic
+# because sshd also reads it for non-interactive remote commands; sourcing it
+# here gives login and interactive shells the identical result.
 [ -f "$HOME/.bashrc" ] && . "$HOME/.bashrc"
-[ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
