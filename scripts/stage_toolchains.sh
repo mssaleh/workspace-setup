@@ -12,7 +12,14 @@ stage_toolchains() {
     ok "rustup upstream install already present"
   else
     info "installing rustup…"
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+    # --no-modify-path matches the uv and opencode installers above/below: the
+    # shipped shell files already source ~/.cargo/env, so rustup appending its
+    # own line is redundant. It is also harmful — this stage runs before the
+    # configuration stage, so the appended line makes a pristine distribution
+    # ~/.bashrc look like edited user content, and convergence then preserves
+    # the distro skeleton instead of installing the real shell configuration.
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+      | sh -s -- -y --no-modify-path --default-toolchain stable
     # shellcheck disable=SC1091
     source "$HOME/.cargo/env"
   fi

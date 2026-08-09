@@ -25,24 +25,30 @@
 #     typed once per boot, not per connection. Override with SSH_KEY_PASSPHRASE=none
 #     to match the macOS behavior (e.g. for a disposable VM).
 
+# ssh_key_use_passphrase — "yes" when the generated key should be protected by
+# a passphrase, "no" otherwise. Linux defaults to a passphrase: the systemd
+# user agent + AddKeysToAgent yes means it is typed once per boot, not per
+# connection. Two cases opt out — macOS, where Keychain + FileVault protect the
+# on-disk key, and an explicit SSH_KEY_PASSPHRASE=none for a disposable host.
+# Both opt-outs must be tested against the same variable; checking the OS and
+# the override in separate branches lets SSH_KEY_PASSPHRASE=none fall through
+# to the passphrase default on Linux, which is exactly where it is needed.
+ssh_key_use_passphrase() {
+  if [[ "${OS_KIND:-}" == macos ]] || [[ "${SSH_KEY_PASSPHRASE:-}" == "none" ]]; then
+    printf 'no\n'
+  else
+    printf 'yes\n'
+  fi
+}
+
 stage_ssh() {
   mkdir -p "$HOME/.ssh"
   chmod 700 "$HOME/.ssh"
 
   # --- Generate a default ed25519 key if none exists ---
   if [[ ! -f "$HOME/.ssh/id_ed25519" ]]; then
-    local use_passphrase=yes
-    if [[ "$OS_KIND" == linux ]] && [[ "${SSH_KEY_PASSPHRASE:-}" != "none" ]]; then
-      # On Linux, default to a passphrase-protected key. The systemd user
-      # agent (enabled below) + AddKeysToAgent yes means it's typed once per
-      # boot. Set SSH_KEY_PASSPHRASE=none to match the macOS passphrase-less
-      # behavior (e.g. for a disposable VM).
-      use_passphrase=yes
-    elif [[ "$OS_KIND" == macos ]]; then
-      # On macOS, Keychain + FileVault protect the on-disk key; passphrase-less
-      # is the selected workstation baseline.
-      use_passphrase=no
-    fi
+    local use_passphrase
+    use_passphrase=$(ssh_key_use_passphrase)
 
     if [[ "$use_passphrase" == yes ]]; then
       info "generating ed25519 SSH keypair WITH passphrase (Linux default)…"

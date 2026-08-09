@@ -38,6 +38,18 @@ config_hash_is_known() {
     '$1 == key && $2 == hash { found = 1 } END { exit !found }' "$inventory"
 }
 
+# A dotfile byte-identical to the distribution's skeleton copy is not user
+# content — it is exactly what adduser/useradd placed there when the account
+# was created. Every fresh Ubuntu/Debian account starts with /etc/skel/.bashrc
+# and /etc/skel/.profile, so without this test the very first run on a new
+# Linux user would always classify them as ambiguous and refuse to converge.
+config_is_pristine_skel() {
+  local dst="$1" skel
+  skel="${CONFIG_SKEL_DIR:-/etc/skel}/$(basename "$dst")"
+  [[ -f "$skel" && -f "$dst" ]] || return 1
+  cmp -s "$skel" "$dst"
+}
+
 config_is_legacy_link() {
   local dst="$1" src="$2" target
   [[ -L "$dst" ]] || return 1
@@ -185,6 +197,14 @@ install_regular_file() {
     CONFIG_UPGRADED_COUNT=$((CONFIG_UPGRADED_COUNT + 1))
     CONFIG_LAST_ACTION=upgraded
     info "upgraded known config version: $dst"
+    return 0
+  fi
+
+  if config_is_pristine_skel "$dst"; then
+    config_atomic_replace "$src" "$dst" "$mode"
+    CONFIG_UPGRADED_COUNT=$((CONFIG_UPGRADED_COUNT + 1))
+    CONFIG_LAST_ACTION=upgraded
+    info "replaced pristine distribution skeleton file: $dst"
     return 0
   fi
 

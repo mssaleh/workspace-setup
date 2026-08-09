@@ -54,6 +54,7 @@ Configuration decisions use only the observed target plus source history carried
 | Byte-identical | No-op |
 | Old link into a `workspace-setup` checkout, including a broken `/tmp` link | Replace it with a regular file |
 | Exact hash of a previously shipped file | Atomically upgrade it |
+| Byte-identical to the distribution's `/etc/skel` copy | Atomically upgrade it — a fresh Linux account's `~/.bashrc` and `~/.profile` are what `adduser` copied, not user content |
 | Parseable supported format with unrelated user values | Merge only the required keys |
 | Semantically compliant custom shell file | Preserve it |
 | Ambiguous user-owned file or unrelated symlink | Preserve it, report a conflict, and fail postflight rather than overwrite |

@@ -17,8 +17,13 @@ bash_path_semantically_compliant() {
       EXPECTED_BREW="$expected_brew" PATH=/usr/bin:/bin:/usr/sbin:/sbin \
       /bin/bash --noprofile --norc -c '
         . "$1"
-        [[ "$(command -v uv 2>/dev/null)" == "$HOME/.local/bin/uv" ]]
-        [[ "$(command -v rustup 2>/dev/null)" == "$HOME/.cargo/bin/rustup" ]]
+        # Every probe must hold. Chained with && so the exit status reflects
+        # all of them: as separate statements only the last one would count,
+        # and on Linux (empty EXPECTED_BREW) that last test is always true,
+        # which would declare any file — including a pristine distro skeleton
+        # that sets no PATH at all — semantically compliant.
+        [[ "$(command -v uv 2>/dev/null)" == "$HOME/.local/bin/uv" ]] &&
+        [[ "$(command -v rustup 2>/dev/null)" == "$HOME/.cargo/bin/rustup" ]] &&
         [[ -z "$EXPECTED_BREW" || "$(command -v brew 2>/dev/null)" == "$EXPECTED_BREW" ]]
       ' bash "$dst" >/dev/null 2>&1; then
     CONFIG_MERGE_ACTION=unchanged
@@ -44,8 +49,10 @@ zsh_path_semantically_compliant() {
       PATH=/usr/bin:/bin:/usr/sbin:/sbin /bin/zsh -dfc '
         [[ "$1" == "$HOME/.zshenv" ]] || source "$HOME/.zshenv"
         source "$1"
-        [[ "$(command -v uv 2>/dev/null)" == "$HOME/.local/bin/uv" ]]
-        [[ "$(command -v rustup 2>/dev/null)" == "$HOME/.cargo/bin/rustup" ]]
+        # Chained with && for the same reason as the bash probe: as separate
+        # statements only the final test would decide compliance.
+        [[ "$(command -v uv 2>/dev/null)" == "$HOME/.local/bin/uv" ]] &&
+        [[ "$(command -v rustup 2>/dev/null)" == "$HOME/.cargo/bin/rustup" ]] &&
         [[ "$(command -v brew 2>/dev/null)" == "$EXPECTED_BREW" ]]
       ' zsh "$dst" >/dev/null 2>&1; then
     CONFIG_MERGE_ACTION=unchanged
