@@ -307,6 +307,14 @@ postflight_upstream_tools() {
       postflight_fail "missing official-repository tools: ${repo_tool_missing[*]}"
     fi
 
+    if [[ -z "${SKIP_LIBREOFFICE:-}" ]]; then
+      if dpkg -s libreoffice >/dev/null 2>&1; then
+        postflight_pass "LibreOffice is installed"
+      else
+        postflight_fail "LibreOffice is missing (set SKIP_LIBREOFFICE=1 on a headless host)"
+      fi
+    fi
+
     # Claude Desktop is optional (GUI app, beta, amd64/arm64 only), so its
     # absence is only a failure when this host was expected to install it.
     if [[ -n "${SKIP_CLAUDE_DESKTOP:-}" ]]; then

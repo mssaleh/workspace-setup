@@ -236,7 +236,38 @@ stage_packages() {
       esac
     fi
 
-    # 5. Tools NOT in apt at all — install via their official providers.
+    # 5. LibreOffice — the LibreOffice packaging team's PPA on Ubuntu.
+    #    Ubuntu's own repository lags upstream by a point release or two, so
+    #    the PPA is added first and the install then resolves to the current
+    #    stable series. Launchpad PPAs are Ubuntu-only: Debian keeps the
+    #    distribution package. GUI application, so SKIP_LIBREOFFICE=1 (the
+    #    same switch as the macOS cask) suppresses it on a headless host.
+    if [[ -n "${SKIP_LIBREOFFICE:-}" ]]; then
+      info "skipping LibreOffice (SKIP_LIBREOFFICE=1)"
+    else
+      if [[ "$DISTRO" == ubuntu ]] \
+         && ! find /etc/apt/sources.list.d -name 'libreoffice-ubuntu-ppa*' 2>/dev/null | grep -q .; then
+        info "adding the LibreOffice PPA (ppa:libreoffice/ppa)…"
+        sudo "${APT_ENV[@]}" "$PKGMGR" install -y software-properties-common >/dev/null 2>&1 || true
+        sudo "${APT_ENV[@]}" add-apt-repository -y ppa:libreoffice/ppa >/dev/null 2>&1 \
+          || warn "could not add the LibreOffice PPA — the distribution package will be used instead"
+        sudo "${APT_ENV[@]}" "$PKGMGR" update >/dev/null 2>&1 || true
+      fi
+      # Comparing against the candidate keeps this a no-op on rerun while still
+      # upgrading a host that already had the older distribution build.
+      local lo_installed lo_candidate
+      lo_installed=$(dpkg-query -W -f='${Version}' libreoffice 2>/dev/null || true)
+      lo_candidate=$(apt-cache policy libreoffice 2>/dev/null | awk '/Candidate:/{print $2}')
+      if [[ -n "$lo_installed" && "$lo_installed" == "$lo_candidate" ]]; then
+        ok "LibreOffice already at the newest available version ($lo_installed)"
+      else
+        info "installing LibreOffice…"
+        sudo "${APT_ENV[@]}" "$PKGMGR" install -y libreoffice \
+          || warn "LibreOffice install failed (skipped)"
+      fi
+    fi
+
+    # 6. Tools NOT in apt at all — install via their official providers.
     #    Exact user-path artifacts are probed so another same-named command on
     #    PATH cannot accidentally satisfy the declared provider.
     mkdir -p "$HOME/.local/bin"

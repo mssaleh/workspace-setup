@@ -56,3 +56,5 @@ PROVIDERS_COMMON_UPSTREAM=(rustup uv-standalone claude codex kitty)
 PROVIDERS_MACOS_UPSTREAM=(apple-container-signed-pkg rosetta)
 PROVIDERS_LINUX_UPSTREAM=(ruff yazi himalaya opencode)
 PROVIDERS_LINUX_OFFICIAL_REPO=(kubectl helm docker-engine docker-compose-v2 claude-desktop)
+# Ubuntu-only Launchpad PPAs. Debian falls back to the distribution package.
+PROVIDERS_UBUNTU_PPA=(libreoffice)

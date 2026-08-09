@@ -36,15 +36,50 @@ ln -s "$HOME/.opencode/bin/opencode" "$HOME/.local/bin/opencode"
 make_executable "$TEST_TMP/system/kubectl"
 make_executable "$TEST_TMP/system/helm"
 
+# The architecture branch must answer too: the Claude Desktop check consults
+# it, and a stub that only understands `-s` would silently skip that check
+# instead of exercising it.
 dpkg() {
-  [[ "$1" == -s && ( "$2" == kubectl || "$2" == helm ) ]]
+  case "$1" in
+    -s) [[ "$2" == kubectl || "$2" == helm || "$2" == libreoffice || "$2" == claude-desktop ]] ;;
+    --print-architecture) printf 'amd64\n' ;;
+    *) return 1 ;;
+  esac
 }
 
 POSTFLIGHT_PASSES=0
 POSTFLIGHT_FAILURES=0
 postflight_upstream_tools
 [[ "$POSTFLIGHT_FAILURES" == 0 ]]
+[[ "$POSTFLIGHT_PASSES" == 9 ]]
+
+# Both GUI applications are opt-out, and opting out must remove the check
+# rather than fail it — a headless host is a supported configuration.
+POSTFLIGHT_PASSES=0
+POSTFLIGHT_FAILURES=0
+SKIP_LIBREOFFICE=1 SKIP_CLAUDE_DESKTOP=1 postflight_upstream_tools
+[[ "$POSTFLIGHT_FAILURES" == 0 ]]
 [[ "$POSTFLIGHT_PASSES" == 7 ]]
+
+# A missing GUI application on a host that expects it is a real failure.
+dpkg() {
+  case "$1" in
+    -s) [[ "$2" == kubectl || "$2" == helm ]] ;;
+    --print-architecture) printf 'amd64\n' ;;
+    *) return 1 ;;
+  esac
+}
+POSTFLIGHT_PASSES=0
+POSTFLIGHT_FAILURES=0
+postflight_upstream_tools
+[[ "$POSTFLIGHT_FAILURES" == 2 ]]
+dpkg() {
+  case "$1" in
+    -s) [[ "$2" == kubectl || "$2" == helm || "$2" == libreoffice || "$2" == claude-desktop ]] ;;
+    --print-architecture) printf 'amd64\n' ;;
+    *) return 1 ;;
+  esac
+}
 
 # The verification must catch a partially missing upstream provider artifact.
 rm "$HOME/.local/bin/ruff"
