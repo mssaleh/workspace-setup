@@ -244,6 +244,8 @@ stage_git_config() {
     git config -f "$tmp" --add credential.https://github.com.helper "!$gh_bin auth git-credential"
     git config -f "$tmp" --add credential.https://gist.github.com.helper ''
     git config -f "$tmp" --add credential.https://gist.github.com.helper "!$gh_bin auth git-credential"
+    git config -f "$tmp" url."git@github.com:".pushInsteadOf https://github.com/
+    git config -f "$tmp" url."git@gist.github.com:".pushInsteadOf https://gist.github.com/
     install_regular_file "$tmp" "$dst" generated/gitconfig 0644
     rm -f "$tmp"
   fi
@@ -275,6 +277,17 @@ stage_git_config() {
   git_config_set_default "$dst" merge.conflictStyle zdiff3
   git_config_set_default "$dst" diff.colorMoved default
   git_config_set_default "$dst" init.defaultBranch main
+
+  # Push over SSH, fetch over HTTPS. A credential helper that stores its secret
+  # in the macOS Keychain cannot be read from an ssh session — the Security
+  # Server refuses to authorize a process with no GUI session and git fails
+  # with "Interaction with the Security Server is not allowed" — so an HTTPS
+  # push from `ssh mac` cannot authenticate at all. Rewriting only the *push*
+  # URL moves authentication onto the ssh key, which needs no keychain, while
+  # anonymous HTTPS fetching of public repositories keeps working without a
+  # key registered on GitHub.
+  git_config_set_default "$dst" url."git@github.com:".pushInsteadOf https://github.com/
+  git_config_set_default "$dst" url."git@gist.github.com:".pushInsteadOf https://gist.github.com/
 
   local credential_key helper
   for credential_key in \

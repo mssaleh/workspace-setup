@@ -87,6 +87,30 @@ git config -f "$HOME/.gitconfig" --unset init.defaultBranch
 stage_dotfiles
 [[ "$(git config -f "$HOME/.gitconfig" --get init.defaultBranch)" == main ]]
 [[ "$(config_sha256 "$redirected_gitconfig")" == "$redirected_before" ]]
+unset GIT_CONFIG_GLOBAL
+
+# Pushes are rewritten onto SSH so a session that cannot reach the macOS
+# Keychain can still authenticate. Only the push URL: rewriting fetch too would
+# break anonymous cloning on a host whose key is not on GitHub yet.
+[[ "$(git config -f "$HOME/.gitconfig" --get 'url.git@github.com:.pushInsteadOf')" == 'https://github.com/' ]]
+[[ -z "$(git config -f "$HOME/.gitconfig" --get 'url.git@github.com:.insteadOf' 2>/dev/null || true)" ]]
+
+# Reapplying must not accumulate duplicate rewrite rules.
+stage_dotfiles
+[[ "$(git config -f "$HOME/.gitconfig" --get-all 'url.git@github.com:.pushInsteadOf' | wc -l | tr -d ' ')" == 1 ]]
+
+# The merge path matters more than the generate path here: an already-configured
+# machine is exactly the one that has been failing to push over ssh. Removing
+# the rule from an existing ~/.gitconfig must restore it.
+git config -f "$HOME/.gitconfig" --unset-all 'url.git@github.com:.pushInsteadOf'
+stage_dotfiles
+[[ "$(git config -f "$HOME/.gitconfig" --get 'url.git@github.com:.pushInsteadOf')" == 'https://github.com/' ]]
+
+# A rewrite the user chose for themselves is left alone rather than replaced.
+git config -f "$HOME/.gitconfig" --unset-all 'url.git@github.com:.pushInsteadOf'
+git config -f "$HOME/.gitconfig" 'url.git@github.com:.pushInsteadOf' 'https://github.com/mssaleh/'
+stage_dotfiles
+[[ "$(git config -f "$HOME/.gitconfig" --get 'url.git@github.com:.pushInsteadOf')" == 'https://github.com/mssaleh/' ]]
 
 # A host that shares one skill store between agents through its own directory
 # links keeps that layout: the copies converge onto the shared file instead of

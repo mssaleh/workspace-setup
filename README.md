@@ -95,6 +95,42 @@ curl -fsSL https://raw.githubusercontent.com/mssaleh/workspace-setup/main/setup.
 - **Does not silently overwrite unknown user configuration.** Missing Git defaults and supported agent-policy keys are merged without removing unrelated values. An ambiguous file is preserved and causes postflight to report a conflict.
 - **Does not set the Apple Terminal font or colors.** The "Clear Dark" profile is installed with size/Option-as-Meta/bell settings, but the font (SF Mono) and exact colors require a one-time manual step in Terminal → Settings → Profile (the plist format needs opaque NSKeyedArchiver blobs that can't be generated inline).
 
+## Working on a Mac over SSH
+
+A Mac you reach with `ssh` cannot use the login Keychain the way a desktop
+session can. The Security Server refuses to authorize a process that has no GUI
+session, even while someone is logged in at the console, so anything that keeps
+its secret there fails — most visibly `git push` over HTTPS:
+
+```
+fatal: Interaction with the Security Server is not allowed. [0xffff9d24]
+fatal: could not read Username for 'https://github.com'
+```
+
+The generated `~/.gitconfig` avoids the problem instead of working around it:
+
+```ini
+[url "git@github.com:"]
+    pushInsteadOf = https://github.com/
+```
+
+Pushes go over SSH and authenticate with the key, which needs no Keychain, so
+they behave identically at the console and over `ssh`. Fetching and cloning
+public repositories stay on anonymous HTTPS, so a host whose key is not
+registered on GitHub yet is unaffected. Existing HTTPS remotes keep working —
+nothing needs re-cloning — and a rewrite rule you set yourself is preserved.
+
+Two things this does not change:
+
+- **`gh`** reads its token from the Keychain successfully over SSH, so it needs
+  no special handling. If it reports `The token in default is invalid`, the
+  token has expired: run `gh auth login`. That is not an SSH problem.
+- **A passphrase-protected key** still needs its passphrase given to an agent
+  once per session. `AddKeysToAgent yes` in the shipped `~/.ssh/config` keeps it
+  to once, and forwarding an agent from the machine you are sitting at
+  (`ForwardAgent yes`, scoped to that specific `Host`, never `Host *`) avoids
+  needing a key on the remote Mac at all.
+
 ## Coding-agent guardrails
 
 The script installs or narrowly merges denylists for all three coding agents so they **cannot** install/remove/upgrade user-level packages via `brew` (macOS) or `apt`/`apt-get`/`snap` (Linux):
