@@ -307,6 +307,19 @@ postflight_upstream_tools() {
       postflight_fail "missing official-repository tools: ${repo_tool_missing[*]}"
     fi
 
+    # Claude Desktop is optional (GUI app, beta, amd64/arm64 only), so its
+    # absence is only a failure when this host was expected to install it.
+    if [[ -n "${SKIP_CLAUDE_DESKTOP:-}" ]]; then
+      :
+    elif dpkg -s claude-desktop >/dev/null 2>&1; then
+      postflight_pass "Claude Desktop official apt package is installed"
+    else
+      case "$(dpkg --print-architecture 2>/dev/null || true)" in
+        amd64|arm64)
+          postflight_fail "Claude Desktop apt package is missing (set SKIP_CLAUDE_DESKTOP=1 on a headless host)" ;;
+      esac
+    fi
+
     if [[ -x "$HOME/.opencode/bin/opencode" \
           && -x "$HOME/.local/bin/opencode" ]] \
         && { { [[ -L "$HOME/.local/bin/opencode" ]] \

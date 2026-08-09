@@ -25,7 +25,7 @@ Apple Container requires Apple silicon and macOS 26 or later. On an older/Intel 
 | Stage | What |
 |---|---|
 | **bootstrap** | Discovers Homebrew at its actual prefix or installs it (macOS); ensures curl + git (Linux). |
-| **packages** | Installs the cross-platform CLI toolbox: `eza`, `fd`, `bat`, `fzf`, `zoxide`, `yazi`, `git`, `git-delta` (`delta`), `lazygit`, `gh`, `tmux`, `mosh`, `rsync`, `rclone`, `nmap`, `jq`, `yq`, `pandoc`, `7zz` (`7z`), `node`, `uv`, `ruff`, `helm`, `kubectl`, `cosign`, `ffmpeg`, `poppler` (`poppler-utils`), `nano`, `himalaya`, `ncdu`, `shellcheck`, `pre-commit`, … |
+| **packages** | Installs the cross-platform CLI toolbox: `eza`, `fd`, `bat`, `ripgrep` (`rg`), `fzf`, `zoxide`, `yazi`, `git`, `git-delta` (`delta`), `lazygit`, `gh`, `tmux`, `mosh`, `rsync`, `rclone`, `nmap`, `jq`, `yq`, `pandoc`, `7zz` (`7z`), `node`, `uv`, `ruff`, `helm`, `kubectl`, `cosign`, `ffmpeg`, `poppler` (`poppler-utils`), `nano`, `himalaya`, `ncdu`, `shellcheck`, `pre-commit`, … On Linux it also installs the **Claude Desktop** app from Anthropic's official apt repository (skip with `SKIP_CLAUDE_DESKTOP=1`). |
 | **docker** | Linux only: installs the official **Docker Engine** + **Docker Compose v2** from download.docker.com. A complete, responsive official installation is a no-op on rerun. |
 | **toolchains** | Installs upstream **rustup**, Astral's standalone **uv/uvx** (plus its receipt), native Claude Code and Codex CLIs, and upstream opencode on Linux. The separate Homebrew `uv` formula remains an intentional backup. |
 | **configuration** | Converges ordinary files under `$HOME`; repairs old links into temporary checkouts, atomically upgrades exact known historical versions, semantically merges supported JSON/TOML/Git formats, preserves ambiguous user-owned content, and installs the coding-agent skills into each agent home. |
@@ -72,6 +72,7 @@ All optional:
 | `SKIP_DOCKER` | (unset) | Set to `1` to skip the Docker Engine install stage (Linux only) |
 | `SKIP_CONTAINER` | (unset) | Set to `1` to skip Apple Container installation/startup (macOS only) |
 | `SKIP_LIBREOFFICE` | (unset) | Set to `1` to skip the LibreOffice cask (macOS only) |
+| `SKIP_CLAUDE_DESKTOP` | (unset) | Set to `1` to skip the Claude Desktop app — it is a GUI application, so set this on a headless host (Linux only) |
 | `SSH_KEY_PASSPHRASE` | (unset) | Linux uses an interactive passphrase by default; set `none` for a disposable host |
 | `REPO_ARCHIVE_URL` | GitHub `main` archive | Source archive used for the temporary `curl\|bash` payload |
 | `REPO_URL` | (unset) | Optional git repository override; requires `git` before bootstrap |
@@ -178,6 +179,7 @@ The script detects the OS and adapts:
 | Nerd Font | brew cask (`JetBrainsMono Nerd Font`) | GitHub release → `~/.local/share/fonts` (`JetBrainsMono Nerd Font Mono` variant — single-width icons for TUI alignment) |
 | Maccy clipboard manager | brew cask | skipped (Linux has its own clipboard managers) |
 | LibreOffice | brew cask (skip with `SKIP_LIBREOFFICE=1`) | skipped |
+| Claude Desktop | skipped (install from claude.ai) | official Anthropic apt repo, key fingerprint verified (skip with `SKIP_CLAUDE_DESKTOP=1`); beta, amd64/arm64 only |
 | Tools not in default apt repo (helm, kubectl, himalaya, ruff, yazi, opencode) | Homebrew formula | official apt repo (helm, kubectl) / official installers (himalaya, opencode) / GitHub release → `~/.local/bin` (ruff, yazi) |
 | Kitty | upstream app installer → `/Applications/kitty.app` | upstream app installer → `~/.local/kitty.app` |
 | Dotfiles Homebrew paths | `/opt/homebrew/...` (via `$BREW_PREFIX`) | guarded by `command -v brew` / `$BREW_PREFIX`; no-op when brew is absent |

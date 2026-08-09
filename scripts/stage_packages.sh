@@ -191,7 +191,52 @@ stage_packages() {
       rm -f "$helm_key"
     fi
 
-    # 4. Tools NOT in apt at all — install via their official providers.
+    # 4. Claude Desktop — official Anthropic apt repo (downloads.claude.ai).
+    #    Linux support is beta and Debian-only: Ubuntu 22.04+/Debian 12+ on
+    #    amd64 or arm64. The repository publishes nothing for other
+    #    architectures, so skip rather than fail there. This is a GUI
+    #    application; set SKIP_CLAUDE_DESKTOP=1 on a headless host.
+    #    The signing key fingerprint is published in Anthropic's install
+    #    documentation and verified before the key is trusted, matching the
+    #    helm handling above.
+    if [[ -n "${SKIP_CLAUDE_DESKTOP:-}" ]]; then
+      info "skipping Claude Desktop (SKIP_CLAUDE_DESKTOP=1)"
+    elif dpkg -s claude-desktop >/dev/null 2>&1; then
+      ok "Claude Desktop official apt package already installed"
+    else
+      local claude_arch; claude_arch=$(dpkg --print-architecture 2>/dev/null || true)
+      case "$claude_arch" in
+        amd64|arm64)
+          info "adding Claude Desktop apt repo (downloads.claude.ai)…"
+          sudo "${APT_ENV[@]}" "$PKGMGR" install -y curl gnupg >/dev/null 2>&1 || true
+          local claude_key; claude_key=$(mktemp)
+          if curl -fsSL https://downloads.claude.ai/claude-desktop/key.asc -o "$claude_key" 2>/dev/null; then
+            local claude_fp
+            claude_fp=$(gpg --show-keys --with-colons "$claude_key" 2>/dev/null \
+              | awk -F: '$1 == "fpr" {print $10}' | head -n1)
+            if [[ "$claude_fp" == "31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE" ]]; then
+              sudo install -m 0644 "$claude_key" \
+                /usr/share/keyrings/claude-desktop-archive-keyring.asc
+              echo "deb [arch=amd64,arm64 signed-by=/usr/share/keyrings/claude-desktop-archive-keyring.asc] https://downloads.claude.ai/claude-desktop/apt/stable stable main" \
+                | sudo tee /etc/apt/sources.list.d/claude-desktop.list >/dev/null
+              sudo "${APT_ENV[@]}" "$PKGMGR" update >/dev/null 2>&1 || true
+              sudo "${APT_ENV[@]}" "$PKGMGR" install -y claude-desktop \
+                || warn "claude-desktop install failed — see https://code.claude.com/docs/en/desktop-linux"
+            else
+              warn "Claude Desktop: GPG key fingerprint mismatch (expected 31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE, got '${claude_fp:-empty}') — skipping for safety"
+            fi
+          else
+            warn "Claude Desktop: could not download the signing key from downloads.claude.ai — skipping"
+          fi
+          rm -f "$claude_key"
+          ;;
+        *)
+          warn "Claude Desktop: no packages published for architecture '${claude_arch:-unknown}' — skipping"
+          ;;
+      esac
+    fi
+
+    # 5. Tools NOT in apt at all — install via their official providers.
     #    Exact user-path artifacts are probed so another same-named command on
     #    PATH cannot accidentally satisfy the declared provider.
     mkdir -p "$HOME/.local/bin"

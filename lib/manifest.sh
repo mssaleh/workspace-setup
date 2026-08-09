@@ -16,7 +16,7 @@ BREW_TAPS=(
 
 PACKAGES_BREW=(
   bash bash-completion@2 zsh-autosuggestions zsh-syntax-highlighting coreutils
-  eza fd bat zoxide yazi fzf chafa
+  eza fd bat ripgrep zoxide yazi fzf chafa
   git git-delta lazygit git-filter-repo pre-commit gh shellcheck
   mosh tmux rsync rclone nmap curl wget
   jq yq pandoc sevenzip
@@ -38,7 +38,7 @@ PACKAGES_BREW_CASK=(
 # explicitly below instead of being smuggled into this array.
 PACKAGES_APT=(
   bash-completion coreutils
-  fd-find bat zoxide fzf
+  fd-find bat ripgrep zoxide fzf
   git lazygit gh shellcheck
   git-filter-repo pre-commit git-delta
   tmux rsync rclone nmap wget curl
@@ -55,4 +55,4 @@ PACKAGES_APT=(
 PROVIDERS_COMMON_UPSTREAM=(rustup uv-standalone claude codex kitty)
 PROVIDERS_MACOS_UPSTREAM=(apple-container-signed-pkg rosetta)
 PROVIDERS_LINUX_UPSTREAM=(ruff yazi himalaya opencode)
-PROVIDERS_LINUX_OFFICIAL_REPO=(kubectl helm docker-engine docker-compose-v2)
+PROVIDERS_LINUX_OFFICIAL_REPO=(kubectl helm docker-engine docker-compose-v2 claude-desktop)
