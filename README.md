@@ -73,6 +73,7 @@ All optional:
 | `SKIP_CONTAINER` | (unset) | Set to `1` to skip Apple Container installation/startup (macOS only) |
 | `SKIP_LIBREOFFICE` | (unset) | Set to `1` to skip LibreOffice — a GUI application, so set this on a headless host (both platforms) |
 | `SKIP_CLAUDE_DESKTOP` | (unset) | Set to `1` to skip the Claude Desktop app — it is a GUI application, so set this on a headless host (Linux only) |
+| `SKIP_HEADLESS_CREDENTIALS` | (unset) | Set to `1` to skip the check that credentials are reachable without a GUI session, on a Mac only ever used at its own keyboard (macOS only) |
 | `SSH_KEY_PASSPHRASE` | (unset) | Linux uses an interactive passphrase by default; set `none` for a disposable host |
 | `REPO_ARCHIVE_URL` | GitHub `main` archive | Source archive used for the temporary `curl\|bash` payload |
 | `REPO_URL` | (unset) | Optional git repository override; requires `git` before bootstrap |
@@ -120,16 +121,57 @@ public repositories stay on anonymous HTTPS, so a host whose key is not
 registered on GitHub yet is unaffected. Existing HTTPS remotes keep working —
 nothing needs re-cloning — and a rewrite rule you set yourself is preserved.
 
-Two things this does not change:
+### The general rule
 
-- **`gh`** reads its token from the Keychain successfully over SSH, so it needs
-  no special handling. If it reports `The token in default is invalid`, the
-  token has expired: run `gh auth login`. That is not an SSH problem.
-- **A passphrase-protected key** still needs its passphrase given to an agent
-  once per session. `AddKeysToAgent yes` in the shipped `~/.ssh/config` keeps it
-  to once, and forwarding an agent from the machine you are sitting at
-  (`ForwardAgent yes`, scoped to that specific `Host`, never `Host *`) avoids
-  needing a key on the remote Mac at all.
+This is not a git problem, or a bug in any particular tool. Measured on macOS
+from an `ssh` session:
+
+| Keychain operation | Result |
+|---|---|
+| Read item **metadata** (that it exists, its attributes) | works |
+| Read an item's **secret** | `-25308 errSecInteractionNotAllowed` |
+| **Create** or update an item | `-25308` |
+| Query keychain settings | `-25308` |
+
+Every failing operation needs the keychain unlocked for the calling session,
+which raises an authorization prompt that no GUI session can display, so the
+Security framework refuses instead of blocking. **Over SSH you can see that a
+secret exists but can never read or write one.** Any CLI that keeps its secret
+in the login Keychain is therefore broken over SSH by construction — which is
+why the same failure keeps reappearing across unrelated tools.
+
+Metadata being readable is what makes it confusing: a tool can report that it
+is signed in, and even name the account, while being unable to produce the
+token.
+
+The escape hatches do not generalise. `security unlock-keychain` needs the
+login password every session. `launchctl asuser`, which borrows the console
+session, needs root *and* someone logged in at the console — on a Mac where
+`sudo` asks for a password, it cannot run unattended at all.
+
+So this setup does not try to unlock the Keychain. It keeps CLI secrets out of
+it, preferring key-based authentication and falling back to a file store only
+where a service offers nothing else:
+
+| Tool | Where its secret lives here | Why |
+|---|---|---|
+| git → GitHub | nowhere — the ssh key authenticates | `pushInsteadOf`, above |
+| ssh, servers, registries with key auth | `~/.ssh` + agent | keys are files; no Keychain involved |
+| `gh` | `~/.config/gh/hosts.yml` (0600) | no key-based mode exists; use `gh auth login --insecure-storage` |
+| Claude Code | `~/.claude/.credentials.json` (0600) | first-class file fallback, the same path used on Linux |
+| aws, npm, kube | already file-based | unaffected |
+
+File stores are protected at rest by FileVault and by `0600` permissions — the
+same posture Linux has always had, where no Keychain exists. Postflight checks
+where each credential actually lives and fails with the specific fix, so a
+machine cannot quietly return to the broken state. Set
+`SKIP_HEADLESS_CREDENTIALS=1` on a Mac only ever used at its own keyboard.
+
+A passphrase-protected key still needs its passphrase given to an agent once
+per session; `AddKeysToAgent yes` in the shipped `~/.ssh/config` keeps it to
+once, and forwarding an agent from the machine you are sitting at
+(`ForwardAgent yes`, scoped to that specific `Host`, never `Host *`) avoids
+needing a key on the remote Mac at all.
 
 ## Coding-agent guardrails
 

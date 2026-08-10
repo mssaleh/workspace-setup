@@ -46,6 +46,11 @@ chmod +x "$HOME/.cargo/bin/rustup"
 # shellcheck disable=SC2016 # literal content for the fixture's future shell
 printf '%s\n' 'export PATH="$HOME/.cargo/bin:$PATH"' > "$HOME/.cargo/env"
 printf '%s\n' '{}' > "$HOME/.config/uv/uv-receipt.json"
+# A correctly provisioned Mac keeps Claude Code's credentials in its file store,
+# because the login Keychain cannot serve them to an ssh session.
+mkdir -p "$HOME/.claude"
+printf '%s\n' '{"claudeAiOauth":{}}' > "$HOME/.claude/.credentials.json"
+chmod 600 "$HOME/.claude/.credentials.json"
 
 stage_dotfiles
 stage_postflight

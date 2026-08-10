@@ -367,6 +367,53 @@ postflight_upstream_tools() {
   fi
 }
 
+# A macOS login Keychain is unusable for secret material from an ssh session:
+# reading or storing a secret needs an authorization prompt that no GUI session
+# can display, so the Security framework returns errSecInteractionNotAllowed
+# (-25308). Item metadata still reads fine, which is why a tool can report that
+# it is signed in while being unable to produce the token.
+#
+# The consequence is a property of the platform, not of any one tool, so this
+# checks where each credential actually lives rather than whether some command
+# happens to succeed in the session running the setup. A secret in the Keychain
+# is a secret the same machine cannot use over ssh.
+#
+# Set SKIP_HEADLESS_CREDENTIALS=1 on a Mac only ever used at its own keyboard.
+postflight_headless_credentials() {
+  [[ "$OS_KIND" == macos ]] || return 0
+  [[ -z "${SKIP_HEADLESS_CREDENTIALS:-}" ]] || return 0
+
+  # git: an ssh push URL authenticates with the key, so no credential helper —
+  # and therefore no Keychain — is consulted for GitHub at all.
+  if [[ "$(git config --global --get 'url.git@github.com:.pushInsteadOf' 2>/dev/null)" == 'https://github.com/' ]]; then
+    postflight_pass "git pushes to GitHub use ssh, not a Keychain-backed helper"
+  else
+    postflight_fail "git pushes to GitHub would use a credential helper; an ssh session cannot read one from the Keychain"
+  fi
+
+  # gh has no key-based mode, so its token has to live in a file to be
+  # reachable. hosts.yml listing an account but carrying no token means the
+  # token is in the Keychain, where `gh auth token` returns nothing over ssh.
+  local gh_hosts="$HOME/.config/gh/hosts.yml"
+  if [[ -f "$gh_hosts" ]] && grep -q 'users:' "$gh_hosts" 2>/dev/null; then
+    if grep -q 'oauth_token:' "$gh_hosts" 2>/dev/null; then
+      postflight_pass "gh token is in a file store and readable without a GUI session"
+    else
+      postflight_fail "gh token is Keychain-only — unusable over ssh; re-run: gh auth login --insecure-storage"
+    fi
+  fi
+
+  # Claude Code prefers its file store when present and falls back to the
+  # Keychain otherwise. A login performed at the desk writes only the Keychain.
+  if [[ -x "$HOME/.local/bin/claude" ]]; then
+    if [[ -s "$HOME/.claude/.credentials.json" ]]; then
+      postflight_pass "Claude Code credentials are in its file store"
+    else
+      postflight_fail "Claude Code credentials are Keychain-only — unusable over ssh; from a desktop terminal run: security find-generic-password -a \"\$USER\" -s 'Claude Code-credentials' -w > ~/.claude/.credentials.json && chmod 600 ~/.claude/.credentials.json"
+    fi
+  fi
+}
+
 postflight_containers() {
   if [[ "$OS_KIND" == macos ]]; then
     [[ -n "${SKIP_CONTAINER:-}" ]] && return 0
@@ -412,6 +459,7 @@ stage_postflight() {
   postflight_packages
   postflight_shell_paths
   postflight_upstream_tools
+  postflight_headless_credentials
   postflight_containers
 
   if ((CONFIG_CONFLICT_COUNT > 0)); then

@@ -19,6 +19,8 @@
 #   SKIP_CONTAINER — set to 1 to skip Apple Container (macOS only)
 #   SKIP_LIBREOFFICE — set to 1 to skip LibreOffice (both platforms)
 #   SKIP_CLAUDE_DESKTOP — set to 1 to skip the Claude Desktop app (Linux only)
+#   SKIP_HEADLESS_CREDENTIALS — set to 1 to skip the check that credentials are
+#                reachable without a GUI session (macOS only)
 #   SSH_KEY_PASSPHRASE — set to "none" for a passphrase-less Linux key
 #   REPO_ARCHIVE_URL — override the streamed payload archive URL
 #   REPO_URL — use a temporary git clone instead (requires git up front)
