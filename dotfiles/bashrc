@@ -180,14 +180,45 @@ function ds() {
     echo "ds: mosh is not installed locally" >&2
     return 127
   fi
-  if ! command ssh -o BatchMode=yes -o ConnectTimeout=8 -o ConnectionAttempts=1 "$host" \
-      'command -v mosh-server >/dev/null && command -v tmux >/dev/null' >/dev/null; then
-    echo "ds: cannot reach $host over SSH, or remote is missing mosh-server/tmux" >&2
+  # Probe for mosh-server + tmux before handing over to mosh, whose own failure
+  # output is opaque. Deliberately no BatchMode: on a first connection ssh has
+  # to be able to ask you to accept the host key, and BatchMode turns that into
+  # "Host key verification failed" — which the old single-branch check then
+  # misreported as a missing mosh-server. ssh reserves exit 255 for its own
+  # errors, so the two failure modes stay distinguishable.
+  local probe_status
+  command ssh -o ConnectTimeout=8 -o ConnectionAttempts=1 "$host" \
+    'command -v mosh-server >/dev/null && command -v tmux >/dev/null' >/dev/null
+  probe_status=$?
+  if [ "$probe_status" -eq 255 ]; then
+    echo "ds: ssh to $host failed — unreachable, host key rejected, or auth refused (see ssh's message above)" >&2
     echo "ds: check with: ssh -o ConnectTimeout=8 $host" >&2
     return 255
+  elif [ "$probe_status" -ne 0 ]; then
+    echo "ds: $host is reachable but has no mosh-server and/or tmux" >&2
+    echo "ds: install them with: ssh $host 'sudo apt install -y mosh tmux'" >&2
+    return "$probe_status"
   fi
+  # A client that dies without exiting cleanly — terminal closed, laptop lid,
+  # mosh's own `Ctrl-^ .` — strands a mosh-server that is still holding a pty
+  # with a tmux client attached to it. mosh has no reattach, so that server is
+  # unreachable forever. Two settings make it self-healing:
+  #
+  #   -D  on reattach evicts the stale tmux client. That client is the stranded
+  #       mosh-server's only child, so the server exits with it — every `ds`
+  #       collects the previous corpse. The trade-off is one client at a time:
+  #       two machines can no longer share a live view of the session.
+  #   MOSH_SERVER_NETWORK_TMOUT  retires an abandoned server after a week with
+  #       no client contact, covering the case where you never return to this
+  #       host. It ends only the mosh-server; the tmux session and every shell
+  #       in it keep running, detached, exactly as after Ctrl-b d.
+  #
+  # mosh interpolates --server into the remote command line without quoting it,
+  # which is what lets the `env` prefix survive to the remote shell.
   LC_ALL=en_US.UTF-8 TERM=xterm-256color \
-    mosh --ssh="ssh -o ConnectTimeout=8 -o ConnectionAttempts=1" "$host" -- tmux new -A -s main
+    mosh --ssh="ssh -o ConnectTimeout=8 -o ConnectionAttempts=1" \
+         --server='env MOSH_SERVER_NETWORK_TMOUT=604800 mosh-server' \
+         "$host" -- tmux new -A -D -s main
 }
 
 # ssh: Kitty advertises TERM=xterm-kitty locally. OpenSSH sends that terminal
@@ -205,7 +236,19 @@ function ssh() {
 function s() { ssh "$@"; }
 
 # ks: opt in to Kitty's ssh kitten for hosts where you want Kitty integration.
-function ks() { if command -v kitten >/dev/null 2>&1; then kitten ssh "$@"; else ssh "$@"; fi; }
+# The kitten refuses to run outside a kitty window ("Error: The SSH kitten is
+# meant to run inside a kitty window") — it needs kitty's escape-code channel to
+# ship terminfo and shell integration to the remote. Testing for the binary
+# alone was the wrong gate: kitten is on PATH in every terminal, so from GNOME
+# Terminal or a plain tty ks errored out instead of taking the ssh fallback that
+# the else-branch exists for.
+function ks() {
+  if [ -n "$KITTY_WINDOW_ID" ] && command -v kitten >/dev/null 2>&1; then
+    kitten ssh "$@"
+  else
+    ssh "$@"
+  fi
+}
 
 # fzf: fuzzy finder. Ctrl-R fuzzy history · Ctrl-T insert file paths · Alt-C cd
 # into a subdir · `**<Tab>` fuzzy completion. Official bash integration:
