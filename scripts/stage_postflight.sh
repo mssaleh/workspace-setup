@@ -363,6 +363,23 @@ postflight_upstream_tools() {
       else
         postflight_fail "JetBrainsMono Nerd Font Mono files are missing"
       fi
+
+      # Binaries on PATH are not the same as an installed application. Check the
+      # desktop entry exists *and* points at the real binary — a stock `Exec=kitty`
+      # copied straight from the app tree launches nothing from GNOME, which looks
+      # identical to no integration at all from the user's side.
+      local kitty_entry="$HOME/.local/share/applications/kitty.desktop"
+      if [[ -f "$kitty_entry" ]] \
+          && grep -q "^Exec=$HOME/.local/kitty.app/bin/kitty" "$kitty_entry"; then
+        postflight_pass "kitty desktop entry is installed with absolute paths"
+      else
+        postflight_fail "kitty desktop entry is missing or does not point at the installed binary"
+      fi
+      if [[ -e "$HOME/.terminfo/x/xterm-kitty" ]]; then
+        postflight_pass "xterm-kitty terminfo is on the default search path"
+      else
+        postflight_fail "xterm-kitty terminfo is not linked into ~/.terminfo"
+      fi
     fi
   fi
 }

@@ -97,6 +97,80 @@ install_kitty_upstream() {
     fail "kitty installer completed without the expected application binaries"
   ensure_cli_symlink "$kitty_bin" "$HOME/.local/bin/kitty"
   ensure_cli_symlink "$kitten_bin" "$HOME/.local/bin/kitten"
+
+  if [[ "$OS_KIND" == linux ]]; then
+    install_kitty_desktop_integration
+  fi
+}
+
+# The upstream binary installer unpacks a self-contained ~/.local/kitty.app and
+# stops there: it does not touch PATH, the application menu, or the desktop's
+# terminal preference. On macOS the .app bundle is enough, but on Linux those
+# are separate steps documented at https://sw.kovidgoyal.net/kitty/binary/, and
+# skipping them leaves kitty invisible to GNOME — not in the app grid, not
+# offered as the terminal, not usable for "Open in Terminal". Everything below
+# is derived from the installed tree, so it is regenerated on each run rather
+# than preserved: the desktop entries embed absolute paths into ~/.local
+# kitty.app that must follow the app if it moves or is reinstalled.
+install_kitty_desktop_integration() {
+  local app="$HOME/.local/kitty.app"
+  local apps_dir="$HOME/.local/share/applications"
+  local icon="$app/share/icons/hicolor/256x256/apps/kitty.png"
+  local entry src
+
+  mkdir -p "$apps_dir"
+  for entry in kitty.desktop kitty-open.desktop; do
+    src="$app/share/applications/$entry"
+    if [[ ! -f "$src" ]]; then
+      warn "kitty: $entry missing from the installed app; skipping desktop entry"
+      continue
+    fi
+    # Rewrite the relative Exec/Icon/TryExec keys to absolute paths. The shipped
+    # entries say `Exec=kitty`, which only resolves for a desktop environment
+    # that already has ~/.local/bin on its PATH — GNOME's session PATH usually
+    # does not include it, so the launcher silently fails to start.
+    sed -e "s|^Icon=kitty$|Icon=$icon|" \
+        -e "s|^TryExec=kitty$|TryExec=$app/bin/kitty|" \
+        -e "s|^Exec=kitty|Exec=$app/bin/kitty|" \
+        "$src" > "$apps_dir/$entry"
+  done
+
+  # Icon in the hicolor theme too, so anything reading by icon name rather than
+  # by absolute path (notification daemons, some docks) still finds it.
+  if [[ -f "$icon" ]]; then
+    mkdir -p "$HOME/.local/share/icons/hicolor/256x256/apps"
+    cp -f "$icon" "$HOME/.local/share/icons/hicolor/256x256/apps/kitty.png"
+  fi
+
+  if command -v update-desktop-database >/dev/null 2>&1; then
+    update-desktop-database "$apps_dir" >/dev/null 2>&1 || true
+  fi
+
+  # xdg-terminal-exec is what Ubuntu's "Open in Terminal" and
+  # org.gnome.desktop.default-applications.terminal now dispatch through; it
+  # reads an ordered preference list. Create it, but treat an existing list as
+  # a user choice rather than reordering it.
+  local term_list="$HOME/.config/xdg-terminals.list"
+  if [[ ! -e "$term_list" ]]; then
+    mkdir -p "$(dirname "$term_list")"
+    printf 'kitty.desktop\n' > "$term_list"
+    info "set kitty as the preferred terminal (xdg-terminals.list)"
+  elif ! grep -qx 'kitty.desktop' "$term_list"; then
+    warn "preserving your terminal preference in $term_list (kitty.desktop not listed)"
+  fi
+
+  # kitty sets TERM=xterm-kitty and ships the matching terminfo inside its own
+  # tree, exported via TERMINFO to its children. Anything that loses that
+  # variable while keeping TERM — sudo with env_reset, a detached tmux server,
+  # an incoming ssh session — then has no entry to read. A link into ~/.terminfo
+  # puts it on ncurses' default search path and closes that gap.
+  local ti_src="$app/lib/kitty/terminfo/x/xterm-kitty"
+  if [[ -f "$ti_src" ]]; then
+    mkdir -p "$HOME/.terminfo/x"
+    ensure_cli_symlink "$ti_src" "$HOME/.terminfo/x/xterm-kitty"
+  fi
+
+  ok "kitty desktop integration installed"
 }
 
 stage_fonts_terminal() {
