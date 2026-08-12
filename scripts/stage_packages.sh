@@ -52,6 +52,72 @@ install_executable_if_path_free() {
   fi
 }
 
+# Configure the NodeSource apt repository. Each step is a no-op when the state
+# it produces is already on disk, so the common case touches nothing and skips
+# the apt update entirely. Returns non-zero if the repo could not be trusted,
+# which leaves the host on whatever Node it already had rather than installing
+# from an unverified key.
+install_nodesource_repo() {
+  local keyring="$1" sources="$2" fp_expected="$3"
+  local arch key fp desired changed=0
+
+  arch=$(dpkg --print-architecture 2>/dev/null || printf 'amd64')
+
+  if [[ ! -s "$keyring" ]] \
+     || ! gpg --show-keys --with-colons "$keyring" 2>/dev/null \
+        | awk -F: '$1 == "fpr" {print $10}' | head -n1 | grep -Fxq "$fp_expected"; then
+    sudo "${APT_ENV[@]}" "$PKGMGR" install -y curl gnupg ca-certificates >/dev/null 2>&1 || true
+    key=$(mktemp) || return 1
+    if ! curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key -o "$key" 2>/dev/null; then
+      warn "Node.js: could not download the signing key from deb.nodesource.com — skipping"
+      rm -f "$key"
+      return 1
+    fi
+    fp=$(gpg --show-keys --with-colons "$key" 2>/dev/null \
+      | awk -F: '$1 == "fpr" {print $10}' | head -n1)
+    if [[ "$fp" != "$fp_expected" ]]; then
+      warn "Node.js: GPG key fingerprint mismatch (expected $fp_expected, got '${fp:-empty}') — skipping for safety"
+      rm -f "$key"
+      return 1
+    fi
+    sudo install -m 0755 -d "$(dirname "$keyring")"
+    if ! gpg --dearmor < "$key" | sudo tee "$keyring" >/dev/null; then
+      warn "Node.js: could not write the keyring to $keyring — skipping"
+      rm -f "$key"
+      return 1
+    fi
+    sudo chmod 0644 "$keyring"
+    rm -f "$key"
+    changed=1
+  fi
+
+  # deb822 format, matching what NodeSource's own setup script writes.
+  desired=$(printf 'Types: deb\nURIs: https://deb.nodesource.com/node_%s.x\nSuites: nodistro\nComponents: main\nArchitectures: %s\nSigned-By: %s\n' \
+    "$NODE_MAJOR" "$arch" "$keyring")
+  if [[ ! -f "$sources" ]] || ! printf '%s' "$desired" | cmp -s - "$sources"; then
+    sudo install -m 0755 -d "$(dirname "$sources")"
+    printf '%s' "$desired" | sudo tee "$sources" >/dev/null
+    changed=1
+  fi
+
+  if ((changed)); then
+    sudo "${APT_ENV[@]}" "$PKGMGR" update >/dev/null 2>&1 || true
+  fi
+  return 0
+}
+
+# The NodeSource package declares Conflicts/Replaces against the distribution's
+# separate `npm` package, so apt retires that one on its own rather than
+# refusing the install; the NodeSource build carries its own matching npm.
+install_nodesource_package() {
+  if sudo "${APT_ENV[@]}" "$PKGMGR" install -y nodejs; then
+    ok "Node.js $(dpkg-query -W -f='${Version}' nodejs 2>/dev/null || printf unknown) installed from NodeSource"
+  else
+    warn "Node.js install failed — see https://github.com/nodesource/distributions"
+    return 1
+  fi
+}
+
 stage_packages() {
   local missing=()
   local pkg
@@ -267,7 +333,41 @@ stage_packages() {
       fi
     fi
 
-    # 6. Tools NOT in apt at all — install via their official providers.
+    # 6. Node.js — official NodeSource apt repo (deb.nodesource.com).
+    #    Ubuntu's own `nodejs` trails upstream by several majors and its `npm`
+    #    is a separately versioned package; the NodeSource build bundles the
+    #    matching npm and tracks the current release line.
+    #
+    #    NodeSource publish a setup_<major>.x script that is meant to be piped
+    #    into `sudo bash`. It is not used here: it rewrites the keyring and the
+    #    source list on every invocation and runs its own apt update, so a
+    #    re-run is never a no-op. The steps it performs are reproduced inline
+    #    instead, each one guarded by the state it would produce, which is what
+    #    makes re-running this stage free. The key fingerprint is verified
+    #    before it is trusted, matching the helm and Claude Desktop handling.
+    local node_keyring=/usr/share/keyrings/nodesource.gpg
+    local node_sources=/etc/apt/sources.list.d/nodesource.sources
+    local node_fp_expected=6F71F525282841EEDAF851B42F59B5F99B1BE0B4
+    local node_installed node_major_installed=""
+    node_installed=$(dpkg-query -W -f='${Version}' nodejs 2>/dev/null || true)
+    [[ -n "$node_installed" ]] && node_major_installed=${node_installed%%.*}
+
+    if [[ "$node_installed" == *nodesource* && "$node_major_installed" == "$NODE_MAJOR" ]]; then
+      ok "Node.js $node_installed already installed from NodeSource"
+    elif [[ -n "$node_installed" && "$node_installed" != *nodesource* ]] \
+         && ! apt-cache policy nodejs 2>/dev/null | grep -q deb.nodesource.com; then
+      # A distribution or third-party nodejs with no NodeSource repo configured
+      # yet: adding the repo below is what lets apt upgrade across providers.
+      info "replacing the distribution Node.js ($node_installed) with NodeSource ${NODE_MAJOR}.x…"
+      install_nodesource_repo "$node_keyring" "$node_sources" "$node_fp_expected" \
+        && install_nodesource_package
+    else
+      info "installing Node.js ${NODE_MAJOR}.x (NodeSource apt repo)…"
+      install_nodesource_repo "$node_keyring" "$node_sources" "$node_fp_expected" \
+        && install_nodesource_package
+    fi
+
+    # 7. Tools NOT in apt at all — install via their official providers.
     #    Exact user-path artifacts are probed so another same-named command on
     #    PATH cannot accidentally satisfy the declared provider.
     mkdir -p "$HOME/.local/bin"

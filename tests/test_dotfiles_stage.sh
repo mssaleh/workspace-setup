@@ -2,14 +2,32 @@
 set -euo pipefail
 
 TEST_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+# shellcheck disable=SC1091
+. "$TEST_ROOT/tests/helpers.sh"
+TEST_NAME='dotfiles stage tests'
+
 TEST_TMP=$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-stage-test.XXXXXX")
 trap 'rm -rf "$TEST_TMP"' EXIT
 
 REPO_DIR=$TEST_ROOT
 HOME="$TEST_TMP/home"
 USER='test'
-OS_KIND=macos
-BREW_BIN=$(command -v brew)
+# Almost everything this stage does is platform-neutral: legacy-link repair,
+# the git config merge, the npm config merge, idempotency across reruns. Only
+# the zsh dotfiles and the Apple Container skill are macOS-owned, and verifying
+# those needs a real brew and zsh. Rather than refuse to run at all without
+# them — which is what hardcoding OS_KIND=macos plus `BREW_BIN=$(command -v
+# brew)` did, dying on `set -e` before the first assertion — run as the host
+# this actually is and assert the macOS-owned artifacts only where they exist.
+if macos_simulation_available; then
+  OS_KIND=macos
+  BREW_BIN=$(command -v brew)
+elif [[ "$(host_os_kind)" == macos ]]; then
+  test_skip 'macOS host without Homebrew or zsh'
+else
+  OS_KIND=linux
+  BREW_BIN=''
+fi
 export REPO_DIR HOME USER OS_KIND BREW_BIN
 mkdir -p "$HOME"
 repo_dir() { printf '%s\n' "$REPO_DIR"; }
@@ -27,12 +45,19 @@ stage_dotfiles
 [[ "$CONFIG_CONFLICT_COUNT" == 0 ]]
 
 # Both agents must find the skill in their own home, and its helper script must
-# stay executable so an agent can actually run it.
-for agent_home in "$HOME/.claude" "$HOME/.codex"; do
-  [[ -f "$agent_home/skills/apple-container-amd64/SKILL.md" ]]
-  grep -Fq 'name: apple-container-amd64' "$agent_home/skills/apple-container-amd64/SKILL.md"
-  [[ -x "$agent_home/skills/apple-container-amd64/scripts/optimize-builder.sh" ]]
-done
+# stay executable so an agent can actually run it. The skill describes Apple
+# Container, so it is installed on macOS only — a Linux host runs Docker and
+# the skill tells agents never to emit docker commands.
+if [[ "$OS_KIND" == macos ]]; then
+  for agent_home in "$HOME/.claude" "$HOME/.codex"; do
+    [[ -f "$agent_home/skills/apple-container-amd64/SKILL.md" ]]
+    grep -Fq 'name: apple-container-amd64' "$agent_home/skills/apple-container-amd64/SKILL.md"
+    [[ -x "$agent_home/skills/apple-container-amd64/scripts/optimize-builder.sh" ]]
+  done
+else
+  [[ ! -e "$HOME/.claude/skills/apple-container-amd64" ]]
+  [[ ! -e "$HOME/.codex/skills/apple-container-amd64" ]]
+fi
 postflight_agent_skills
 [[ "$POSTFLIGHT_FAILURES" == 0 ]]
 first_mutations=$((CONFIG_INSTALLED_COUNT + CONFIG_MIGRATED_COUNT + CONFIG_UPGRADED_COUNT + CONFIG_MERGED_COUNT))
@@ -77,6 +102,27 @@ stage_dotfiles
 [[ "$CONFIG_CONFLICT_COUNT" == 0 ]]
 grep -Fq '# user customization' "$HOME/.bashrc"
 
+# ~/.npmrc must go through the semantic merge, not a rewrite. Asserting on the
+# merge function alone would not catch the stage forgetting to pass it, which
+# is the mistake that silently destroys a user's registry and auth token.
+printf '%s\n' 'registry=https://npm.example.com/' '//npm.example.com/:_authToken=secret' > "$HOME/.npmrc"
+CONFIG_CONFLICT_COUNT=0
+stage_dotfiles
+[[ "$CONFIG_CONFLICT_COUNT" == 0 ]]
+grep -Fxq 'registry=https://npm.example.com/' "$HOME/.npmrc"
+grep -Fxq '//npm.example.com/:_authToken=secret' "$HOME/.npmrc"
+grep -Eq '^prefix=' "$HOME/.npmrc"
+grep -Eq '^cache=' "$HOME/.npmrc"
+# The prefix ~/.bashrc exports and the prefix npm is configured with must agree,
+# or `npm i -g` installs somewhere that is not on PATH.
+npmrc_prefix=$(sed -n 's/^prefix=//p' "$HOME/.npmrc")
+[[ "$npmrc_prefix" == "$HOME/.npm/packages" ]]
+# Re-running appends nothing.
+stage_dotfiles
+[[ "$(grep -c '^prefix=' "$HOME/.npmrc")" == 1 ]]
+[[ "$(grep -c '^cache=' "$HOME/.npmrc")" == 1 ]]
+[[ "$(grep -c '^registry=' "$HOME/.npmrc")" == 1 ]]
+
 # A caller's Git environment must not redirect inspection or writes away from
 # the concrete ~/.gitconfig target this stage promises to converge.
 redirected_gitconfig="$TEST_TMP/redirected.gitconfig"
@@ -114,7 +160,11 @@ stage_dotfiles
 
 # A host that shares one skill store between agents through its own directory
 # links keeps that layout: the copies converge onto the shared file instead of
-# replacing the links or reporting a conflict.
+# replacing the links or reporting a conflict. Skills ship on macOS only.
+if [[ "$OS_KIND" != macos ]]; then
+  printf 'dotfiles stage tests: ok (linux; macOS-only zsh and skill assertions skipped)\n'
+  exit 0
+fi
 SHARED_HOME="$TEST_TMP/shared-home"
 HOME="$SHARED_HOME"
 export HOME

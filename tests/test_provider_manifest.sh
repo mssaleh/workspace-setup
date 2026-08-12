@@ -35,4 +35,21 @@ array_has opencode "${PROVIDERS_LINUX_UPSTREAM[@]}"
 # Compose is intentionally the narrow Homebrew compatibility layer.
 array_has container-compose "${PACKAGES_BREW[@]}"
 
+# Node.js is NodeSource-owned on Linux. Leaving either name in PACKAGES_APT
+# would let apt reinstall the distribution build — and the distribution `npm`
+# is a separate package that pulls its own, older, nodejs with it.
+array_has nodejs "${PROVIDERS_LINUX_OFFICIAL_REPO[@]}"
+for _apt_node in nodejs npm; do
+  if array_has "$_apt_node" "${PACKAGES_APT[@]}"; then
+    printf 'Node.js is NodeSource-owned on Linux; remove %s from PACKAGES_APT\n' "$_apt_node" >&2
+    exit 1
+  fi
+done
+# macOS keeps its Homebrew node; the NodeSource repo is Linux-only.
+array_has node "${PACKAGES_BREW[@]}"
+[[ "${NODE_MAJOR:-}" =~ ^[0-9]+$ ]] || {
+  printf 'NODE_MAJOR must be declared as a bare major version\n' >&2
+  exit 1
+}
+
 printf 'provider manifest tests: ok\n'

@@ -22,6 +22,27 @@ _profile_prepend() {
   PATH="$_profile_wanted${_profile_new:+:$_profile_new}"
 }
 
+# The tail-end twin of _profile_prepend, for entries that must lose to
+# everything already on PATH. Removes before adding, so re-sourcing ~/.profile
+# cannot duplicate an entry.
+_profile_append() {
+  _profile_wanted=$1
+  [ -d "$_profile_wanted" ] || return 0
+  _profile_new=
+  _profile_old_ifs=$IFS
+  _profile_had_noglob=
+  case $- in *f*) _profile_had_noglob=1 ;; *) set -f ;; esac
+  IFS=:
+  # shellcheck disable=SC2086 # colon-delimited iteration is intentional
+  for _profile_entry in ${PATH:-}; do
+    [ "$_profile_entry" = "$_profile_wanted" ] && continue
+    _profile_new="${_profile_new}${_profile_new:+:}${_profile_entry}"
+  done
+  IFS=$_profile_old_ifs
+  [ -n "$_profile_had_noglob" ] || set +f
+  PATH="${_profile_new:+$_profile_new:}$_profile_wanted"
+}
+
 _profile_brew=
 case "$(uname -s):$(uname -m)" in
   Darwin:arm64|Darwin:aarch64) _profile_candidates='/opt/homebrew/bin/brew /usr/local/bin/brew' ;;
@@ -46,6 +67,19 @@ if [ -n "$_profile_brew" ]; then
   fi
 fi
 _profile_prepend "$HOME/.local/bin"
+
+# npm's global prefix — see the matching block in ~/.bashrc. Appended so an
+# npm-global CLI cannot shadow an upstream provider's artifact in ~/.local/bin.
+NPM_PACKAGES="${NPM_PACKAGES:-$HOME/.npm/packages}"
+case ":${NODE_PATH:-}:" in
+  *":$NPM_PACKAGES/lib/node_modules:"*) ;;
+  *) NODE_PATH="$NPM_PACKAGES/lib/node_modules${NODE_PATH:+:$NODE_PATH}" ;;
+esac
+_profile_append "$NPM_PACKAGES/bin"
+_profile_append "$HOME/.npm/node/bin"
+export NPM_PACKAGES NODE_PATH
+
 export PATH
 unset _profile_brew _profile_candidate _profile_candidates _profile_wanted _profile_new _profile_old_ifs _profile_had_noglob _profile_entry
 unset -f _profile_prepend 2>/dev/null || true
+unset -f _profile_append 2>/dev/null || true

@@ -113,6 +113,49 @@ grep -Eq '^cpus = 3$' "$container_dst"
 grep -Eq '^\[registry\]$' "$container_dst"
 [[ "$CONFIG_LAST_ACTION" == merged ]]
 
+# ~/.npmrc is npm's own file. The setup fills in the two keys it needs and
+# leaves the rest alone, so re-running writes nothing and a user's registry,
+# proxy, or self-chosen prefix survives.
+NPM_PACKAGES="$TEST_TMP/npm-packages"
+npmrc_src="$TEST_TMP/npmrc-desired"
+npmrc_dst="$TEST_TMP/npmrc"
+printf 'prefix=%s\ncache=%s/cache\n' "$NPM_PACKAGES" "$NPM_PACKAGES" > "$npmrc_src"
+
+# Missing -> installed outright.
+install_regular_file "$npmrc_src" "$npmrc_dst" generated/npmrc 0644 merge_npmrc
+grep -Fxq "prefix=$NPM_PACKAGES" "$npmrc_dst"
+[[ "$CONFIG_LAST_ACTION" == installed ]]
+
+# Re-running must not change a byte, and must not append a second copy.
+install_regular_file "$npmrc_src" "$npmrc_dst" generated/npmrc 0644 merge_npmrc
+[[ "$CONFIG_LAST_ACTION" == unchanged ]]
+[[ "$(grep -c '^prefix=' "$npmrc_dst")" == 1 ]]
+
+# A user's own settings are preserved while the missing keys are filled in.
+printf '%s\n' 'registry=https://npm.example.com/' '//npm.example.com/:_authToken=secret' > "$npmrc_dst"
+install_regular_file "$npmrc_src" "$npmrc_dst" generated/npmrc 0644 merge_npmrc
+[[ "$CONFIG_LAST_ACTION" == merged ]]
+grep -Fxq 'registry=https://npm.example.com/' "$npmrc_dst"
+grep -Fxq "prefix=$NPM_PACKAGES" "$npmrc_dst"
+grep -Fxq "cache=$NPM_PACKAGES/cache" "$npmrc_dst"
+# ...and the merge is itself idempotent.
+install_regular_file "$npmrc_src" "$npmrc_dst" generated/npmrc 0644 merge_npmrc
+[[ "$CONFIG_LAST_ACTION" == unchanged ]]
+[[ "$(grep -c '^prefix=' "$npmrc_dst")" == 1 ]]
+
+# A prefix the user chose for themselves is a preference, not drift.
+printf '%s\n' 'prefix=/opt/npm-global' > "$npmrc_dst"
+install_regular_file "$npmrc_src" "$npmrc_dst" generated/npmrc 0644 merge_npmrc
+grep -Fxq 'prefix=/opt/npm-global' "$npmrc_dst"
+[[ "$(grep -c '^prefix=' "$npmrc_dst")" == 1 ]]
+
+# A file with no trailing newline must not have the new key spliced onto its
+# last line.
+printf 'registry=https://npm.example.com/' > "$npmrc_dst"
+install_regular_file "$npmrc_src" "$npmrc_dst" generated/npmrc 0644 merge_npmrc
+grep -Fxq 'registry=https://npm.example.com/' "$npmrc_dst"
+grep -Fxq "prefix=$NPM_PACKAGES" "$npmrc_dst"
+
 # Every directly installed source must record its current hash so the next
 # release can distinguish this version from a user edit without a host receipt.
 KNOWN_CONFIG_HASHES_FILE="$TEST_ROOT/lib/known-config-hashes.tsv"

@@ -135,15 +135,46 @@ install_kitty_desktop_integration() {
         "$src" > "$apps_dir/$entry"
   done
 
+  # The shipped entry describes a terminal but not an *application* as GNOME
+  # models one: without StartupWMClass a window cannot be matched back to its
+  # launcher, without Actions the dock icon has no right-click "New Window",
+  # and without Keywords the overview only matches the literal string "kitty".
+  # These are appended rather than sed-ed in because upstream ships no such
+  # keys to rewrite.
+  local kitty_entry="$apps_dir/kitty.desktop"
+  if [[ -f "$kitty_entry" ]]; then
+    cat >> "$kitty_entry" <<ENTRY
+StartupWMClass=kitty
+Keywords=shell;prompt;command;commandline;cmd;console;
+Actions=new-window;
+
+[Desktop Action new-window]
+Name=New Window
+Exec=$app/bin/kitty
+Icon=$icon
+ENTRY
+  fi
+
   # Icon in the hicolor theme too, so anything reading by icon name rather than
-  # by absolute path (notification daemons, some docks) still finds it.
+  # by absolute path (notification daemons, some docks) still finds it. Install
+  # the scalable SVG alongside the bitmap: the app grid and dock ask for 32-64px
+  # and hicolor has no size between "256" and "nothing", so a PNG-only install
+  # leaves every launcher rendering a downscale of the largest bitmap.
   if [[ -f "$icon" ]]; then
     mkdir -p "$HOME/.local/share/icons/hicolor/256x256/apps"
     cp -f "$icon" "$HOME/.local/share/icons/hicolor/256x256/apps/kitty.png"
   fi
+  local svg="$app/share/icons/hicolor/scalable/apps/kitty.svg"
+  if [[ -f "$svg" ]]; then
+    mkdir -p "$HOME/.local/share/icons/hicolor/scalable/apps"
+    cp -f "$svg" "$HOME/.local/share/icons/hicolor/scalable/apps/kitty.svg"
+  fi
 
   if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database "$apps_dir" >/dev/null 2>&1 || true
+  fi
+  if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+    gtk-update-icon-cache -qtf "$HOME/.local/share/icons/hicolor" >/dev/null 2>&1 || true
   fi
 
   # xdg-terminal-exec is what Ubuntu's "Open in Terminal" and

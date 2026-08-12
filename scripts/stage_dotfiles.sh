@@ -152,6 +152,53 @@ merge_container_config() {
   CONFIG_MERGE_ACTION=merged
 }
 
+# ~/.npmrc is npm's own config, not something this setup owns outright: a user
+# may legitimately have set a registry, a proxy, or their own prefix. Only the
+# keys that are absent are filled in, so a second run writes nothing and a
+# user-chosen prefix survives. Rewriting the whole file — the `cat > ~/.npmrc`
+# that the NodeSource instructions suggest — would silently drop the rest.
+merge_npmrc() {
+  local _src="$1" dst="$2" mode="$3" tmp changed=0
+  tmp=$(mktemp "${TMPDIR:-/tmp}/npmrc.XXXXXX") || return 1
+  cp "$dst" "$tmp" || { rm -f "$tmp"; return 1; }
+  # npm tolerates a missing trailing newline; appending to a file without one
+  # would otherwise splice the new key onto the last line.
+  [[ -s "$tmp" ]] && [[ -n "$(tail -c1 "$tmp")" ]] && printf '\n' >> "$tmp"
+  if ! grep -Eq '^[[:space:]]*prefix[[:space:]]*=' "$tmp"; then
+    printf 'prefix=%s\n' "$NPM_PACKAGES" >> "$tmp"
+    changed=1
+  fi
+  if ! grep -Eq '^[[:space:]]*cache[[:space:]]*=' "$tmp"; then
+    printf 'cache=%s/cache\n' "$NPM_PACKAGES" >> "$tmp"
+    changed=1
+  fi
+  if ((changed)); then
+    config_atomic_replace "$tmp" "$dst" "$mode" || { rm -f "$tmp"; return 1; }
+    CONFIG_MERGE_ACTION=merged
+  else
+    CONFIG_MERGE_ACTION=unchanged
+  fi
+  rm -f "$tmp"
+}
+
+# The prefix is an absolute path under $HOME, so this file is host-specific and
+# generated rather than shipped. ~/.bashrc and ~/.profile export the same
+# NPM_PACKAGES and put its bin directory on PATH.
+stage_npm_config() {
+  local tmp dst="$HOME/.npmrc"
+  NPM_PACKAGES="${NPM_PACKAGES:-$HOME/.npm/packages}"
+  export NPM_PACKAGES
+  # bin/ and lib/node_modules/ are created here rather than left to npm's first
+  # global install: ~/.bashrc adds a PATH entry only for a directory that
+  # exists, so without them the prefix would not be on PATH until the shell
+  # after the one that installed the first package.
+  mkdir -p "$NPM_PACKAGES/bin" "$NPM_PACKAGES/lib/node_modules"
+  tmp=$(mktemp "${TMPDIR:-/tmp}/npmrc-desired.XXXXXX") || return 1
+  printf 'prefix=%s\ncache=%s/cache\n' "$NPM_PACKAGES" "$NPM_PACKAGES" > "$tmp"
+  install_regular_file "$tmp" "$dst" generated/npmrc 0644 merge_npmrc
+  rm -f "$tmp"
+}
+
 install_repo_config() {
   local repo="$1" relative="$2" dst="$3" mode="${4:-0644}" merge_fn="${5:-}"
   install_regular_file "$repo/$relative" "$dst" "$relative" "$mode" "$merge_fn"
@@ -339,9 +386,22 @@ stage_dotfiles() {
   install_repo_config "$repo" dotfiles/tmux.conf "$HOME/.tmux.conf"
 
   stage_git_config "$repo"
+  stage_npm_config
 
   install_repo_config "$repo" dotfiles/config/kitty/kitty.conf \
     "$HOME/.config/kitty/kitty.conf"
+  # kitty.conf ends in `include platform.conf`. The platform layer carries the
+  # keymap's base modifier, the font size, and the window chrome — all of which
+  # are genuinely different per OS rather than merely tuned: a Cmd-based keymap
+  # loads without complaint on Linux and then never fires, because GNOME Shell
+  # grabs Super before kitty sees it.
+  if [[ "$OS_KIND" == macos ]]; then
+    install_repo_config "$repo" dotfiles/config/kitty/platform-macos.conf \
+      "$HOME/.config/kitty/platform.conf"
+  else
+    install_repo_config "$repo" dotfiles/config/kitty/platform-linux.conf \
+      "$HOME/.config/kitty/platform.conf"
+  fi
   install_repo_config "$repo" dotfiles/config/kitty/current-theme.conf \
     "$HOME/.config/kitty/current-theme.conf"
   install_repo_config "$repo" dotfiles/config/kitty/ssh.conf \

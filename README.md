@@ -31,7 +31,7 @@ Apple Container requires Apple silicon and macOS 26 or later. On an older/Intel 
 | **configuration** | Converges ordinary files under `$HOME`; repairs old links into temporary checkouts, atomically upgrades exact known historical versions, semantically merges supported JSON/TOML/Git formats, preserves ambiguous user-owned content, and installs the coding-agent skills into each agent home. |
 | **containers** | macOS only: installs Apple Container from the signed package on Apple's GitHub release, ensures Rosetta, and starts it with kernel installation enabled. `container-compose` is supplied separately by Homebrew. |
 | **ssh** | Generates an ed25519 keypair if none exists, locks down `~/.ssh` permissions (700 dir, 600 files), wires up the SSH agent (macOS: Keychain; Linux: systemd user unit). Does **not** push to GitHub — run `gh auth login` manually. |
-| **fonts + terminal** | Installs JetBrainsMono Nerd Font and Kitty via Kitty's upstream installer on both platforms, then creates the standard `~/.local/bin/{kitty,kitten}` links. On macOS it also installs Maccy/LibreOffice and imports Apple Terminal defaults once. |
+| **fonts + terminal** | Installs JetBrainsMono Nerd Font and Kitty via Kitty's upstream installer on both platforms, then creates the standard `~/.local/bin/{kitty,kitten}` links. On macOS it also installs Maccy/LibreOffice and imports Apple Terminal defaults once. On Linux it finishes the desktop-side install the upstream installer leaves out — application entries, window class, icon theme, terminal preference, terminfo — so Kitty behaves like an installed GNOME application rather than a binary on `PATH`. |
 | **postflight** | Verifies provider packages, regular-file configuration, clean-shell PATH resolution, upstream artifacts, and the active container runtime as one coherent result. |
 
 ## Ownership and convergence model
@@ -238,6 +238,9 @@ workspace-setup/
 │   ├── agents/skills/             # skills converged into every agent home
 │   │   └── apple-container-amd64/ # SKILL.md + scripts/optimize-builder.sh
 │   └── config/                    # kitty/, bat/, yazi/, gh/, opencode/, container/
+│       ├── kitty/kitty.conf       # platform-neutral base; ends in `include platform.conf`
+│       ├── kitty/platform-macos.conf  # → ~/.config/kitty/platform.conf on macOS
+│       ├── kitty/platform-linux.conf  # → ~/.config/kitty/platform.conf on Linux
 │       └── container/config.toml # templated: ${CPUS}, ${MEM_MB} → host-scaled
 ├── tests/                          # convergence + clean-shell PATH regression tests
 └── README.md
@@ -259,7 +262,10 @@ The script detects the OS and adapts:
 | LibreOffice | brew cask | Ubuntu: `ppa:libreoffice/ppa` (the packaging team's PPA — the distribution build lags upstream); Debian: distribution package. Skip either with `SKIP_LIBREOFFICE=1` |
 | Claude Desktop | skipped (install from claude.ai) | official Anthropic apt repo, key fingerprint verified (skip with `SKIP_CLAUDE_DESKTOP=1`); beta, amd64/arm64 only |
 | Tools not in default apt repo (helm, kubectl, himalaya, ruff, yazi, opencode) | Homebrew formula | official apt repo (helm, kubectl) / official installers (himalaya, opencode) / GitHub release → `~/.local/bin` (ruff, yazi) |
-| Kitty | upstream app installer → `/Applications/kitty.app` | upstream app installer → `~/.local/kitty.app` |
+| Node.js | Homebrew `node` (plus a pinned `node@24` keg) | **NodeSource** apt repo (`deb.nodesource.com`), major set by `NODE_MAJOR` in `lib/manifest.sh`; signing key fingerprint verified. Ubuntu's own `nodejs` trails upstream by several majors and its separately versioned `npm` package drags an older nodejs in with it, so neither name stays in `PACKAGES_APT`. The repo and keyring are written only when their content differs, so a re-run performs no apt work at all |
+| npm global prefix | `~/.npm/packages` via `~/.npmrc` (`prefix` + `cache`) — set on both platforms so `npm i -g` never needs sudo | same |
+| Kitty | upstream app installer → `/Applications/kitty.app` | upstream app installer → `~/.local/kitty.app`, plus desktop integration the installer omits: absolute-path `.desktop` entries, `StartupWMClass`, a "New Window" action, the scalable icon in the hicolor theme, `xdg-terminals.list`, and `~/.terminfo` |
+| Kitty config | `kitty.conf` + `platform-macos.conf` → `platform.conf`: Cmd-based keymap, `font_size 15`, powerline tabs, `macos_*` options | `kitty.conf` + `platform-linux.conf` → `platform.conf`: Ctrl+Shift keymap, `font_size 12`, flat tabs, `wayland_titlebar_color system`. Cmd is **not** usable — kitty aliases it to Super, which GNOME Shell grabs first, so the bindings load silently and never fire |
 | Dotfiles Homebrew paths | `/opt/homebrew/...` (via `$BREW_PREFIX`) | guarded by `command -v brew` / `$BREW_PREFIX`; no-op when brew is absent |
 | zsh plugins / bash completion | Homebrew paths (`zsh-autosuggestions`, `zsh-syntax-highlighting`) | Linux paths (`/usr/share/bash-completion/`) with Homebrew fallback; **no zsh on Linux** (bash only) |
 | Shell config files | regular `bashrc`, `bash_profile`, `profile`, `zshenv`, `zprofile`, `zshrc`, `inputrc`, `tmux.conf` | regular `bashrc`, `bash_profile`, `profile`, `inputrc`, `tmux.conf` (no zsh files) |

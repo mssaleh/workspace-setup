@@ -43,7 +43,6 @@ PACKAGES_APT=(
   git-filter-repo pre-commit git-delta
   tmux rsync rclone nmap wget curl
   jq yq pandoc 7zip
-  nodejs npm
   ffmpeg poppler-utils nano
   ncdu smartmontools xsel pkg-config
   ca-certificates gnupg lsb-release unzip xz-utils fontconfig
@@ -55,6 +54,15 @@ PACKAGES_APT=(
 PROVIDERS_COMMON_UPSTREAM=(rustup uv-standalone claude codex kitty)
 PROVIDERS_MACOS_UPSTREAM=(apple-container-signed-pkg rosetta)
 PROVIDERS_LINUX_UPSTREAM=(ruff yazi himalaya opencode)
-PROVIDERS_LINUX_OFFICIAL_REPO=(kubectl helm docker-engine docker-compose-v2 claude-desktop)
+# nodejs comes from NodeSource rather than the distribution: Ubuntu ships a
+# Node major that trails upstream by a long way, and its separate `npm` package
+# is versioned independently of it. The NodeSource package bundles the matching
+# npm and tracks the current release line.
+PROVIDERS_LINUX_OFFICIAL_REPO=(kubectl helm docker-engine docker-compose-v2 claude-desktop nodejs)
+
+# The Node.js major series installed from NodeSource on Linux. Bump to move the
+# host onto a new release line; the stage reinstalls when the installed major
+# no longer matches.
+NODE_MAJOR=24
 # Ubuntu-only Launchpad PPAs. Debian falls back to the distribution package.
 PROVIDERS_UBUNTU_PPA=(libreoffice)

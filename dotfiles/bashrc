@@ -55,6 +55,22 @@ _path_prepend() {
   PATH="$wanted${new_path:+:$new_path}"
 }
 
+# The tail-end twin of _path_prepend, for entries that must lose to everything
+# already on PATH. Same remove-then-add shape, so re-sourcing cannot duplicate.
+_path_append() {
+  local wanted="$1" entry new_path="" old_ifs="$IFS"
+  local -a path_parts
+  [[ -d "$wanted" ]] || return 0
+  IFS=:
+  read -r -a path_parts <<< "${PATH:-}"
+  IFS="$old_ifs"
+  for entry in "${path_parts[@]}"; do
+    [[ "$entry" == "$wanted" ]] && continue
+    new_path="${new_path}${new_path:+:}${entry}"
+  done
+  PATH="${new_path:+$new_path:}$wanted"
+}
+
 [[ -f "$HOME/.cargo/env" ]] && . "$HOME/.cargo/env"
 
 # Apple and other conventional signed packages install CLIs here. sshd's bare
@@ -71,9 +87,23 @@ if [[ -n "$_brew_bin" ]]; then
   fi
 fi
 _path_prepend "$HOME/.local/bin"
+
+# npm's global prefix lives in $HOME so `npm i -g` never needs sudo and never
+# writes into a package manager's tree. Appended, not prepended: an npm-global
+# CLI must not shadow the same command installed by its own upstream provider
+# into ~/.local/bin, which is the artifact the setup verifies.
+NPM_PACKAGES="${NPM_PACKAGES:-$HOME/.npm/packages}"
+case ":${NODE_PATH:-}:" in
+  *":$NPM_PACKAGES/lib/node_modules:"*) ;;
+  *) NODE_PATH="$NPM_PACKAGES/lib/node_modules${NODE_PATH:+:$NODE_PATH}" ;;
+esac
+_path_append "$NPM_PACKAGES/bin"
+_path_append "$HOME/.npm/node/bin"
+export NPM_PACKAGES NODE_PATH
+
 export PATH BREW_PREFIX
 unset _brew_bin
-unset -f _find_brew_bin _path_prepend
+unset -f _find_brew_bin _path_prepend _path_append
 
 # Locale safety net: ensure a UTF-8-capable LANG is set.
 # macOS: region "en_AE" has no POSIX locale, so several contexts (Terminal.app,

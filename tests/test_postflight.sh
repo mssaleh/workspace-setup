@@ -2,6 +2,19 @@
 set -euo pipefail
 
 TEST_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+# shellcheck disable=SC1091
+. "$TEST_ROOT/tests/helpers.sh"
+TEST_NAME='postflight tests'
+
+# This exercises the *macOS* postflight end to end: it runs every check with
+# OS_KIND=macos, which shells out to brew for the cask inventory and sources
+# the zsh dotfiles to verify their clean-shell PATH. Neither is meaningfully
+# stubbable, so on a host without them the honest result is "not verified
+# here". The Linux half of postflight has its own coverage in
+# test_linux_postflight.sh, which runs everywhere.
+macos_simulation_available \
+  || test_skip 'needs Homebrew and zsh to simulate a macOS host; see test_linux_postflight.sh for the Linux checks'
+
 TEST_TMP=$(mktemp -d "${TMPDIR:-/tmp}/postflight-test.XXXXXX")
 trap 'rm -rf "$TEST_TMP"' EXIT
 

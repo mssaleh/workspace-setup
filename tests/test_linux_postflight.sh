@@ -17,6 +17,8 @@ mkdir -p \
 # shellcheck disable=SC1091
 . "$TEST_ROOT/lib/log.sh"
 # shellcheck disable=SC1091
+. "$TEST_ROOT/lib/manifest.sh"
+# shellcheck disable=SC1091
 . "$TEST_ROOT/scripts/stage_postflight.sh"
 
 make_executable() {
@@ -35,6 +37,10 @@ make_executable "$HOME/.opencode/bin/opencode"
 ln -s "$HOME/.opencode/bin/opencode" "$HOME/.local/bin/opencode"
 make_executable "$TEST_TMP/system/kubectl"
 make_executable "$TEST_TMP/system/helm"
+# Node is verified by the version it reports, so the stub has to answer `-v`
+# with the declared major rather than merely exist.
+printf '%s\n' '#!/bin/sh' "printf 'v%s.0.0\\n' \"${NODE_MAJOR}\"" > "$TEST_TMP/system/node"
+chmod +x "$TEST_TMP/system/node"
 
 # The architecture branch must answer too: the Claude Desktop check consults
 # it, and a stub that only understands `-s` would silently skip that check
@@ -51,7 +57,7 @@ POSTFLIGHT_PASSES=0
 POSTFLIGHT_FAILURES=0
 postflight_upstream_tools
 [[ "$POSTFLIGHT_FAILURES" == 0 ]]
-[[ "$POSTFLIGHT_PASSES" == 9 ]]
+[[ "$POSTFLIGHT_PASSES" == 10 ]]
 
 # Both GUI applications are opt-out, and opting out must remove the check
 # rather than fail it — a headless host is a supported configuration.
@@ -59,7 +65,7 @@ POSTFLIGHT_PASSES=0
 POSTFLIGHT_FAILURES=0
 SKIP_LIBREOFFICE=1 SKIP_CLAUDE_DESKTOP=1 postflight_upstream_tools
 [[ "$POSTFLIGHT_FAILURES" == 0 ]]
-[[ "$POSTFLIGHT_PASSES" == 7 ]]
+[[ "$POSTFLIGHT_PASSES" == 8 ]]
 
 # A missing GUI application on a host that expects it is a real failure.
 dpkg() {

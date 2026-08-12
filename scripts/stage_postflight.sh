@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # scripts/stage_postflight.sh — one cross-stage verification pass.
+# shellcheck disable=SC2153 # NODE_MAJOR and friends come from lib/manifest.sh
 
 POSTFLIGHT_PASSES=0
 POSTFLIGHT_FAILURES=0
@@ -26,8 +27,10 @@ postflight_configs() {
     "$HOME/.inputrc"
     "$HOME/.tmux.conf"
     "$HOME/.gitconfig"
+    "$HOME/.npmrc"
     "$HOME/.ssh/config"
     "$HOME/.config/kitty/kitty.conf"
+    "$HOME/.config/kitty/platform.conf"
     "$HOME/.config/kitty/current-theme.conf"
     "$HOME/.config/kitty/ssh.conf"
     "$HOME/.config/kitty/startup.session"
@@ -307,6 +310,22 @@ postflight_upstream_tools() {
       postflight_fail "missing official-repository tools: ${repo_tool_missing[*]}"
     fi
 
+    # Node.js must be the NodeSource build of the declared major, not whatever
+    # the distribution ships. Checking the reported version rather than the
+    # package origin keeps this honest on a host where node came from somewhere
+    # else entirely — the version is what every tool downstream actually sees.
+    local node_version node_major
+    node_version=$(node -v 2>/dev/null || true)
+    node_major=${node_version#v}
+    node_major=${node_major%%.*}
+    if [[ -z "$node_version" ]]; then
+      postflight_fail "Node.js is not on PATH (expected the NodeSource ${NODE_MAJOR}.x build)"
+    elif [[ "$node_major" == "${NODE_MAJOR:-}" ]]; then
+      postflight_pass "Node.js $node_version matches the declared ${NODE_MAJOR}.x line"
+    else
+      postflight_fail "Node.js $node_version is not the declared ${NODE_MAJOR}.x line"
+    fi
+
     if [[ -z "${SKIP_LIBREOFFICE:-}" ]]; then
       if dpkg -s libreoffice >/dev/null 2>&1; then
         postflight_pass "LibreOffice is installed"
@@ -379,6 +398,32 @@ postflight_upstream_tools() {
         postflight_pass "xterm-kitty terminfo is on the default search path"
       else
         postflight_fail "xterm-kitty terminfo is not linked into ~/.terminfo"
+      fi
+
+      # GNOME can only match a window back to its launcher, offer right-click
+      # actions, and render a crisp dock icon when the entry and icon theme say
+      # so. Each of these is invisible when missing — the app still starts.
+      if grep -q '^StartupWMClass=' "$kitty_entry" 2>/dev/null \
+          && grep -q '^\[Desktop Action new-window\]' "$kitty_entry" 2>/dev/null; then
+        postflight_pass "kitty desktop entry declares its window class and actions"
+      else
+        postflight_fail "kitty desktop entry is missing StartupWMClass or its New Window action"
+      fi
+      if [[ -f "$HOME/.local/share/icons/hicolor/scalable/apps/kitty.svg" ]]; then
+        postflight_pass "kitty scalable icon is installed in the hicolor theme"
+      else
+        postflight_fail "kitty scalable icon is missing (dock and overview downscale the 256px bitmap)"
+      fi
+
+      # The failure this guards against is silent by construction: kitty accepts
+      # `cmd+` on Linux as an alias for Super, logs nothing, and then never fires
+      # the binding because GNOME Shell has already grabbed Super. A Linux host
+      # holding the macOS platform layer looks perfectly converged.
+      local kitty_platform="$HOME/.config/kitty/platform.conf"
+      if [[ -f "$kitty_platform" ]] && ! grep -qE '^[[:space:]]*map[[:space:]]+[^#]*\bcmd\+' "$kitty_platform"; then
+        postflight_pass "kitty platform layer is the Linux keymap"
+      else
+        postflight_fail "kitty platform.conf is missing or still carries Cmd-based bindings"
       fi
     fi
   fi
