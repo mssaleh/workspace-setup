@@ -186,8 +186,14 @@ merge_npmrc() {
 # NPM_PACKAGES and put its bin directory on PATH.
 stage_npm_config() {
   local tmp dst="$HOME/.npmrc"
-  NPM_PACKAGES="${NPM_PACKAGES:-$HOME/.npm/packages}"
-  export NPM_PACKAGES
+  # Derived from $HOME, deliberately not from an inherited NPM_PACKAGES.
+  # ~/.bashrc exports that variable, so honouring it would make a setup run
+  # from an already-configured shell take its prefix from the invoking
+  # environment rather than from the home directory being converged — wrong
+  # the moment the two differ, as under `sudo -H` or when provisioning another
+  # account. A prefix the user genuinely chose is preserved by merge_npmrc
+  # reading the existing ~/.npmrc, which is the right place to express it.
+  NPM_PACKAGES="$HOME/.npm/packages"
   # bin/ and lib/node_modules/ are created here rather than left to npm's first
   # global install: ~/.bashrc adds a PATH entry only for a directory that
   # exists, so without them the prefix would not be on PATH until the shell

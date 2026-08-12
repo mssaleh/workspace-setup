@@ -47,6 +47,11 @@ PACKAGES_APT=(
   ncdu smartmontools xsel pkg-config
   ca-certificates gnupg lsb-release unzip xz-utils fontconfig
   eza chafa cosign mosh
+  # kitty runs on X11/XWayland so Mutter draws its title bar (see
+  # dotfiles/config/kitty/platform-linux.conf). Its X11 backend dlopens
+  # libxcb-xkb.so.1, which a default Ubuntu desktop does not install; without
+  # this package kitty does not start at all, so it is not optional.
+  libxcb-xkb1
 )
 
 # Documentation/inventory for non-default-repository providers. These names

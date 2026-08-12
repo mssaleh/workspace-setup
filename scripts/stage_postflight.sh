@@ -425,6 +425,30 @@ postflight_upstream_tools() {
       else
         postflight_fail "kitty platform.conf is missing or still carries Cmd-based bindings"
       fi
+
+      # kitty runs on X11 so Mutter draws its title bar. That makes the X11
+      # backend's shared library a hard runtime dependency: without it kitty
+      # exits at startup instead of falling back, which presents as "kitty is
+      # broken" rather than "kitty looks wrong".
+      if grep -qE '^[[:space:]]*linux_display_server[[:space:]]+x11' "$kitty_platform" 2>/dev/null; then
+        if ldconfig -p 2>/dev/null | grep -q 'libxcb-xkb\.so\.1'; then
+          postflight_pass "kitty X11 backend dependency (libxcb-xkb1) is installed"
+        else
+          postflight_fail "kitty is configured for X11 but libxcb-xkb.so.1 is absent — kitty will not start (sudo apt install -y libxcb-xkb1)"
+        fi
+
+        # Without native scaling, XWayland clients are rendered at the logical
+        # size and upscaled by the compositor, which is visible as soft text on
+        # any fractionally scaled display. Enabling it changes the session
+        # rather than a file, so this reports rather than repairs.
+        if command -v gsettings >/dev/null 2>&1 \
+            && [[ "$(gsettings get org.gnome.mutter experimental-features 2>/dev/null)" == *xwayland-native-scaling* ]]; then
+          postflight_pass "Mutter renders XWayland clients at native scale"
+        elif command -v gsettings >/dev/null 2>&1; then
+          warn "Mutter is not set to scale XWayland natively; kitty may look soft on a fractional scale."
+          warn "  fix: gsettings set org.gnome.mutter experimental-features \"['scale-monitor-framebuffer', 'xwayland-native-scaling']\""
+        fi
+      fi
     fi
   fi
 }

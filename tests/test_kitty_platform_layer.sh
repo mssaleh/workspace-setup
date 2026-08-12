@@ -54,13 +54,29 @@ fi
 if grep -qE '^[[:space:]]*map[[:space:]]+[^#]*\b(super|cmd|command)\+' "$KITTY_SRC/platform-linux.conf"; then
   fail_test 'platform-linux.conf binds Super, which GNOME Shell intercepts'
 fi
+# Mutter never offers server-side decorations to a Wayland client, so kitty
+# draws its own title bar there and it cannot be made to look like an Adwaita
+# header bar. On X11 Mutter reparents the window into a frame drawn by its own
+# GTK-based mutter-x11-frames helper, which is a real native title bar. Tinting
+# the client-side bar was treating the symptom; this is the fix.
+grep -qE '^[[:space:]]*linux_display_server[[:space:]]+x11' "$KITTY_SRC/platform-linux.conf" \
+  || fail_test 'platform-linux.conf must select the X11 backend so Mutter draws the title bar'
+# Kept only as the fallback appearance if kitty ever runs on Wayland anyway.
 grep -qE '^[[:space:]]*wayland_titlebar_color[[:space:]]+system' "$KITTY_SRC/platform-linux.conf" \
-  || fail_test 'platform-linux.conf does not make the CSD title bar follow system colours'
-# Mutter offers no server-side decorations, so an X11 fallback is the only way
-# to get a real one — and the upstream build cannot dlopen its X11 backend on a
-# stock Ubuntu desktop. Pin that this stays unset rather than being "fixed".
+  || fail_test 'platform-linux.conf drops the Wayland-fallback title bar colour'
+
+# Choosing X11 makes libxcb-xkb.so.1 a hard runtime dependency: kitty's X11
+# backend dlopens it, and without it kitty exits at startup rather than falling
+# back to Wayland. A default Ubuntu desktop does not install it. These two
+# decisions must therefore travel together or the setup ships a dead terminal.
+# shellcheck disable=SC1091
+. "$TEST_ROOT/lib/manifest.sh"
 if grep -qE '^[[:space:]]*linux_display_server[[:space:]]+x11' "$KITTY_SRC/platform-linux.conf"; then
-  fail_test 'platform-linux.conf forces the X11 backend, which fails to dlopen on a stock Ubuntu desktop'
+  _has_xcb=0
+  for _pkg in "${PACKAGES_APT[@]}"; do
+    [[ "$_pkg" == libxcb-xkb1 ]] && _has_xcb=1
+  done
+  ((_has_xcb)) || fail_test 'kitty selects the X11 backend but libxcb-xkb1 is not in PACKAGES_APT; kitty would not start'
 fi
 
 # ── 3. No layer may bind the same key twice ─────────────────────────────────
