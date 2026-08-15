@@ -76,7 +76,6 @@ case ":${NODE_PATH:-}:" in
   *) NODE_PATH="$NPM_PACKAGES/lib/node_modules${NODE_PATH:+:$NODE_PATH}" ;;
 esac
 _profile_append "$NPM_PACKAGES/bin"
-_profile_append "$HOME/.npm/node/bin"
 export NPM_PACKAGES NODE_PATH
 
 export PATH

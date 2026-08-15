@@ -117,13 +117,16 @@ grep -Eq '^\[registry\]$' "$container_dst"
 # leaves the rest alone, so re-running writes nothing and a user's registry,
 # proxy, or self-chosen prefix survives.
 NPM_PACKAGES="$TEST_TMP/npm-packages"
+NPM_CACHE="$TEST_TMP/cache/npm"
 npmrc_src="$TEST_TMP/npmrc-desired"
 npmrc_dst="$TEST_TMP/npmrc"
-printf 'prefix=%s\ncache=%s/cache\n' "$NPM_PACKAGES" "$NPM_PACKAGES" > "$npmrc_src"
+printf 'prefix=%s\ncache=%s\nfund=false\naudit=false\nengine-strict=true\n' \
+  "$NPM_PACKAGES" "$NPM_CACHE" > "$npmrc_src"
 
 # Missing -> installed outright.
 install_regular_file "$npmrc_src" "$npmrc_dst" generated/npmrc 0644 merge_npmrc
 grep -Fxq "prefix=$NPM_PACKAGES" "$npmrc_dst"
+grep -Fxq "cache=$NPM_CACHE" "$npmrc_dst"
 [[ "$CONFIG_LAST_ACTION" == installed ]]
 
 # Re-running must not change a byte, and must not append a second copy.
@@ -136,8 +139,10 @@ printf '%s\n' 'registry=https://npm.example.com/' '//npm.example.com/:_authToken
 install_regular_file "$npmrc_src" "$npmrc_dst" generated/npmrc 0644 merge_npmrc
 [[ "$CONFIG_LAST_ACTION" == merged ]]
 grep -Fxq 'registry=https://npm.example.com/' "$npmrc_dst"
+grep -Fxq '//npm.example.com/:_authToken=secret' "$npmrc_dst"
 grep -Fxq "prefix=$NPM_PACKAGES" "$npmrc_dst"
-grep -Fxq "cache=$NPM_PACKAGES/cache" "$npmrc_dst"
+grep -Fxq "cache=$NPM_CACHE" "$npmrc_dst"
+grep -Fxq 'engine-strict=true' "$npmrc_dst"
 # ...and the merge is itself idempotent.
 install_regular_file "$npmrc_src" "$npmrc_dst" generated/npmrc 0644 merge_npmrc
 [[ "$CONFIG_LAST_ACTION" == unchanged ]]
@@ -148,6 +153,23 @@ printf '%s\n' 'prefix=/opt/npm-global' > "$npmrc_dst"
 install_regular_file "$npmrc_src" "$npmrc_dst" generated/npmrc 0644 merge_npmrc
 grep -Fxq 'prefix=/opt/npm-global' "$npmrc_dst"
 [[ "$(grep -c '^prefix=' "$npmrc_dst")" == 1 ]]
+
+# The cache this setup used to write — inside the prefix — is corrected, because
+# it is this project's own earlier choice rather than the user's.
+printf 'prefix=%s\ncache=%s/cache\n' "$NPM_PACKAGES" "$NPM_PACKAGES" > "$npmrc_dst"
+install_regular_file "$npmrc_src" "$npmrc_dst" generated/npmrc 0644 merge_npmrc
+[[ "$CONFIG_LAST_ACTION" == merged ]]
+grep -Fxq "cache=$NPM_CACHE" "$npmrc_dst"
+[[ "$(grep -c '^cache=' "$npmrc_dst")" == 1 ]]
+# ...and correcting it is idempotent.
+install_regular_file "$npmrc_src" "$npmrc_dst" generated/npmrc 0644 merge_npmrc
+[[ "$CONFIG_LAST_ACTION" == unchanged ]]
+
+# A cache the user pointed somewhere of their own is left exactly where it is.
+printf 'prefix=%s\ncache=/mnt/fast/npm\n' "$NPM_PACKAGES" > "$npmrc_dst"
+install_regular_file "$npmrc_src" "$npmrc_dst" generated/npmrc 0644 merge_npmrc
+grep -Fxq 'cache=/mnt/fast/npm' "$npmrc_dst"
+[[ "$(grep -c '^cache=' "$npmrc_dst")" == 1 ]]
 
 # A file with no trailing newline must not have the new key spliced onto its
 # last line.

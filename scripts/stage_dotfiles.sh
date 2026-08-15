@@ -157,21 +157,70 @@ merge_container_config() {
 # keys that are absent are filled in, so a second run writes nothing and a
 # user-chosen prefix survives. Rewriting the whole file — the `cat > ~/.npmrc`
 # that the NodeSource instructions suggest — would silently drop the rest.
+npmrc_has_key() {
+  grep -Eq "^[[:space:]]*$1[[:space:]]*=" "$2"
+}
+
 merge_npmrc() {
-  local _src="$1" dst="$2" mode="$3" tmp changed=0
+  local _src="$1" dst="$2" mode="$3" tmp changed=0 key
   tmp=$(mktemp "${TMPDIR:-/tmp}/npmrc.XXXXXX") || return 1
   cp "$dst" "$tmp" || { rm -f "$tmp"; return 1; }
   # npm tolerates a missing trailing newline; appending to a file without one
   # would otherwise splice the new key onto the last line.
   [[ -s "$tmp" ]] && [[ -n "$(tail -c1 "$tmp")" ]] && printf '\n' >> "$tmp"
-  if ! grep -Eq '^[[:space:]]*prefix[[:space:]]*=' "$tmp"; then
+  if ! npmrc_has_key prefix "$tmp"; then
     printf 'prefix=%s\n' "$NPM_PACKAGES" >> "$tmp"
     changed=1
   fi
-  if ! grep -Eq '^[[:space:]]*cache[[:space:]]*=' "$tmp"; then
-    printf 'cache=%s/cache\n' "$NPM_PACKAGES" >> "$tmp"
+
+  # Earlier runs put the cache inside the prefix, which buries hundreds of
+  # megabytes of throwaway data in the tree `npm ls -g` walks and hides it from
+  # anything that clears caches by looking in ~/.cache. Correcting a value this
+  # project chose is not the same as overriding one the user chose, so only that
+  # exact string is rewritten; any other cache line is left alone.
+  if npmrc_has_key cache "$tmp"; then
+    # Compared as an exact string, never as a pattern: a prefix under $HOME can
+    # contain regex metacharacters, and `.` in a path would otherwise match any
+    # character and rewrite a cache line the user chose. awk is used for the
+    # same reason, and because `sed -i` differs between GNU and BSD.
+    if awk -v want="$NPM_PACKAGES/cache" '
+        match($0, /^[[:space:]]*cache[[:space:]]*=[[:space:]]*/) {
+          val = substr($0, RLENGTH + 1)
+          sub(/[[:space:]]+$/, "", val)
+          if (val == want) { found = 1 }
+        }
+        END { exit !found }' "$tmp"; then
+      if ! awk -v want="$NPM_PACKAGES/cache" -v repl="$NPM_CACHE" '
+        match($0, /^[[:space:]]*cache[[:space:]]*=[[:space:]]*/) {
+          val = substr($0, RLENGTH + 1)
+          sub(/[[:space:]]+$/, "", val)
+          if (val == want) { print "cache=" repl; next }
+        }
+        { print }' "$tmp" > "$tmp.new"; then
+        rm -f "$tmp" "$tmp.new"
+        return 1
+      fi
+      if ! mv -f "$tmp.new" "$tmp"; then
+        rm -f "$tmp" "$tmp.new"
+        return 1
+      fi
+      changed=1
+    fi
+  else
+    printf 'cache=%s\n' "$NPM_CACHE" >> "$tmp"
     changed=1
   fi
+
+  # Quality-of-life defaults, each filled in only when absent so an explicit
+  # choice survives. fund/audit remove a network round trip and a sponsorship
+  # banner from every install; engine-strict refuses a package whose declared
+  # engines exclude this Node instead of failing later at runtime.
+  for key in 'fund=false' 'audit=false' 'engine-strict=true'; do
+    npmrc_has_key "${key%%=*}" "$tmp" && continue
+    printf '%s\n' "$key" >> "$tmp"
+    changed=1
+  done
+
   if ((changed)); then
     config_atomic_replace "$tmp" "$dst" "$mode" || { rm -f "$tmp"; return 1; }
     CONFIG_MERGE_ACTION=merged
@@ -194,13 +243,17 @@ stage_npm_config() {
   # account. A prefix the user genuinely chose is preserved by merge_npmrc
   # reading the existing ~/.npmrc, which is the right place to express it.
   NPM_PACKAGES="$HOME/.npm/packages"
+  # The cache is throwaway data, so it belongs in ~/.cache and not inside the
+  # prefix, which is a tree of installed packages that `npm ls -g` walks.
+  NPM_CACHE="$HOME/.cache/npm"
   # bin/ and lib/node_modules/ are created here rather than left to npm's first
   # global install: ~/.bashrc adds a PATH entry only for a directory that
   # exists, so without them the prefix would not be on PATH until the shell
   # after the one that installed the first package.
   mkdir -p "$NPM_PACKAGES/bin" "$NPM_PACKAGES/lib/node_modules"
   tmp=$(mktemp "${TMPDIR:-/tmp}/npmrc-desired.XXXXXX") || return 1
-  printf 'prefix=%s\ncache=%s/cache\n' "$NPM_PACKAGES" "$NPM_PACKAGES" > "$tmp"
+  printf 'prefix=%s\ncache=%s\nfund=false\naudit=false\nengine-strict=true\n' \
+    "$NPM_PACKAGES" "$NPM_CACHE" > "$tmp"
   install_regular_file "$tmp" "$dst" generated/npmrc 0644 merge_npmrc
   rm -f "$tmp"
 }

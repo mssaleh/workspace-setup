@@ -23,6 +23,11 @@ HISTFILE="$HOME/.zsh_history"
 HISTSIZE=100000
 SAVEHIST=100000
 setopt SHARE_HISTORY HIST_IGNORE_ALL_DUPS HIST_IGNORE_SPACE HIST_REDUCE_BLANKS INC_APPEND_HISTORY
+# The twin of HISTIGNORE in ~/.bashrc: commands that are quicker to retype than
+# to find. zsh takes one extended-glob pattern matched against the whole line,
+# where bash takes a colon-separated list, so the two spellings differ but the
+# set does not.
+HISTORY_IGNORE='(exit|ls|ll|la|cd|cd -|cd ..|pwd|clear|history|bg|fg|jobs|reset|y)'
 setopt INTERACTIVE_COMMENTS
 
 # Completion. Homebrew tools ship completions in $BREW_PREFIX/share/zsh/site-functions,

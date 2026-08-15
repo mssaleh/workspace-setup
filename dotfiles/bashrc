@@ -133,7 +133,6 @@ case ":${NODE_PATH:-}:" in
   *) NODE_PATH="$NPM_PACKAGES/lib/node_modules${NODE_PATH:+:$NODE_PATH}" ;;
 esac
 _path_append "$NPM_PACKAGES/bin"
-_path_append "$HOME/.npm/node/bin"
 export NPM_PACKAGES NODE_PATH
 
 _path_dedupe
@@ -184,11 +183,15 @@ if [[ -n "${XDG_RUNTIME_DIR:-}" && "$(uname -s)" != Darwin ]]; then
 fi
 
 # History — approximates zsh SHARE_HISTORY/IGNORE_ALL_DUPS: big, deduped,
-# appended after every command instead of on shell exit.
+# written after every command instead of on shell exit.
 HISTSIZE=100000
 HISTFILESIZE=100000
 HISTCONTROL=ignoreboth:erasedups
 HISTTIMEFORMAT='%F %T  '
+# Commands whose next invocation is always easier to retype than to find. `exit`
+# alone was a fifth of a real history file. The patterns are anchored whole-line,
+# so `cd ..` and `ls -la` are still recorded — only the bare forms are dropped.
+HISTIGNORE='exit:ls:ll:la:cd:cd -:cd ..:pwd:clear:history:bg:fg:jobs:reset:y'
 shopt -s histappend
 shopt -s checkwinsize
 
@@ -221,10 +224,21 @@ __prompt_git() {
 PS1="\[\e[1;38;5;${_host_color}m\]${_host_label}\[\e[0m\] \[\e[34m\]\w\[\e[0m\]\[\e[38;5;242m\]\$(__prompt_git)\[\e[0m\] \\$ "
 
 # Terminal/tab title = "<machine>: <dir>" (kitty.conf uses `no-title` so the
-# shell owns it). Append this shell's command, then import commands appended by
-# other live terminals so Up/Ctrl-R see a coherent history immediately.
+# shell owns it).
 __set_term_title() { printf '\e]2;%s: %s\a' "$_host_label" "${PWD/#$HOME/\~}"; }
-__history_sync() { history -a; history -n; }
+
+# Shared, genuinely deduplicated history across every live terminal.
+#
+# HISTCONTROL=erasedups prunes the in-memory list, never the file, and `history
+# -a` only appends lines this shell has not written yet — so the pair that looks
+# like it dedupes (`-a` then `-n`) lets the file grow a duplicate for every
+# repeat. Measured on a real history file: 354 entries, 144 unique.
+#
+# `-w` is what rewrites the file from the deduped in-memory list, and `-n` has
+# to come first so lines another terminal added since the last read are imported
+# before that rewrite replaces the file. `-c; -r` then resyncs this shell, so
+# Up and Ctrl-R immediately see what every other terminal has run.
+__history_sync() { history -n; history -w; history -c; history -r; }
 if ((BASH_VERSINFO[0] >= 5)); then
   if [[ "$(declare -p PROMPT_COMMAND 2>/dev/null)" != 'declare -a'* ]]; then
     _prompt_command_previous=${PROMPT_COMMAND:-}
