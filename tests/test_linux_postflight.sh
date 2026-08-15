@@ -102,4 +102,57 @@ POSTFLIGHT_FAILURES=0
 postflight_upstream_tools
 [[ "$POSTFLIGHT_FAILURES" == 1 ]]
 
+# ── STM32CubeCLT must not shadow the system build tools ────────────────────
+# The vendor profile script prepends its bundled CMake, Make and Ninja ahead of
+# /usr/bin for every login shell. Resolution is stubbed rather than run against
+# this host's /etc/profile.d so the check is exercised in both states.
+postflight_stm32cubeclt_installed() { return 0; }
+
+# Corrected: the cross toolchain and programmer resolve, the build tools do not.
+postflight_login_path_resolve() {
+  case "$1" in
+    arm-none-eabi-gcc)    printf '/opt/st/stm32cubeclt_1.22.0/GNU-tools-for-STM32/bin/%s\n' "$1" ;;
+    STM32_Programmer_CLI) printf '/opt/st/stm32cubeclt_1.22.0/STM32CubeProgrammer/bin/%s\n' "$1" ;;
+    *)                    printf '/usr/bin/%s\n' "$1" ;;
+  esac
+}
+POSTFLIGHT_PASSES=0
+POSTFLIGHT_FAILURES=0
+postflight_vendor_toolchain_paths
+[[ "$POSTFLIGHT_FAILURES" == 0 ]]
+[[ "$POSTFLIGHT_PASSES" == 2 ]]
+
+# Shadowed: every build tool resolves inside the vendor tree.
+postflight_login_path_resolve() {
+  case "$1" in
+    cmake|make|ninja)     printf '/opt/st/stm32cubeclt_1.22.0/CMake/bin/%s\n' "$1" ;;
+    arm-none-eabi-gcc)    printf '/opt/st/stm32cubeclt_1.22.0/GNU-tools-for-STM32/bin/%s\n' "$1" ;;
+    STM32_Programmer_CLI) printf '/opt/st/stm32cubeclt_1.22.0/STM32CubeProgrammer/bin/%s\n' "$1" ;;
+  esac
+}
+POSTFLIGHT_PASSES=0
+POSTFLIGHT_FAILURES=0
+postflight_vendor_toolchain_paths
+[[ "$POSTFLIGHT_FAILURES" == 1 ]]
+
+# Removing the vendor directories entirely must not be reported as success for
+# the cross toolchain — the programmer and arm-none-eabi-* still have to resolve.
+postflight_login_path_resolve() {
+  case "$1" in
+    cmake|make|ninja) printf '/usr/bin/%s\n' "$1" ;;
+  esac
+}
+POSTFLIGHT_PASSES=0
+POSTFLIGHT_FAILURES=0
+postflight_vendor_toolchain_paths
+[[ "$POSTFLIGHT_FAILURES" == 1 ]]
+
+# A host without STM32CubeCLT is not a host with a problem.
+postflight_stm32cubeclt_installed() { return 1; }
+POSTFLIGHT_PASSES=0
+POSTFLIGHT_FAILURES=0
+postflight_vendor_toolchain_paths
+[[ "$POSTFLIGHT_FAILURES" == 0 ]]
+[[ "$POSTFLIGHT_PASSES" == 0 ]]
+
 printf 'Linux postflight tests: ok\n'

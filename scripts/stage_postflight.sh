@@ -157,6 +157,23 @@ postflight_ssh_agent() {
     postflight_fail "loginctl linger is disabled for $USER"
   fi
 
+  # A GNOME desktop also runs gnome-keyring's GCR agent, which announces its own
+  # socket to the systemd user manager at runtime and so overrides
+  # ~/.config/environment.d/10-ssh-agent.conf. Shells correct themselves, but
+  # every GUI-launched application inherits the manager's value — so a key added
+  # from a terminal would be invisible to the editor's git integration. What
+  # matters is the socket the manager actually advertises, not which units exist.
+  local advertised_socket
+  advertised_socket=$(systemctl --user show-environment 2>/dev/null \
+    | sed -n 's/^SSH_AUTH_SOCK=//p')
+  if [[ -z "$advertised_socket" ]]; then
+    postflight_fail "the systemd user manager advertises no SSH_AUTH_SOCK"
+  elif [[ "$advertised_socket" == "$expected_socket" ]]; then
+    postflight_pass "GUI applications inherit the OpenSSH agent socket"
+  else
+    postflight_fail "a second SSH agent is advertised to GUI applications ($advertised_socket) — mask it: systemctl --user mask gcr-ssh-agent.socket gcr-ssh-agent.service"
+  fi
+
   fingerprint=$(ssh-keygen -lf "$HOME/.ssh/id_ed25519.pub" 2>/dev/null \
     | awk 'NR == 1 { print $2; exit }')
   if [[ -n "$fingerprint" ]] \
@@ -310,6 +327,57 @@ postflight_shell_paths() {
     else
       postflight_fail "zsh rustup PATH resolution is wrong (got '${rustup_path:-missing}')"
     fi
+  fi
+
+  postflight_vendor_toolchain_paths
+}
+
+# STM32CubeCLT ships /etc/profile.d/cubeclt-bin-path_<version>.sh, which
+# prepends its bundled CMake, Make, Ninja and LLVM ahead of /usr/bin for every
+# login shell — and therefore for every GUI application, because the systemd
+# user manager inherits the login environment. system/profile.d/zz-*.sh corrects
+# that, but the vendor file is package-managed and returns under a new
+# version-suffixed name on each upgrade, so the shadowing can come back without
+# anyone touching a config file. This is the check that notices.
+#
+# A login shell is required: /etc/profile.d is not read by the bare
+# --noprofile --norc shells the checks above use.
+
+# Where a login shell would find a command. Split out so the check below can be
+# exercised against a fixture instead of this host's real /etc/profile.d.
+postflight_login_path_resolve() {
+  bash -lc "command -v $1" 2>/dev/null || true
+}
+
+postflight_stm32cubeclt_installed() {
+  compgen -G '/opt/st/stm32cubeclt_*' >/dev/null 2>&1
+}
+
+postflight_vendor_toolchain_paths() {
+  [[ "$OS_KIND" == linux ]] || return 0
+  postflight_stm32cubeclt_installed || return 0
+
+  local tool resolved shadowed=()
+  for tool in cmake make ninja; do
+    resolved=$(postflight_login_path_resolve "$tool")
+    [[ "$resolved" == /opt/st/* ]] && shadowed+=("$tool")
+  done
+
+  if ((${#shadowed[@]} == 0)); then
+    postflight_pass "STM32CubeCLT does not shadow the system build tools"
+  else
+    postflight_fail "STM32CubeCLT shadows ${shadowed[*]} for every login shell — install system/profile.d/zz-stm32cubeclt-path.sh"
+  fi
+
+  # The half that must keep working: the cross toolchain and the programmer.
+  local missing=()
+  for tool in arm-none-eabi-gcc STM32_Programmer_CLI; do
+    [[ -n "$(postflight_login_path_resolve "$tool")" ]] || missing+=("$tool")
+  done
+  if ((${#missing[@]} == 0)); then
+    postflight_pass "STM32 cross toolchain and programmer are on the login PATH"
+  else
+    postflight_fail "STM32CubeCLT is installed but ${missing[*]} is not on the login PATH"
   fi
 }
 

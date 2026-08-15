@@ -97,10 +97,99 @@ curl -fsSL https://raw.githubusercontent.com/mssaleh/workspace-setup/main/setup.
 - **Does not authenticate with GitHub.** Run `gh auth login` manually after.
 - **Does not install Docker on macOS.** macOS uses Apple's native `container` CLI (Virtualization.framework micro-VMs + Rosetta, no daemon). On Linux, the official Docker Engine is installed natively — it's the standard runtime there.
 - **Does not push SSH keys anywhere.** The public key stays at `~/.ssh/id_ed25519.pub`; add it to GitHub manually or via `gh auth login`.
-- **Does not automatically harden the SSH server.** `system/sshd/90-workspace-setup.conf` is a reviewed Ubuntu baseline for terminal-only hosts, but it must only be installed after an authorized-key login has been verified; automatically disabling passwords on a fresh host could lock out its owner.
+- **Does not change anything outside `$HOME`.** Everything under `system/` is reviewed and ready but installed by hand — see [System-level files](#system-level-files-you-install-yourself). A file in `/etc` affects every account and, for an SSH or sysctl mistake, can lock you out of the machine or leave it unbootable; that is the user's call to make, not a setup script's.
 - **Does not install coding-agent plugins or marketplace configs.** The guardrails (denylists) are installed; the agent-specific plugins/marketplaces are left for the user to configure.
 - **Does not silently overwrite unknown user configuration.** Missing Git defaults and supported agent-policy keys are merged without removing unrelated values. An ambiguous file is preserved and causes postflight to report a conflict.
 - **Does not set the Apple Terminal font or colors.** The "Clear Dark" profile is installed with size/Option-as-Meta/bell settings, but the font (SF Mono) and exact colors require a one-time manual step in Terminal → Settings → Profile (the plist format needs opaque NSKeyedArchiver blobs that can't be generated inline).
+
+## System-level files you install yourself
+
+Four things a `$HOME`-only setup cannot reach. Each is reviewed, each is
+reversible by deleting the file, and postflight reports the two that can regress
+on their own. Nothing here is required for the rest of the setup to work.
+
+### STM32CubeCLT shadowing the system build tools — `system/profile.d/`
+
+STM32CubeCLT ships `/etc/profile.d/cubeclt-bin-path_<version>.sh`, which
+*prepends* eight directories to `PATH`. Its bundled CMake, GNU Make, Ninja and
+LLVM then win over the distribution's copies in every login shell, and — because
+the systemd user manager inherits the login environment — in every GUI
+application too. An unrelated CMake project, `node-gyp`, or a Python wheel
+builds against a vendor toolchain nobody chose for it.
+
+That file belongs to the `stm32cubeclt-<version>` package and returns under a
+new version-suffixed name on each upgrade, so it is left alone and its effect is
+corrected afterwards. `run-parts` sorts `/etc/profile.d` in C collation, which
+puts a `zz-` name last:
+
+```bash
+sudo install -m 0644 system/profile.d/zz-stm32cubeclt-path.sh /etc/profile.d/
+```
+
+The programmer, the ST-LINK GDB server and `arm-none-eabi-*` stay on the global
+`PATH`. CMake, Make, Ninja and `st-arm-clang` are reached per project through
+`use_stm32` in `~/.config/direnv/direnvrc`. Verify with a *new login shell*:
+
+```bash
+command -v cmake make ninja      # all under /usr/bin
+command -v arm-none-eabi-gcc STM32_Programmer_CLI   # both under /opt/st
+```
+
+### Watch and memory limits — `system/sysctl.d/`
+
+Ubuntu's 65536 inotify watches and 128 instances are reached by an editor
+indexing a large tree plus a few agent sessions, and the failure is silent: a
+watcher stops noticing changes rather than reporting an error.
+
+```bash
+sudo install -m 0644 system/sysctl.d/60-dev-limits.conf /etc/sysctl.d/
+sudo sysctl --system
+```
+
+### Unbounded container logs — `system/docker/`
+
+The default `json-file` driver has no size limit, so one chatty container fills
+the disk. This file is a **merge target, not a drop-in replacement**: it carries
+the `runtimes.nvidia` block that `nvidia-ctk` writes, so compare it against what
+is already there before copying, and keep any local additions.
+
+```bash
+diff -u /etc/docker/daemon.json system/docker/daemon.json
+dockerd --validate --config-file system/docker/daemon.json
+sudo cp /etc/docker/daemon.json /etc/docker/daemon.json.bak
+sudo install -m 0644 system/docker/daemon.json /etc/docker/
+sudo systemctl restart docker
+```
+
+### A second SSH agent — no file, two commands
+
+A GNOME desktop runs gnome-keyring's GCR agent alongside the OpenSSH systemd
+socket. GCR announces its own socket to the systemd user manager at runtime,
+which overrides `~/.config/environment.d/10-ssh-agent.conf`. Shells correct
+themselves, but GUI applications inherit the manager's value — so a key added
+from a terminal is invisible to an editor's git integration. Keep one agent:
+
+```bash
+systemctl --user mask gcr-ssh-agent.socket gcr-ssh-agent.service
+systemctl --user restart ssh-agent.socket
+# log out and back in, then confirm one socket for shells and GUI alike:
+systemctl --user show-environment | grep SSH_AUTH_SOCK
+```
+
+To undo: `systemctl --user unmask gcr-ssh-agent.socket gcr-ssh-agent.service`.
+
+### SSH server hardening — `system/sshd/`
+
+`system/sshd/90-workspace-setup.conf` is a reviewed Ubuntu baseline for
+terminal-only hosts. Install it **only after** verifying an authorized-key login
+works, because it disables password authentication and could otherwise lock out
+the machine's owner.
+
+```bash
+ssh -o PreferredAuthentications=publickey -o BatchMode=yes "$USER@localhost" true
+sudo install -m 0644 system/sshd/90-workspace-setup.conf /etc/ssh/sshd_config.d/
+sudo sshd -t && sudo systemctl reload ssh
+```
 
 ## Working on a Mac over SSH
 
@@ -250,7 +339,11 @@ workspace-setup/
 │       ├── kitty/platform-linux.conf  # → ~/.config/kitty/platform.conf on Linux
 │       └── container/config.toml # templated: ${CPUS}, ${MEM_MB} → host-scaled
 ├── tests/                          # convergence + clean-shell PATH regression tests
-├── system/sshd/                    # opt-in terminal-only Ubuntu SSH hardening
+├── system/                         # reviewed /etc files, installed by hand
+│   ├── profile.d/                  # undo STM32CubeCLT's PATH prepend
+│   ├── sysctl.d/                   # inotify watch/instance limits, swappiness
+│   ├── docker/daemon.json          # log rotation + builder GC (merge target)
+│   └── sshd/                       # opt-in terminal-only Ubuntu SSH hardening
 └── README.md
 ```
 
