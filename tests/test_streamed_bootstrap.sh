@@ -28,6 +28,7 @@ printf '%s\n' 'stage_dotfiles() { :; }' > "$fixture/scripts/stage_dotfiles.sh"
 printf '%s\n' 'stage_toolchains() { :; }' > "$fixture/scripts/stage_toolchains.sh"
 printf '%s\n' 'stage_ssh() { :; }' > "$fixture/scripts/stage_ssh.sh"
 printf '%s\n' 'stage_fonts_terminal() { :; }' > "$fixture/scripts/stage_fonts_terminal.sh"
+printf '%s\n' 'stage_terminal_profile() { :; }' > "$fixture/scripts/stage_terminal_profile.sh"
 printf '%s\n' 'stage_container() { :; }' > "$fixture/scripts/stage_container.sh"
 printf '%s\n' 'stage_postflight() { :; }' > "$fixture/scripts/stage_postflight.sh"
 

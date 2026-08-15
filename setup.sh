@@ -122,6 +122,8 @@ fi
 # shellcheck disable=SC1091
 . "$(repo_dir)/scripts/stage_fonts_terminal.sh"
 # shellcheck disable=SC1091
+. "$(repo_dir)/scripts/stage_terminal_profile.sh"
+# shellcheck disable=SC1091
 . "$(repo_dir)/scripts/stage_container.sh"
 # shellcheck disable=SC1091
 . "$(repo_dir)/scripts/stage_postflight.sh"
@@ -154,6 +156,9 @@ main() {
   fi
   if [[ -z "${SKIP_FONT:-}" ]]; then
     stage "fonts + terminal: Nerd Font, kitty"     stage_fonts_terminal
+    # After the font stage, so the family it installs already exists when the
+    # GNOME terminal is pointed at it.
+    stage "terminal profile: GNOME parity with kitty" stage_terminal_profile
   fi
 
   if ! stage "postflight: verify the converged host" stage_postflight; then

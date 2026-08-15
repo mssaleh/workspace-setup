@@ -32,6 +32,7 @@ Apple Container requires Apple silicon and macOS 26 or later. On an older/Intel 
 | **containers** | macOS only: installs Apple Container from the signed package on Apple's GitHub release, ensures Rosetta, and starts it with kernel installation enabled. `container-compose` is supplied separately by Homebrew. |
 | **ssh** | Generates an ed25519 keypair if none exists, locks down `~/.ssh` permissions (700 dir, 600 files), wires up the SSH agent (macOS: Keychain; Linux: systemd user unit). Does **not** push to GitHub — run `gh auth login` manually. |
 | **fonts + terminal** | Installs JetBrainsMono Nerd Font and Kitty via Kitty's upstream installer on both platforms, then creates the standard `~/.local/bin/{kitty,kitten}` links. On macOS it also installs Maccy/LibreOffice and imports Apple Terminal defaults once. On Linux it finishes the desktop-side install the upstream installer leaves out — application entries, window class, icon theme, terminal preference, terminfo — so Kitty behaves like an installed GNOME application rather than a binary on `PATH`. |
+| **terminal profile** | Gives GNOME's Ptyxis the same *behaviour* as Kitty — 100000 lines of scrollback, a login shell so `/etc/profile.d` is read, no audible bell — and deliberately leaves its *appearance* alone. Ptyxis keeps Ubuntu's palette and `Monospace 10` because looking different from Kitty is how you tell at a glance which terminal a window belongs to. A setting the user has changed themselves is preserved and reported, never overwritten. |
 | **postflight** | Verifies provider packages, regular-file configuration, clean-shell PATH resolution, upstream artifacts, and the active container runtime as one coherent result. |
 
 Kitty and tmux are configured as one clipboard path for coding agents: OSC 52
@@ -322,6 +323,7 @@ workspace-setup/
 │   ├── stage_container.sh         # signed Apple Container pkg + system startup
 │   ├── stage_ssh.sh               # ed25519 keypair + permissions + agent
 │   ├── stage_fonts_terminal.sh    # Nerd Font + upstream Kitty + Apple Terminal
+│   ├── stage_terminal_profile.sh  # GNOME terminal behaviour (never its appearance)
 │   └── stage_postflight.sh        # unified host verification
 ├── dotfiles/
 │   ├── bashrc, bash_profile, profile, inputrc, nanorc # shell/editor — both platforms
