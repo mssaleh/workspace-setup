@@ -21,6 +21,14 @@ mkdir -p \
 # shellcheck disable=SC1091
 . "$TEST_ROOT/scripts/stage_postflight.sh"
 
+# GNU stat accepts `-f` with different semantics and exits successfully after
+# printing filesystem statistics. The verifier must choose the Linux form
+# explicitly or valid 0600 SSH files are reported as unsafe.
+mode_probe="$TEST_TMP/mode-probe"
+: > "$mode_probe"
+chmod 0600 "$mode_probe"
+[[ "$(postflight_mode "$mode_probe")" == 600 ]]
+
 make_executable() {
   printf '%s\n' '#!/bin/sh' 'exit 0' > "$1"
   chmod +x "$1"

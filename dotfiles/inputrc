@@ -17,3 +17,20 @@
 
 # Case-insensitive completion (mirrors the zsh matcher-list in ~/.zshrc)
 set completion-ignore-case on
+set completion-map-case on
+set colored-completion-prefix on
+set colored-stats on
+set visible-stats on
+set mark-symlinked-directories on
+set menu-complete-display-prefix on
+set show-all-if-ambiguous on
+set skip-completed-text on
+set enable-bracketed-paste on
+
+# With text already entered, Up/Down search commands beginning with that text.
+# fzf owns Ctrl-R when available; these remain fast, predictable Readline
+# fallbacks for prefix history navigation.
+"\e[A": history-search-backward
+"\eOA": history-search-backward
+"\e[B": history-search-forward
+"\eOB": history-search-forward

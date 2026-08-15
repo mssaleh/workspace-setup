@@ -41,6 +41,28 @@ ssh_key_use_passphrase() {
   fi
 }
 
+# Match identities by fingerprint, never by the key's filename. `ssh-add -l`
+# reports a fingerprint and a free-form comment, so grepping for id_ed25519
+# misses ordinary keys whose comment is user@host.
+ssh_default_identity_fingerprint() {
+  [[ -f "$HOME/.ssh/id_ed25519.pub" ]] || return 1
+  ssh-keygen -lf "$HOME/.ssh/id_ed25519.pub" 2>/dev/null \
+    | awk 'NR == 1 { print $2; exit }'
+}
+
+ssh_agent_has_default_identity() {
+  local fingerprint
+  fingerprint=$(ssh_default_identity_fingerprint) || return 1
+  [[ -n "$fingerprint" ]] || return 1
+  ssh-add -l 2>/dev/null \
+    | awk -v wanted="$fingerprint" '$2 == wanted { found = 1 } END { exit !found }'
+}
+
+linux_ssh_agent_socket() {
+  local runtime_dir="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+  printf '%s/openssh_agent\n' "$runtime_dir"
+}
+
 stage_ssh() {
   mkdir -p "$HOME/.ssh"
   chmod 700 "$HOME/.ssh"
@@ -84,7 +106,7 @@ stage_ssh() {
     # macOS: the launchd-managed agent (com.openssh.ssh-agent) is always
     # running. Add the key to the Keychain-backed agent so the passphrase
     # (if any) is stored in Keychain and the key survives reboot.
-    if ssh-add -l 2>/dev/null | grep -q id_ed25519; then
+    if ssh_agent_has_default_identity; then
       ok "key already loaded in agent"
     else
       info "adding key to macOS Keychain-backed SSH agent…"
@@ -94,14 +116,24 @@ stage_ssh() {
     fi
 
   elif [[ "$OS_KIND" == linux ]]; then
+    # Desktop sessions may inherit GCR's different agent socket. Select the
+    # OpenSSH socket before activating the unit so service-based releases also
+    # receive the correct SSH_AUTH_SOCK at process start.
+    local agent_socket
+    agent_socket=$(linux_ssh_agent_socket)
+    export SSH_AUTH_SOCK="$agent_socket"
+    systemctl --user set-environment SSH_AUTH_SOCK="$agent_socket" 2>/dev/null \
+      || warn "could not update the current user-manager SSH_AUTH_SOCK"
+
     # Linux: enable the systemd user ssh-agent if a unit is shipped.
     # - Ubuntu 26.04: ships ssh-agent.socket (WantedBy=sockets.target, headless-ready).
     # - Ubuntu 24.04: ships ssh-agent.service only, GUI-gated via
     #   ConditionPathExists=/etc/X11/Xsession.options. We drop a drop-in to
     #   strip that condition so it works headless.
     # - Other distros (Arch, Fedora): may ship the unit; we try and warn if not.
-    local needs_linger=no
+    local agent_unit_found=no
     if [[ -f /usr/lib/systemd/user/ssh-agent.socket ]]; then
+      agent_unit_found=yes
       # 26.04+ path — socket-activated, clean headless enable.
       if systemctl --user is-enabled ssh-agent.socket >/dev/null 2>&1; then
         ok "ssh-agent.socket already enabled"
@@ -109,9 +141,11 @@ stage_ssh() {
         info "enabling ssh-agent.socket (systemd user unit)…"
         systemctl --user enable --now ssh-agent.socket 2>/dev/null \
           || warn "could not enable ssh-agent.socket (run: systemctl --user enable --now ssh-agent.socket)"
-        needs_linger=yes
       fi
+      systemctl --user start ssh-agent.socket 2>/dev/null \
+        || warn "could not start ssh-agent.socket"
     elif [[ -f /usr/lib/systemd/user/ssh-agent.service ]]; then
+      agent_unit_found=yes
       # 24.04 path — service only, GUI-gated. Drop a drop-in to strip the
       # ConditionPathExists so it works on a headless box.
       local dropin_dir="$HOME/.config/systemd/user/ssh-agent.service.d"
@@ -134,19 +168,19 @@ DROPIN
           systemctl --user enable --now ssh-agent.service 2>/dev/null \
             || warn "could not enable ssh-agent.service (run: systemctl --user enable --now ssh-agent.service)"
         fi
-        needs_linger=yes
       else
         ok "ssh-agent.service headless drop-in already installed"
       fi
+      systemctl --user start ssh-agent.service 2>/dev/null \
+        || warn "could not start ssh-agent.service"
     else
-      warn "no systemd user ssh-agent unit found on this system (the dotfiles' SSH_AUTH_SOCK guard will fall back to a per-shell ssh-agent)"
+      warn "no systemd user ssh-agent unit found on this system"
     fi
 
-    # enable-linger so the user systemd manager (and the agent) survive logout.
-    # Also useful for any socket-activated user service (Docker Engine on Linux
-    # runs as a system service under root, so it doesn't need linger — but the
-    # ssh-agent user unit does). We only do this once.
-    if [[ "$needs_linger" == yes ]]; then
+    # enable-linger so the user manager and agent survive logout. Converge this
+    # independently of unit enablement: Ubuntu may preset-enable the socket on
+    # a fresh host while leaving linger disabled.
+    if [[ "$agent_unit_found" == yes ]]; then
       if loginctl show-user "$USER" 2>/dev/null | grep -q '^Linger=yes'; then
         ok "loginctl linger already enabled for $USER"
       else
@@ -156,15 +190,22 @@ DROPIN
       fi
     fi
 
+    # Confirm activation created the selected socket before trying ssh-add.
+    if [[ -S "$agent_socket" ]]; then
+      ok "OpenSSH agent socket is ready at $agent_socket"
+    else
+      warn "OpenSSH agent socket is not available at $agent_socket"
+    fi
+
     # Load the key into the agent if one is running. On a fresh headless box
     # with a passphrase-protected key, this prompts once for the passphrase
     # (via the TTY). AddKeysToAgent yes in ~/.ssh/config means future
     # connections don't re-prompt within the same boot.
-    if [[ -n "${SSH_AUTH_SOCK:-}" ]] && ssh-add -l 2>/dev/null | grep -q id_ed25519; then
+    if [[ -n "${SSH_AUTH_SOCK:-}" ]] && ssh_agent_has_default_identity; then
       ok "key already loaded in agent"
     else
       info "loading key into the SSH agent (you'll be prompted for the passphrase if the key has one)…"
-      ssh-add "$HOME/.ssh/id_ed25519" 2>/dev/null \
+      ssh-add "$HOME/.ssh/id_ed25519" \
         || warn "could not add key to agent (run: ssh-add ~/.ssh/id_ed25519)"
     fi
 

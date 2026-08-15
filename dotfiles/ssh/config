@@ -9,12 +9,23 @@
 #     IdentityFile ~/.ssh/id_ed25519
 #     IdentitiesOnly yes
 
-# Defaults for every host. Extended keepalives so sessions (incl. kitten ssh)
-# survive laptop sleep/wake over a stable overlay: SSH-layer probes
-# every 30s, ~3h grace (30 x 360). TCPKeepAlive off so a transient TCP idle
-# doesn't drop us — ServerAlive is the sole arbiter. (mosh/ds survives regardless.)
+# `ks <host>` is the managed-host profile: kitty ships its terminfo and shell
+# integration. `s <host>` is the legacy profile and advertises xterm-256color.
+# `ds <host>` remains the durable Mosh + tmux profile.
+
+# Defaults for every host. Plain SSH fails a dead connection in about three
+# minutes; Mosh + tmux, rather than a three-hour keepalive grace period, owns
+# session durability. Multiplexing removes repeat-authentication latency while
+# keeping each master short-lived and its socket inside a private directory.
 Host *
     AddKeysToAgent yes
+    ConnectTimeout 10
+    ConnectionAttempts 1
     ServerAliveInterval 30
-    ServerAliveCountMax 360
+    ServerAliveCountMax 6
     TCPKeepAlive no
+    ControlMaster auto
+    ControlPersist 10m
+    ControlPath ~/.ssh/controlmasters/%C
+    HashKnownHosts yes
+    UpdateHostKeys yes

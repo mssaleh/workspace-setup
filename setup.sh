@@ -170,7 +170,7 @@ Next steps (manual, not automated by design):
   2. Authenticate with GitHub:
        gh auth login
   3. Edit ~/.ssh/config to add your hosts (the file has an example Host block).
-  4. Restart your shell (or source ~/.bashrc / ~/.zshrc) to pick up the new config.
+  4. Restart the terminal, or run: exec "$SHELL" -l
 Report bugs at: https://github.com/mssaleh/workspace-setup/issues
 NEXT
 }

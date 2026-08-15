@@ -34,6 +34,11 @@ Apple Container requires Apple silicon and macOS 26 or later. On an older/Intel 
 | **fonts + terminal** | Installs JetBrainsMono Nerd Font and Kitty via Kitty's upstream installer on both platforms, then creates the standard `~/.local/bin/{kitty,kitten}` links. On macOS it also installs Maccy/LibreOffice and imports Apple Terminal defaults once. On Linux it finishes the desktop-side install the upstream installer leaves out — application entries, window class, icon theme, terminal preference, terminfo — so Kitty behaves like an installed GNOME application rather than a binary on `PATH`. |
 | **postflight** | Verifies provider packages, regular-file configuration, clean-shell PATH resolution, upstream artifacts, and the active container runtime as one coherent result. |
 
+Kitty and tmux are configured as one clipboard path for coding agents: OSC 52
+writes work locally and through SSH/Mosh/tmux, while clipboard reads always ask
+for confirmation. tmux uses `set-clipboard on` specifically so applications in
+a pane—not only tmux copy mode—can copy results to the desktop clipboard.
+
 ## Ownership and convergence model
 
 This is automation for a conventional hand-configured machine, not a settings manager:
@@ -92,6 +97,7 @@ curl -fsSL https://raw.githubusercontent.com/mssaleh/workspace-setup/main/setup.
 - **Does not authenticate with GitHub.** Run `gh auth login` manually after.
 - **Does not install Docker on macOS.** macOS uses Apple's native `container` CLI (Virtualization.framework micro-VMs + Rosetta, no daemon). On Linux, the official Docker Engine is installed natively — it's the standard runtime there.
 - **Does not push SSH keys anywhere.** The public key stays at `~/.ssh/id_ed25519.pub`; add it to GitHub manually or via `gh auth login`.
+- **Does not automatically harden the SSH server.** `system/sshd/90-workspace-setup.conf` is a reviewed Ubuntu baseline for terminal-only hosts, but it must only be installed after an authorized-key login has been verified; automatically disabling passwords on a fresh host could lock out its owner.
 - **Does not install coding-agent plugins or marketplace configs.** The guardrails (denylists) are installed; the agent-specific plugins/marketplaces are left for the user to configure.
 - **Does not silently overwrite unknown user configuration.** Missing Git defaults and supported agent-policy keys are merged without removing unrelated values. An ambiguous file is preserved and causes postflight to report a conflict.
 - **Does not set the Apple Terminal font or colors.** The "Clear Dark" profile is installed with size/Option-as-Meta/bell settings, but the font (SF Mono) and exact colors require a one-time manual step in Terminal → Settings → Profile (the plist format needs opaque NSKeyedArchiver blobs that can't be generated inline).
@@ -205,7 +211,7 @@ If your machine shares a single skill store across agents (e.g. `~/.agents/skill
 bash tests/run.sh
 ```
 
-The suite runs against temporary `HOME` directories and never touches the real one. It covers convergence decisions (install / no-op / legacy-link repair / known-version upgrade / merge / preserved conflict), the provider manifest, Linux command aliases, clean-shell PATH resolution for bash and zsh, postflight on both platforms, and the streamed `curl | bash` payload bootstrap.
+The suite runs against temporary `HOME` directories and never touches the real one. It covers convergence decisions (install / no-op / legacy-link repair / known-version upgrade / merge / preserved conflict), the provider manifest, Linux command aliases, clean-shell PATH resolution for bash and zsh, Nano tab safety, the Kitty/tmux clipboard chain, shell hook idempotence, SSH-agent identity matching, postflight on both platforms, and the streamed `curl | bash` payload bootstrap.
 
 ## Repository structure
 
@@ -229,7 +235,7 @@ workspace-setup/
 │   ├── stage_fonts_terminal.sh    # Nerd Font + upstream Kitty + Apple Terminal
 │   └── stage_postflight.sh        # unified host verification
 ├── dotfiles/
-│   ├── bashrc, bash_profile, profile, inputrc   # bash — both macOS and Linux
+│   ├── bashrc, bash_profile, profile, inputrc, nanorc # shell/editor — both platforms
 │   ├── zshenv, zprofile, zshrc                  # zsh — macOS only (Linux is bash-only)
 │   ├── tmux.conf
 │   ├── ssh/config                 # example Host block + keepalive defaults
@@ -238,11 +244,13 @@ workspace-setup/
 │   ├── agents/skills/             # skills converged into every agent home
 │   │   └── apple-container-amd64/ # SKILL.md + scripts/optimize-builder.sh
 │   └── config/                    # kitty/, bat/, yazi/, gh/, opencode/, container/
+│       ├── environment.d/         # Linux OpenSSH-agent environment
 │       ├── kitty/kitty.conf       # platform-neutral base; ends in `include platform.conf`
 │       ├── kitty/platform-macos.conf  # → ~/.config/kitty/platform.conf on macOS
 │       ├── kitty/platform-linux.conf  # → ~/.config/kitty/platform.conf on Linux
 │       └── container/config.toml # templated: ${CPUS}, ${MEM_MB} → host-scaled
 ├── tests/                          # convergence + clean-shell PATH regression tests
+├── system/sshd/                    # opt-in terminal-only Ubuntu SSH hardening
 └── README.md
 ```
 
@@ -255,7 +263,7 @@ The script detects the OS and adapts:
 | Package manager | Homebrew | apt-get (Ubuntu/Debian) |
 | Container runtime | Apple `container` CLI (Apple-signed release pkg) + Homebrew `container-compose` | **Docker Engine** (official, from download.docker.com) + Docker Compose v2 |
 | Apple Terminal defaults | applied (Clear Dark profile, scalar keys only) | skipped |
-| SSH agent | macOS Keychain (launchd-managed `com.openssh.ssh-agent`, `--apple-use-keychain`) | systemd user unit (Ubuntu 26.04+: socket-activated; Ubuntu 24.04: headless drop-in) + `AddKeysToAgent yes`; passphrase typed once per boot |
+| SSH agent | macOS Keychain (launchd-managed `com.openssh.ssh-agent`, `--apple-use-keychain`) | systemd user unit (Ubuntu 26.04+: socket-activated; Ubuntu 24.04: headless drop-in), explicit OpenSSH socket selection, linger + `AddKeysToAgent yes`; passphrase typed once per boot |
 | SSH key passphrase | passphrase-less (Keychain + FileVault protect the on-disk key) | passphrase-protected by default (override with `SSH_KEY_PASSPHRASE=none` for disposable VMs) |
 | Nerd Font | brew cask (`JetBrainsMono Nerd Font`) | GitHub release → `~/.local/share/fonts` (`JetBrainsMono Nerd Font Mono` variant — single-width icons for TUI alignment) |
 | Maccy clipboard manager | brew cask | skipped (Linux has its own clipboard managers) |
@@ -266,7 +274,7 @@ The script detects the OS and adapts:
 | npm global prefix | `~/.npm/packages` via `~/.npmrc` (`prefix` + `cache`) — set on both platforms so `npm i -g` never needs sudo | same |
 | Kitty | upstream app installer → `/Applications/kitty.app` | upstream app installer → `~/.local/kitty.app`, plus desktop integration the installer omits: absolute-path `.desktop` entries, `StartupWMClass`, a "New Window" action, the scalable icon in the hicolor theme, `xdg-terminals.list`, and `~/.terminfo` |
 | Kitty config | `kitty.conf` + `platform-macos.conf` → `platform.conf`: Cmd-based keymap, `font_size 14`, powerline tabs, `macos_*` options | `kitty.conf` + `platform-linux.conf` → `platform.conf`: Ctrl+Shift keymap, `font_size 11` (matches GNOME's `monospace-font-name`), flat tabs. Cmd is **not** usable — kitty aliases it to Super, which GNOME Shell grabs first, so the bindings load silently and never fire |
-| Kitty window decorations | native macOS title bar | `linux_display_server x11`, so Mutter reparents the window into a frame drawn by its own GTK `mutter-x11-frames` helper and kitty gets the real Yaru title bar. Mutter implements no `zxdg_decoration_manager_v1`, so a Wayland client must draw its own bar and cannot look like an Adwaita header bar. Requires `libxcb-xkb1` (declared in `PACKAGES_APT`) — **without it kitty does not start**. Postflight also reports if Mutter's `xwayland-native-scaling` is off, which would leave text soft on a fractional scale |
+| Kitty window decorations | native macOS title bar | `linux_display_server x11` under the Wayland session, so GNOME/Mutter supplies the preferred desktop title bar and OS-window controls; `Ctrl+Shift+P` is left to terminal applications. |
 | Dotfiles Homebrew paths | `/opt/homebrew/...` (via `$BREW_PREFIX`) | guarded by `command -v brew` / `$BREW_PREFIX`; no-op when brew is absent |
-| zsh plugins / bash completion | Homebrew paths (`zsh-autosuggestions`, `zsh-syntax-highlighting`) | Linux paths (`/usr/share/bash-completion/`) with Homebrew fallback; **no zsh on Linux** (bash only) |
-| Shell config files | regular `bashrc`, `bash_profile`, `profile`, `zshenv`, `zprofile`, `zshrc`, `inputrc`, `tmux.conf` | regular `bashrc`, `bash_profile`, `profile`, `inputrc`, `tmux.conf` (no zsh files) |
+| Shell integrations | zsh: zoxide, fzf, `zsh-autosuggestions`, `zsh-syntax-highlighting`; Bash receives the matching cross-platform hooks | Bash: zoxide, fzf + `/usr/share/bash-completion/`; **no zsh on Linux** |
+| Shell config files | regular `bashrc`, `bash_profile`, `profile`, `zshenv`, `zprofile`, `zshrc`, `inputrc`, `nanorc`, `tmux.conf` | regular `bashrc`, `bash_profile`, `profile`, `inputrc`, `nanorc`, `tmux.conf` (no zsh files) |

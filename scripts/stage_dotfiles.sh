@@ -68,7 +68,7 @@ zshrc_semantically_compliant() {
         source "$HOME/.zshenv"
         source "$1"
         [[ "$EDITOR" == nano ]]
-        (( $+functions[y] && $+functions[ds] && $+functions[ssh] && $+functions[s] && $+functions[ks] ))
+        (( $+functions[y] && $+functions[ds] && $+functions[s] && $+functions[ks] ))
       ' zsh "$dst" >/dev/null 2>&1; then
     CONFIG_MERGE_ACTION=unchanged
     return 0
@@ -390,6 +390,7 @@ stage_dotfiles() {
   fi
   install_repo_config "$repo" dotfiles/inputrc   "$HOME/.inputrc"
   install_repo_config "$repo" dotfiles/tmux.conf "$HOME/.tmux.conf"
+  install_repo_config "$repo" dotfiles/nanorc    "$HOME/.nanorc"
 
   stage_git_config "$repo"
   stage_npm_config
@@ -428,6 +429,10 @@ stage_dotfiles() {
     "$HOME/.config/gh/config.yml"
   install_repo_config "$repo" dotfiles/config/opencode/opencode.jsonc \
     "$HOME/.config/opencode/opencode.jsonc" 0644 merge_opencode_settings
+  if [[ "$OS_KIND" == linux ]]; then
+    install_repo_config "$repo" dotfiles/config/environment.d/10-ssh-agent.conf \
+      "$HOME/.config/environment.d/10-ssh-agent.conf"
+  fi
 
   if [[ "$OS_KIND" == macos && -z "${SKIP_CONTAINER:-}" ]]; then
     stage_container_config "$repo"
@@ -447,6 +452,8 @@ stage_dotfiles() {
 
   mkdir -p "$HOME/.ssh"
   chmod 0700 "$HOME/.ssh"
+  mkdir -p "$HOME/.ssh/controlmasters"
+  chmod 0700 "$HOME/.ssh/controlmasters"
   install_repo_config "$repo" dotfiles/ssh/config "$HOME/.ssh/config" 0600
 
   ok "configuration: installed=$CONFIG_INSTALLED_COUNT migrated=$CONFIG_MIGRATED_COUNT upgraded=$CONFIG_UPGRADED_COUNT merged=$CONFIG_MERGED_COUNT unchanged=$CONFIG_UNCHANGED_COUNT conflicts=$CONFIG_CONFLICT_COUNT"

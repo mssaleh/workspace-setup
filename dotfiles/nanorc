@@ -1,0 +1,19 @@
+# ~/.nanorc — low-friction defaults for code, configuration and remote edits.
+# Soft wrapping is visual only: Nano never inserts hard line breaks.
+set autoindent
+set atblanks
+set constantshow
+set indicator
+set linenumbers
+set minibar
+set mouse
+set positionlog
+set softwrap
+set stateflags
+set tabsize 4
+set trimblanks
+
+# Keep literal Tab input intact. Makefiles require it, and language-specific
+# formatters should own indentation policy rather than a global editor rule.
+# Syntax definitions are loaded by the package-managed system nanorc
+# (/etc/nanorc on Ubuntu; the Homebrew prefix on macOS).

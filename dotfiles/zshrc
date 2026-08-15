@@ -1,5 +1,12 @@
 # ~/.zshrc — interactive shell. PATH is set in ~/.zshenv.
 
+# Avoid duplicate precmd and key-binding hooks when this file is sourced twice
+# in one process. This variable is not exported, so every new zsh initializes.
+if [[ "${__WORKSPACE_ZSHRC_PID:-}" == "$$" ]]; then
+  return
+fi
+__WORKSPACE_ZSHRC_PID=$$
+
 # SSH agent socket — see ~/.bashrc for the full rationale. zsh needs the same
 # guard because the systemd user ssh-agent.socket sets SSH_AUTH_SOCK in the
 # user manager environment, not in every shell. macOS doesn't need this.
@@ -91,7 +98,7 @@ function y() {
 # ds: durable remote session — mosh (survives wifi drop / network roam) + tmux
 # on the remote (survives SSH disconnect; not remote reboot). Usage: ds mini | ds user@host
 # LC_ALL forces a valid UTF-8 locale so mosh doesn't choke on macOS sending
-# LC_CTYPE=UTF-8; the TERM downgrade matches ssh() so remote TUIs render on any host.
+# LC_CTYPE=UTF-8; the explicit TERM baseline keeps Mosh portable to old hosts.
 function ds() {
   local host="$1"
   if [ -z "$host" ]; then
@@ -143,19 +150,9 @@ function ds() {
          "$host" -- tmux new -A -D -s main
 }
 
-# ssh: Kitty advertises TERM=xterm-kitty locally. OpenSSH sends that terminal
-# type to remote PTYs, and many hosts do not have its terminfo installed. Keep
-# the local Kitty TERM, but use xterm-256color for SSH by default.
-function ssh() {
-  local _ssh_term="${TERM:-xterm-256color}"
-  case "$_ssh_term" in
-    xterm-kitty|tmux-256color|screen-256color) _ssh_term=xterm-256color ;;
-  esac
-  TERM="$_ssh_term" command ssh "$@"
-}
-
-# s: short compatible SSH command. Usage: s mini | s user@host
-function s() { ssh "$@"; }
+# Plain `ssh` preserves xterm-kitty for managed hosts. `s` is the explicit
+# compatibility path for old hosts that do not have kitty's terminfo.
+function s() { TERM=xterm-256color command ssh "$@"; }
 
 # ks: opt in to Kitty's ssh kitten for hosts where you want Kitty integration.
 # The kitten refuses to run outside a kitty window ("Error: The SSH kitten is
@@ -168,7 +165,7 @@ function ks() {
   if [ -n "$KITTY_WINDOW_ID" ] && command -v kitten >/dev/null 2>&1; then
     kitten ssh "$@"
   else
-    ssh "$@"
+    command ssh "$@"
   fi
 }
 
@@ -199,11 +196,16 @@ if command -v fzf >/dev/null 2>&1; then
   # such as automated `zsh -ic` SSH checks.
   if [[ -t 0 && -t 1 ]]; then
     source <(fzf --zsh)
-    eval "$(zoxide init zsh)"
   fi
 fi
 
-# Plugins (Homebrew, sourced — not aliases). Syntax-highlighting must be last.
+# Keep directory jumping available even when fzf is absent.
+if command -v zoxide >/dev/null 2>&1; then
+  eval "$(zoxide init zsh)"
+fi
+
+# Plugins (Homebrew, sourced — not aliases). Syntax highlighting is sourced at
+# the absolute end of the file, as required by the plugin.
 # OS-aware: on Homebrew they live under $BREW_PREFIX/share/<plugin>/; on Linux
 # distros that ship them as packages (Debian/Ubuntu: zsh-autosuggestions,
 # zsh-syntax-highlighting) they live in /usr/share/zsh-<plugin>/.
@@ -216,8 +218,6 @@ _zsh_plugin() {
   return 1
 }
 _zsh_plugin zsh-autosuggestions zsh-autosuggestions.zsh
-_zsh_plugin zsh-syntax-highlighting zsh-syntax-highlighting.zsh  # must be last
-unset -f _zsh_plugin
 
 # ── Linux-style navigation keys ────────────────────────────────────────────
 # Make Home / End / forward-Delete work at the shell prompt like they do on
@@ -239,3 +239,6 @@ bindkey '^[[3;5~' kill-word             # Ctrl+Delete → delete word to the rig
 # Word jumps to match Linux Ctrl+Left / Ctrl+Right:
 bindkey '^[[1;5D' backward-word         # Ctrl+Left
 bindkey '^[[1;5C' forward-word          # Ctrl+Right
+
+_zsh_plugin zsh-syntax-highlighting zsh-syntax-highlighting.zsh
+unset -f _zsh_plugin

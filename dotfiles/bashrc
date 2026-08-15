@@ -3,6 +3,15 @@
 # The bash twin of ~/.zshrc: same minimal setup, same prompt, same functions,
 # NO command aliases. Byte-identical on every machine (Mac + Linux).
 
+# This file installs hooks into PROMPT_COMMAND and Readline. Re-sourcing it in
+# the same process would duplicate those hooks; start a fresh login shell when
+# deploying changes instead. The marker is intentionally not exported, so a
+# child Bash process still performs its own initialization.
+if [[ "${__WORKSPACE_BASHRC_PID:-}" == "$BASHPID" ]]; then
+  return
+fi
+__WORKSPACE_BASHRC_PID=$BASHPID
+
 # Helper: source the first readable file from the list. Used for OS-aware
 # sourcing (try Homebrew path first, fall back to Linux path).
 _source_first() {
@@ -71,6 +80,32 @@ _path_append() {
   PATH="${new_path:+$new_path:}$wanted"
 }
 
+# Vendor profile scripts can prepend the same toolchain block every time a
+# login shell is nested. Keep the first occurrence of every inherited entry so
+# PATH remains stable without changing command precedence.
+_path_dedupe() {
+  local entry existing duplicate deduped_path="" old_ifs="$IFS"
+  local -a path_parts unique_parts
+  IFS=:
+  read -r -a path_parts <<< "${PATH:-}"
+  IFS="$old_ifs"
+  for entry in "${path_parts[@]}"; do
+    [[ -n "$entry" ]] || continue
+    duplicate=
+    for existing in "${unique_parts[@]}"; do
+      if [[ "$existing" == "$entry" ]]; then
+        duplicate=1
+        break
+      fi
+    done
+    [[ -n "$duplicate" ]] || unique_parts+=("$entry")
+  done
+  for entry in "${unique_parts[@]}"; do
+    deduped_path="${deduped_path}${deduped_path:+:}${entry}"
+  done
+  PATH="$deduped_path"
+}
+
 [[ -f "$HOME/.cargo/env" ]] && . "$HOME/.cargo/env"
 
 # Apple and other conventional signed packages install CLIs here. sshd's bare
@@ -101,9 +136,10 @@ _path_append "$NPM_PACKAGES/bin"
 _path_append "$HOME/.npm/node/bin"
 export NPM_PACKAGES NODE_PATH
 
+_path_dedupe
 export PATH BREW_PREFIX
 unset _brew_bin
-unset -f _find_brew_bin _path_prepend _path_append
+unset -f _find_brew_bin _path_prepend _path_append _path_dedupe
 
 # Locale safety net: ensure a UTF-8-capable LANG is set.
 # macOS: region "en_AE" has no POSIX locale, so several contexts (Terminal.app,
@@ -132,13 +168,19 @@ case $- in *i*) ;; *) return ;; esac
 # `ssh -A` agent forwarding into this host is NOT clobbered (the forwarded
 # socket comes through sshd, which sets SSH_AUTH_SOCK itself). macOS doesn't
 # need this — launchd sets SSH_AUTH_SOCK for every shell via the system agent.
-if [[ -z "${SSH_AUTH_SOCK:-}" && -n "${XDG_RUNTIME_DIR:-}" ]] && [[ "$(uname -s)" != Darwin ]]; then
-  if [[ -S "$XDG_RUNTIME_DIR/openssh_agent" ]]; then
-    export SSH_AUTH_SOCK="$XDG_RUNTIME_DIR/openssh_agent"
-  elif [[ -S "$XDG_RUNTIME_DIR/ssh-agent.socket" ]]; then
-    # Arch / some other distros use this name
-    export SSH_AUTH_SOCK="$XDG_RUNTIME_DIR/ssh-agent.socket"
+if [[ -n "${XDG_RUNTIME_DIR:-}" && "$(uname -s)" != Darwin ]]; then
+  _local_agent=
+  [[ -S "$XDG_RUNTIME_DIR/openssh_agent" ]] && _local_agent="$XDG_RUNTIME_DIR/openssh_agent"
+  [[ -z "$_local_agent" && -S "$XDG_RUNTIME_DIR/ssh-agent.socket" ]] \
+    && _local_agent="$XDG_RUNTIME_DIR/ssh-agent.socket"
+  # GUI sessions may inherit GCR's separate agent. Prefer the same OpenSSH
+  # systemd socket used headlessly, but never replace a working forwarded agent
+  # received from `ssh -A`.
+  if [[ -n "$_local_agent" ]] \
+      && { [[ -z "${SSH_CONNECTION:-}" ]] || [[ -z "${SSH_AUTH_SOCK:-}" ]] || [[ ! -S "${SSH_AUTH_SOCK:-}" ]]; }; then
+    export SSH_AUTH_SOCK="$_local_agent"
   fi
+  unset _local_agent
 fi
 
 # History — approximates zsh SHARE_HISTORY/IGNORE_ALL_DUPS: big, deduped,
@@ -146,6 +188,7 @@ fi
 HISTSIZE=100000
 HISTFILESIZE=100000
 HISTCONTROL=ignoreboth:erasedups
+HISTTIMEFORMAT='%F %T  '
 shopt -s histappend
 shopt -s checkwinsize
 
@@ -178,11 +221,33 @@ __prompt_git() {
 PS1="\[\e[1;38;5;${_host_color}m\]${_host_label}\[\e[0m\] \[\e[34m\]\w\[\e[0m\]\[\e[38;5;242m\]\$(__prompt_git)\[\e[0m\] \\$ "
 
 # Terminal/tab title = "<machine>: <dir>" (kitty.conf uses `no-title` so the
-# shell owns it). Also flush history after every command (see History above).
+# shell owns it). Append this shell's command, then import commands appended by
+# other live terminals so Up/Ctrl-R see a coherent history immediately.
 __set_term_title() { printf '\e]2;%s: %s\a' "$_host_label" "${PWD/#$HOME/\~}"; }
-PROMPT_COMMAND='history -a; __set_term_title'
+__history_sync() { history -a; history -n; }
+if ((BASH_VERSINFO[0] >= 5)); then
+  if [[ "$(declare -p PROMPT_COMMAND 2>/dev/null)" != 'declare -a'* ]]; then
+    _prompt_command_previous=${PROMPT_COMMAND:-}
+    PROMPT_COMMAND=()
+    [[ -z "$_prompt_command_previous" ]] || PROMPT_COMMAND+=("$_prompt_command_previous")
+    unset _prompt_command_previous
+  fi
+  PROMPT_COMMAND+=(__history_sync __set_term_title)
+else
+  # shellcheck disable=SC2128,SC2178 # Bash <5 scalar compatibility branch
+  PROMPT_COMMAND="${PROMPT_COMMAND:+$PROMPT_COMMAND; }__history_sync; __set_term_title"
+fi
 
-export EDITOR=nano
+export EDITOR=nano VISUAL=nano SUDO_EDITOR=nano
+# Respect an explicitly supplied pager (coding agents commonly use `cat`), but
+# give human terminals a color-safe pager that exits for one-screen output and
+# leaves completed output visible in scrollback.
+PAGER=${PAGER:-less}
+LESS=${LESS:--FRXMi}
+MANPAGER=${MANPAGER:-'less -R'}
+SYSTEMD_PAGER=${SYSTEMD_PAGER:-less}
+SYSTEMD_LESS=${SYSTEMD_LESS:-FRXMK}
+export PAGER LESS MANPAGER SYSTEMD_PAGER SYSTEMD_LESS
 
 # yazi: `y` opens the file manager and cd's to the directory you quit in.
 # Official wrapper: https://yazi-rs.github.io/docs/quick-start
@@ -192,14 +257,16 @@ function y() {
 	tmp="$(mktemp "${TMPDIR:-/tmp}/yazi-cwd.XXXXXX")"
 	command yazi "$@" --cwd-file="$tmp"
 	cwd="$(command cat -- "$tmp" 2>/dev/null)"
-	[ -n "$cwd" ] && [ "$cwd" != "$PWD" ] && [ -d "$cwd" ] && builtin cd -- "$cwd"
+	if [ -n "$cwd" ] && [ "$cwd" != "$PWD" ] && [ -d "$cwd" ]; then
+		builtin cd -- "$cwd" || return
+	fi
 	command rm -f -- "$tmp"
 }
 
 # ds: durable remote session — mosh (survives wifi drop / network roam) + tmux
 # on the remote (survives SSH disconnect; not remote reboot). Usage: ds mini | ds user@host
 # LC_ALL forces a valid UTF-8 locale so mosh doesn't choke on macOS sending
-# LC_CTYPE=UTF-8; the TERM downgrade matches ssh() so remote TUIs render on any host.
+# LC_CTYPE=UTF-8; the explicit TERM baseline keeps Mosh portable to legacy hosts.
 function ds() {
   local host="$1"
   if [ -z "$host" ]; then
@@ -251,19 +318,9 @@ function ds() {
          "$host" -- tmux new -A -D -s main
 }
 
-# ssh: Kitty advertises TERM=xterm-kitty locally. OpenSSH sends that terminal
-# type to remote PTYs, and many hosts do not have its terminfo installed. Keep
-# the local Kitty TERM, but use xterm-256color for SSH by default.
-function ssh() {
-  local _ssh_term="${TERM:-xterm-256color}"
-  case "$_ssh_term" in
-    xterm-kitty|tmux-256color|screen-256color) _ssh_term=xterm-256color ;;
-  esac
-  TERM="$_ssh_term" command ssh "$@"
-}
-
-# s: short compatible SSH command. Usage: s mini | s user@host
-function s() { ssh "$@"; }
+# Plain `ssh` now preserves xterm-kitty for managed Ubuntu hosts. `s` is the
+# explicit compatibility path for legacy hosts that lack kitty's terminfo.
+function s() { TERM=xterm-256color command ssh "$@"; }
 
 # ks: opt in to Kitty's ssh kitten for hosts where you want Kitty integration.
 # The kitten refuses to run outside a kitty window ("Error: The SSH kitten is
@@ -276,7 +333,7 @@ function ks() {
   if [ -n "$KITTY_WINDOW_ID" ] && command -v kitten >/dev/null 2>&1; then
     kitten ssh "$@"
   else
-    ssh "$@"
+    command ssh "$@"
   fi
 }
 
@@ -303,10 +360,14 @@ if command -v fzf >/dev/null 2>&1; then
   export FZF_CTRL_T_OPTS="--preview '(bat --color=always --style=numbers {} || eza --tree --color=always {}) 2>/dev/null | head -200'"
   export FZF_ALT_C_OPTS="--preview 'eza --tree --color=always {} 2>/dev/null | head -200'"
   export FZF_CTRL_R_OPTS="--preview 'echo {}' --preview-window=down:3:hidden:wrap --bind=ctrl-/:toggle-preview"
-  # fzf's keybindings assume a real terminal; skip them in non-TTY shells
-  # such as automated `bash -ic` SSH checks.
+  # fzf's key bindings assume a real terminal; skip them in automated and
+  # redirected shells.
   if [ -t 0 ] && [ -t 1 ]; then
     eval "$(fzf --bash)"
-    eval "$(zoxide init bash)"
   fi
+fi
+
+# Keep directory jumping available even when fzf is absent.
+if command -v zoxide >/dev/null 2>&1; then
+  eval "$(zoxide init bash)"
 fi

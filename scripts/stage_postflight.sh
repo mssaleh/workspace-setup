@@ -16,7 +16,11 @@ postflight_fail() {
 }
 
 postflight_mode() {
-  stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1" 2>/dev/null
+  if [[ "${OS_KIND:-}" == macos ]]; then
+    stat -f '%Lp' "$1" 2>/dev/null
+  else
+    stat -c '%a' "$1" 2>/dev/null
+  fi
 }
 
 postflight_configs() {
@@ -26,6 +30,7 @@ postflight_configs() {
     "$HOME/.profile"
     "$HOME/.inputrc"
     "$HOME/.tmux.conf"
+    "$HOME/.nanorc"
     "$HOME/.gitconfig"
     "$HOME/.npmrc"
     "$HOME/.ssh/config"
@@ -50,6 +55,8 @@ postflight_configs() {
       "$HOME/.zshrc"
     )
     [[ -z "${SKIP_CONTAINER:-}" ]] && files+=("$HOME/.config/container/config.toml")
+  else
+    files+=("$HOME/.config/environment.d/10-ssh-agent.conf")
   fi
 
   local bad=() file
@@ -112,6 +119,52 @@ postflight_configs() {
     else
       postflight_fail "Apple Container configuration is incomplete"
     fi
+  fi
+}
+
+postflight_ssh_agent() {
+  [[ -z "${SKIP_SSH:-}" ]] || return 0
+  [[ "$OS_KIND" == linux ]] || return 0
+
+  local unit expected_socket runtime_dir fingerprint
+  if [[ -f /usr/lib/systemd/user/ssh-agent.socket ]]; then
+    unit=ssh-agent.socket
+  elif [[ -f /usr/lib/systemd/user/ssh-agent.service ]]; then
+    unit=ssh-agent.service
+  else
+    postflight_fail "no systemd user OpenSSH agent unit is installed"
+    return 0
+  fi
+
+  if systemctl --user is-enabled "$unit" >/dev/null 2>&1 \
+      && systemctl --user is-active "$unit" >/dev/null 2>&1; then
+    postflight_pass "$unit is enabled and active"
+  else
+    postflight_fail "$unit is not both enabled and active"
+  fi
+
+  runtime_dir="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+  expected_socket="$runtime_dir/openssh_agent"
+  if [[ -S "$expected_socket" ]]; then
+    postflight_pass "OpenSSH agent socket exists at $expected_socket"
+  else
+    postflight_fail "OpenSSH agent socket is missing at $expected_socket"
+  fi
+
+  if loginctl show-user "$USER" 2>/dev/null | grep -q '^Linger=yes'; then
+    postflight_pass "loginctl linger keeps the user agent available after logout"
+  else
+    postflight_fail "loginctl linger is disabled for $USER"
+  fi
+
+  fingerprint=$(ssh-keygen -lf "$HOME/.ssh/id_ed25519.pub" 2>/dev/null \
+    | awk 'NR == 1 { print $2; exit }')
+  if [[ -n "$fingerprint" ]] \
+      && SSH_AUTH_SOCK="$expected_socket" ssh-add -l 2>/dev/null \
+        | awk -v wanted="$fingerprint" '$2 == wanted { found = 1 } END { exit !found }'; then
+    postflight_pass "default SSH identity is loaded in the OpenSSH agent"
+  else
+    postflight_fail "default SSH identity is not loaded in the OpenSSH agent"
   fi
 }
 
@@ -426,28 +479,11 @@ postflight_upstream_tools() {
         postflight_fail "kitty platform.conf is missing or still carries Cmd-based bindings"
       fi
 
-      # kitty runs on X11 so Mutter draws its title bar. That makes the X11
-      # backend's shared library a hard runtime dependency: without it kitty
-      # exits at startup instead of falling back, which presents as "kitty is
-      # broken" rather than "kitty looks wrong".
-      if grep -qE '^[[:space:]]*linux_display_server[[:space:]]+x11' "$kitty_platform" 2>/dev/null; then
-        if ldconfig -p 2>/dev/null | grep -q 'libxcb-xkb\.so\.1'; then
-          postflight_pass "kitty X11 backend dependency (libxcb-xkb1) is installed"
-        else
-          postflight_fail "kitty is configured for X11 but libxcb-xkb.so.1 is absent — kitty will not start (sudo apt install -y libxcb-xkb1)"
-        fi
-
-        # Without native scaling, XWayland clients are rendered at the logical
-        # size and upscaled by the compositor, which is visible as soft text on
-        # any fractionally scaled display. Enabling it changes the session
-        # rather than a file, so this reports rather than repairs.
-        if command -v gsettings >/dev/null 2>&1 \
-            && [[ "$(gsettings get org.gnome.mutter experimental-features 2>/dev/null)" == *xwayland-native-scaling* ]]; then
-          postflight_pass "Mutter renders XWayland clients at native scale"
-        elif command -v gsettings >/dev/null 2>&1; then
-          warn "Mutter is not set to scale XWayland natively; kitty may look soft on a fractional scale."
-          warn "  fix: gsettings set org.gnome.mutter experimental-features \"['scale-monitor-framebuffer', 'xwayland-native-scaling']\""
-        fi
+      if grep -qE '^[[:space:]]*linux_display_server[[:space:]]+x11' "$kitty_platform" 2>/dev/null \
+          && ldconfig -p 2>/dev/null | grep -Fq 'libxcb-xkb.so.1'; then
+        postflight_pass "kitty uses GNOME-framed X11 and its required XKB library is present"
+      else
+        postflight_fail "kitty needs the X11 backend plus libxcb-xkb.so.1 for GNOME window controls"
       fi
     fi
   fi
@@ -541,6 +577,7 @@ stage_postflight() {
   POSTFLIGHT_FAILURES=0
 
   postflight_configs
+  postflight_ssh_agent
   postflight_agent_skills
   postflight_packages
   postflight_shell_paths
