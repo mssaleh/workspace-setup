@@ -52,7 +52,21 @@ This is automation for a conventional hand-configured machine, not a settings ma
 | Apple Container | Apple-signed installer package |
 | Configuration | ordinary files at their native paths |
 
-Configuration decisions use only the observed target plus source history carried in the temporary payload:
+Configuration decisions use only the observed target plus source history carried in the temporary payload.
+
+That source history is `lib/known-config-hashes.tsv`, and it is what makes an
+upgrade possible at all. Faced with a `~/.bashrc` that is neither missing nor
+byte-identical to the one being shipped, the only options are to overwrite it —
+losing whatever the user wrote — or to preserve it and report a conflict, in
+which case a fix can never reach a machine that already has the previous
+version. The inventory resolves that: a file matching any version this project
+has shipped is unmodified and safe to replace, and anything else is the user's.
+Recording it in the payload rather than in a receipt under `$HOME` is what keeps
+the target a conventional machine with nothing to clean up.
+
+**After changing anything under `dotfiles/`, run `tools/record-known-hashes.sh`.**
+It is idempotent, and `tests/run.sh` fails with that same instruction if it is
+forgotten.
 
 | Observed target | Action |
 |---|---|
@@ -314,6 +328,8 @@ workspace-setup/
 │   ├── manifest.sh                # source-only platform/provider ownership manifest
 │   ├── config.sh                  # atomic, state-aware regular-file convergence
 │   └── known-config-hashes.tsv    # historical source hashes (never installed)
+├── tools/
+│   └── record-known-hashes.sh     # maintainer: refresh the hash inventory
 ├── scripts/
 │   ├── stage_bootstrap.sh         # install brew / ensure curl+git (Linux)
 │   ├── stage_packages.sh          # brew formulae / apt + official installers

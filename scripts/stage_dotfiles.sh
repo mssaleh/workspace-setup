@@ -478,6 +478,12 @@ stage_dotfiles() {
     "$HOME/.config/yazi/yazi.toml"
   install_repo_config "$repo" dotfiles/config/yazi/keymap.toml \
     "$HOME/.config/yazi/keymap.toml"
+  install_repo_config "$repo" dotfiles/config/direnv/direnvrc \
+    "$HOME/.config/direnv/direnvrc"
+  # uv's own installer writes ~/.config/uv/uv-receipt.json beside this; the two
+  # files are independent and neither disturbs the other.
+  install_repo_config "$repo" dotfiles/config/uv/uv.toml \
+    "$HOME/.config/uv/uv.toml"
   install_repo_config "$repo" dotfiles/config/gh/config.yml \
     "$HOME/.config/gh/config.yml"
   install_repo_config "$repo" dotfiles/config/opencode/opencode.jsonc \

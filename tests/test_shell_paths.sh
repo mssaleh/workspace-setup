@@ -164,4 +164,62 @@ npm_cache=$(sed -n 's/^ *NPM_CACHE="\(.*\)"$/\1/p' "$TEST_ROOT/scripts/stage_dot
 [[ -n "$npm_prefix" && -n "$npm_cache" ]]
 [[ "$npm_cache" != "$npm_prefix"/* ]]
 
+# ── The STM32 toolchain split ──────────────────────────────────────────────
+# system/profile.d/zz-stm32cubeclt-path.sh takes the vendor toolchain off the
+# global PATH and keeps back only the directories that collide with nothing;
+# use_stm32 in the direnv rc hands the rest to one project at a time. The two
+# halves are written in different files and are only correct together, so the
+# invariant is checked rather than assumed: they must not overlap, and between
+# them they must cover everything the vendor script put on PATH except its
+# useless installation root.
+profile_d="$TEST_ROOT/system/profile.d/zz-stm32cubeclt-path.sh"
+direnvrc="$TEST_ROOT/dotfiles/config/direnv/direnvrc"
+
+kept=$(sed -n 's/^[[:space:]]*for _stm32_leaf in \(.*\); do$/\1/p' "$profile_d" | tr ' ' '\n' | sort)
+per_project=$(sed -n 's/^[[:space:]]*for leaf in \(.*\); do$/\1/p' "$direnvrc" | tr ' ' '\n' | sort)
+[[ -n "$kept" && -n "$per_project" ]] \
+  || { printf 'FAIL: could not read the STM32 directory lists\n' >&2; exit 1; }
+
+if [[ -n "$(comm -12 <(printf '%s\n' "$kept") <(printf '%s\n' "$per_project"))" ]]; then
+  printf 'FAIL: a directory is both globally kept and re-added per project\n' >&2
+  exit 1
+fi
+
+# Every directory the vendor script exports, minus the bare installation root
+# which holds no binary worth having on PATH.
+vendor='CMake/bin GNU-tools-for-STM32/bin Make/bin Ninja/bin STLink-gdb-server/bin STM32CubeProgrammer/bin st-arm-clang/bin'
+covered=$(printf '%s\n%s\n' "$kept" "$per_project" | sort -u)
+if [[ "$covered" != "$(printf '%s' "$vendor" | tr ' ' '\n' | sort)" ]]; then
+  printf 'FAIL: the global and per-project STM32 directories do not add up to the vendor set\n' >&2
+  printf '  covered: %s\n' "$(tr '\n' ' ' <<< "$covered")" >&2
+  exit 1
+fi
+
+# The build tools specifically must be the per-project half — putting cmake,
+# make or ninja back on the global PATH is the whole defect.
+for build_tool in CMake/bin Make/bin Ninja/bin; do
+  grep -Fqx "$build_tool" <<< "$per_project" \
+    || { printf 'FAIL: %s is not reachable through use_stm32\n' "$build_tool" >&2; exit 1; }
+  grep -Fqx "$build_tool" <<< "$kept" \
+    && { printf 'FAIL: %s is back on the global PATH\n' "$build_tool" >&2; exit 1; }
+done
+
+# direnv's hook appends to PROMPT_COMMAND, so it has to be evaluated after the
+# other tools that touch it rather than before them.
+direnv_line=$(grep -n 'direnv hook bash' "$TEST_ROOT/dotfiles/bashrc" | cut -d: -f1)
+[[ -n "$direnv_line" ]] || { printf 'FAIL: bash does not hook direnv\n' >&2; exit 1; }
+for earlier in 'zoxide init bash' 'fzf --bash'; do
+  earlier_line=$(grep -n "$earlier" "$TEST_ROOT/dotfiles/bashrc" | cut -d: -f1)
+  [[ -n "$earlier_line" ]] || continue
+  ((earlier_line < direnv_line)) \
+    || { printf 'FAIL: direnv is hooked before %s\n' "$earlier" >&2; exit 1; }
+done
+
+# uv picks the best link mode per platform and filesystem; naming one here
+# would override that with a worse choice somewhere.
+if grep -qE '^[[:space:]]*link-mode' "$TEST_ROOT/dotfiles/config/uv/uv.toml"; then
+  printf 'FAIL: uv.toml pins link-mode and overrides uv per-platform choice\n' >&2
+  exit 1
+fi
+
 printf 'shell PATH tests: ok\n'

@@ -1,0 +1,72 @@
+# shellcheck shell=bash
+# ~/.config/direnv/direnvrc — helpers available to every .envrc on this machine.
+#
+# direnv loads this before the project's own .envrc, so a function defined here
+# can be called by name from any project without being copied into it.
+
+# use_stm32 [version]
+#
+# Puts the STM32CubeCLT build tools on PATH for this project only.
+#
+# /etc/profile.d/zz-stm32cubeclt-path.sh keeps CMake, GNU Make, Ninja and
+# st-arm-clang OFF the global PATH, because prepending them there makes every
+# unrelated CMake project, node-gyp build and Python wheel compile against a
+# vendor toolchain nobody chose. The programmer, the ST-LINK GDB server and
+# arm-none-eabi-* stay global, so an STM32 project usually needs this only when
+# it drives the build through ST's own CMake or Make.
+#
+# Usage, in a project's .envrc:
+#
+#     use stm32              # newest installed version
+#     use stm32 1.22.0       # a specific one
+#
+# The newest version is chosen by sort -V rather than glob order, so 1.9 does
+# not outrank 1.22.
+use_stm32() {
+    local requested="${1:-}" root
+
+    if [[ -n "$requested" ]]; then
+        root="/opt/st/stm32cubeclt_${requested}"
+    else
+        root=$(find /opt/st -maxdepth 1 -type d -name 'stm32cubeclt_*' 2>/dev/null \
+            | sort -V | tail -n 1)
+    fi
+
+    if [[ -z "$root" || ! -d "$root" ]]; then
+        log_error "use_stm32: no STM32CubeCLT installation at ${root:-/opt/st/stm32cubeclt_*}"
+        return 1
+    fi
+
+    local leaf
+    for leaf in CMake/bin Make/bin Ninja/bin st-arm-clang/bin; do
+        [[ -d "$root/$leaf" ]] && PATH_add "$root/$leaf"
+    done
+
+    export STM32CUBECLT_ROOT="$root"
+    export CLANG_GCC_CMSIS_COMPILER="$root/st-arm-clang"
+    export GCC_TOOLCHAIN_ROOT="$root/GNU-tools-for-STM32/bin"
+
+    log_status "use_stm32: ${root##*/}"
+}
+
+# use_zephyr [workspace]
+#
+# Activates a west workspace's Python environment and points the Zephyr build at
+# the SDK. Defaults to the directory containing the .envrc.
+use_zephyr() {
+    local workspace="${1:-$PWD}" sdk
+
+    if [[ ! -d "$workspace/.west" ]]; then
+        log_error "use_zephyr: $workspace is not a west workspace (no .west/)"
+        return 1
+    fi
+    export ZEPHYR_BASE="$workspace/zephyr"
+
+    [[ -d "$workspace/.venv" ]] && source "$workspace/.venv/bin/activate"
+
+    sdk=$(find "$HOME" -maxdepth 1 -type d -name 'zephyr-sdk-*' 2>/dev/null \
+        | sort -V | tail -n 1)
+    [[ -n "$sdk" ]] && export ZEPHYR_SDK_INSTALL_DIR="$sdk"
+
+    log_status "use_zephyr: ${workspace##*/}${sdk:+ (sdk ${sdk##*-})}"
+}

@@ -20,6 +20,7 @@ PACKAGES_BREW=(
   git git-delta lazygit git-filter-repo pre-commit gh shellcheck
   mosh tmux rsync rclone nmap curl wget
   jq yq pandoc sevenzip
+  direnv
   node node@24 uv ruff
   helm kubernetes-cli cosign container-compose
   ffmpeg poppler nano
@@ -43,6 +44,7 @@ PACKAGES_APT=(
   git-filter-repo pre-commit git-delta
   tmux rsync rclone nmap wget curl
   jq yq pandoc 7zip
+  direnv
   ffmpeg poppler-utils nano
   ncdu smartmontools xsel pkg-config
   ca-certificates gnupg lsb-release unzip xz-utils fontconfig

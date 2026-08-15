@@ -385,3 +385,16 @@ fi
 if command -v zoxide >/dev/null 2>&1; then
   eval "$(zoxide init bash)"
 fi
+
+# direnv: per-project environment, loaded on cd and unloaded on the way out.
+# This is what keeps toolchains out of the global PATH — most concretely the
+# STM32CubeCLT build tools, which /etc/profile.d/zz-stm32cubeclt-path.sh removes
+# from every login shell and ~/.config/direnv/direnvrc hands back to the one
+# project that wants them (`use stm32` in its .envrc).
+#
+# Hooked last, after zoxide and fzf: direnv's hook appends to PROMPT_COMMAND and
+# must see the finished value. The re-source guard at the top of this file keeps
+# a second source from stacking a second hook.
+if command -v direnv >/dev/null 2>&1; then
+  eval "$(direnv hook bash)"
+fi

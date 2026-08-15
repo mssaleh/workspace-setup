@@ -45,6 +45,8 @@ postflight_configs() {
     "$HOME/.config/yazi/keymap.toml"
     "$HOME/.config/gh/config.yml"
     "$HOME/.config/opencode/opencode.jsonc"
+    "$HOME/.config/direnv/direnvrc"
+    "$HOME/.config/uv/uv.toml"
     "$HOME/.claude/settings.json"
     "$HOME/.codex/rules/default.rules"
   )

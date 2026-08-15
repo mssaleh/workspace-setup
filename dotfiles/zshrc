@@ -247,3 +247,11 @@ bindkey '^[[1;5C' forward-word          # Ctrl+Right
 
 _zsh_plugin zsh-syntax-highlighting zsh-syntax-highlighting.zsh
 unset -f _zsh_plugin
+
+# direnv: per-project environment, loaded on cd and unloaded on the way out.
+# The twin of the block at the end of ~/.bashrc — hooked last, after the
+# plugins, because direnv's hook installs a precmd that must see the finished
+# shell. zsh-syntax-highlighting in particular expects to wrap the final state.
+if command -v direnv >/dev/null 2>&1; then
+  eval "$(direnv hook zsh)"
+fi

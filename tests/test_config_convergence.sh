@@ -180,12 +180,11 @@ grep -Fxq "prefix=$NPM_PACKAGES" "$npmrc_dst"
 
 # Every directly installed source must record its current hash so the next
 # release can distinguish this version from a user edit without a host receipt.
-KNOWN_CONFIG_HASHES_FILE="$TEST_ROOT/lib/known-config-hashes.tsv"
-while IFS= read -r -d '' tracked_source; do
-  [[ "$tracked_source" == "$TEST_ROOT/dotfiles/config/container/config.toml" ]] && continue
-  relative=${tracked_source#"$TEST_ROOT/"}
-  tracked_hash=$(config_sha256 "$tracked_source")
-  config_hash_is_known "$relative" "$tracked_hash"
-done < <(find "$TEST_ROOT/dotfiles" -type f -print0)
+# The maintainer tool both reports and fixes this, so failing here names the one
+# command that resolves it rather than leaving a bare assertion to decipher.
+if ! "$TEST_ROOT/tools/record-known-hashes.sh" --check; then
+  printf 'FAIL: shipped configuration is missing from lib/known-config-hashes.tsv\n' >&2
+  exit 1
+fi
 
 printf 'config convergence tests: ok\n'

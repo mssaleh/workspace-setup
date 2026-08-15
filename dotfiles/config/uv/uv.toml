@@ -1,0 +1,26 @@
+# ~/.config/uv/uv.toml — uv's user-level configuration.
+# Reference: https://docs.astral.sh/uv/reference/settings/
+#
+# A project's own pyproject.toml or uv.toml overrides everything here, so these
+# are defaults for work that has not stated a preference. uv rejects an unknown
+# key or an invalid value outright rather than ignoring it, so a typo here stops
+# every uv command until it is fixed.
+#
+# link-mode is deliberately absent: uv already picks the best available method
+# per platform and filesystem, and naming one here would override that choice
+# with a worse one somewhere.
+
+# Compile to .pyc at install time rather than on first import. uv's default is
+# off, which puts the cost on the first run of every freshly created
+# environment; paying it once at install is the better trade for an environment
+# used far more often than it is built.
+compile-bytecode = true
+
+# Prefer the interpreters uv manages over whatever the system happens to ship.
+#
+# This is already uv's default. It is stated explicitly so that a later edit
+# cannot switch it to "system" without someone noticing what that costs here:
+# this host's /usr/bin/python3 is Ubuntu 26.04's Python 3.14, new enough that
+# many packages still have no wheel for it, so an unpinned environment built
+# against it compiles from source or fails outright.
+python-preference = "managed"
