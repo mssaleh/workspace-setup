@@ -143,11 +143,23 @@ sudo install -m 0644 system/profile.d/zz-stm32cubeclt-path.sh /etc/profile.d/
 
 The programmer, the ST-LINK GDB server and `arm-none-eabi-*` stay on the global
 `PATH`. CMake, Make, Ninja and `st-arm-clang` are reached per project through
-`use_stm32` in `~/.config/direnv/direnvrc`. Verify with a *new login shell*:
+`use_stm32` in `~/.config/direnv/direnvrc`.
+
+Verify in a **new login shell** — `/etc/profile.d` is not read by the shell that
+installed the file:
 
 ```bash
-command -v cmake make ninja      # all under /usr/bin
-command -v arm-none-eabi-gcc STM32_Programmer_CLI   # both under /opt/st
+bash -lc 'command -v cmake make ninja'                    # all under /usr/bin
+bash -lc 'command -v arm-none-eabi-gcc STM32_Programmer_CLI'   # both under /opt/st
+```
+
+Also confirm the ordering, since the correction only works if `run-parts` sorts
+this file after the vendor's — it uses C collation, which is what the `zz-`
+prefix buys:
+
+```bash
+run-parts --list --regex '^[a-zA-Z0-9_][a-zA-Z0-9._-]*\.sh$' /etc/profile.d \
+  | xargs -n1 basename | grep -nE 'cubeclt|stm32'
 ```
 
 ### Watch and memory limits — `system/sysctl.d/`
@@ -168,43 +180,95 @@ the disk. This file is a **merge target, not a drop-in replacement**: it carries
 the `runtimes.nvidia` block that `nvidia-ctk` writes, so compare it against what
 is already there before copying, and keep any local additions.
 
+Restarting the daemon stops every running container, so check first.
+
 ```bash
-diff -u /etc/docker/daemon.json system/docker/daemon.json
+docker ps -q | wc -l                                     # expect 0
+diff -u /etc/docker/daemon.json system/docker/daemon.json || true   # exits 1 when they differ
 dockerd --validate --config-file system/docker/daemon.json
-sudo cp /etc/docker/daemon.json /etc/docker/daemon.json.bak
-sudo install -m 0644 system/docker/daemon.json /etc/docker/
+sudo cp -a /etc/docker/daemon.json "/etc/docker/daemon.json.bak-$(date +%Y%m%d)"
+sudo install -m 0644 system/docker/daemon.json /etc/docker/daemon.json
 sudo systemctl restart docker
 ```
 
-### A second SSH agent — no file, two commands
+Verify against real objects rather than the config file — a setting that parses
+is not necessarily a setting that applies:
+
+```bash
+docker run --rm -d --name logcheck --entrypoint sleep alpine 5 >/dev/null
+docker inspect logcheck --format '{{.HostConfig.LogConfig.Config}}'   # max-file:3 max-size:10m
+docker network create pool-check >/dev/null
+docker network inspect pool-check --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}'  # 10.201.x
+docker network rm pool-check >/dev/null
+```
+
+### A second SSH agent — no file, three commands
 
 A GNOME desktop runs gnome-keyring's GCR agent alongside the OpenSSH systemd
-socket. GCR announces its own socket to the systemd user manager at runtime,
-which overrides `~/.config/environment.d/10-ssh-agent.conf`. Shells correct
-themselves, but GUI applications inherit the manager's value — so a key added
-from a terminal is invisible to an editor's git integration. Keep one agent:
+socket. `gcr-ssh-agent.socket` is ordered `After=ssh-agent.socket` and its
+`ExecStartPost` runs `systemctl --user set-environment SSH_AUTH_SOCK=…/gcr/ssh`,
+so it deliberately wins — and a runtime `set-environment` also beats
+`~/.config/environment.d/10-ssh-agent.conf`. Shells correct themselves, but GUI
+applications inherit the manager's value, so a key added from a terminal is
+invisible to an editor's git integration.
 
 ```bash
 systemctl --user mask gcr-ssh-agent.socket gcr-ssh-agent.service
-systemctl --user restart ssh-agent.socket
-# log out and back in, then confirm one socket for shells and GUI alike:
-systemctl --user show-environment | grep SSH_AUTH_SOCK
+systemctl --user stop gcr-ssh-agent.service gcr-ssh-agent.socket
+systemctl --user set-environment "SSH_AUTH_SOCK=$XDG_RUNTIME_DIR/openssh_agent"
 ```
 
-To undo: `systemctl --user unmask gcr-ssh-agent.socket gcr-ssh-agent.service`.
+Both of the last two lines matter. `mask` only prevents future starts, so
+without the `stop` the GCR agent keeps serving until the next login. And the
+third line is deliberately **not** `systemctl --user restart ssh-agent.socket`:
+that unit carries `ExecStopPre=… unset-environment SSH_AUTH_SOCK`, and stopping
+the socket kills the agent process along with every key already loaded into it.
+
+Confirm one agent, without logging out:
+
+```bash
+systemctl --user show-environment | grep SSH_AUTH_SOCK   # …/openssh_agent
+ssh-add -l                                               # keys still loaded
+```
+
+To undo: `systemctl --user unmask gcr-ssh-agent.socket gcr-ssh-agent.service`
+and log back in.
+
+### Making the PATH fix reach already-running GUI applications
+
+The systemd user manager inherited its `PATH` when the session started, so
+applications it launches keep the vendor toolchain until the next login. A
+logout fixes it; this applies the same correction immediately, by running the
+profile script against the manager's current value rather than guessing a new
+one:
+
+```bash
+CUR=$(systemctl --user show-environment | sed -n 's/^PATH=//p')
+FIXED=$(env -i PATH="$CUR" /bin/dash -c '. /etc/profile.d/zz-stm32cubeclt-path.sh; printf "%s" "$PATH"')
+systemctl --user set-environment "PATH=$FIXED"
+```
 
 ### SSH server hardening — `system/sshd/`
 
 `system/sshd/90-workspace-setup.conf` is a reviewed Ubuntu baseline for
-terminal-only hosts. Install it **only after** verifying an authorized-key login
-works, because it disables password authentication and could otherwise lock out
-the machine's owner.
+terminal-only hosts. It disables password authentication, so install it **only
+after** confirming that key-based login works **from the machine you connect
+from** — not from this one. A host does not list its own key in its own
+`authorized_keys`, so `ssh $USER@localhost` fails on a correctly configured
+machine and is not a useful test.
 
 ```bash
-ssh -o PreferredAuthentications=publickey -o BatchMode=yes "$USER@localhost" true
+# On the client you will connect from:
+ssh -o PreferredAuthentications=publickey -o BatchMode=yes <host> true
+
+# Then on the host:
+grep -c '^ssh-' ~/.ssh/authorized_keys      # must be at least 1
 sudo install -m 0644 system/sshd/90-workspace-setup.conf /etc/ssh/sshd_config.d/
 sudo sshd -t && sudo systemctl reload ssh
 ```
+
+Check whether it is already in place before reinstalling it:
+`sudo sshd -T | grep -E '^(passwordauthentication|pubkeyauthentication)'`.
 
 ## Working on a Mac over SSH
 
