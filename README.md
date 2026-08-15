@@ -407,7 +407,7 @@ workspace-setup/
 │   └── stage_postflight.sh        # unified host verification
 ├── dotfiles/
 │   ├── bashrc, bash_profile, profile, inputrc, nanorc # shell/editor — both platforms
-│   ├── zshenv, zprofile, zshrc                  # zsh — macOS only (Linux is bash-only)
+│   ├── zshenv, zprofile, zshrc                  # zsh — macOS only, enforced by tests
 │   ├── tmux.conf
 │   ├── ssh/config                 # example Host block + keepalive defaults
 │   ├── claude/settings.json       # permissions.deny denylist
@@ -451,5 +451,5 @@ The script detects the OS and adapts:
 | Kitty config | `kitty.conf` + `platform-macos.conf` → `platform.conf`: Cmd-based keymap, `font_size 14`, powerline tabs, `macos_*` options | `kitty.conf` + `platform-linux.conf` → `platform.conf`: Ctrl+Shift keymap, `font_size 11` (matches GNOME's `monospace-font-name`), flat tabs. Cmd is **not** usable — kitty aliases it to Super, which GNOME Shell grabs first, so the bindings load silently and never fire |
 | Kitty window decorations | native macOS title bar | `linux_display_server x11` under the Wayland session, so GNOME/Mutter supplies the preferred desktop title bar and OS-window controls; `Ctrl+Shift+P` is left to terminal applications. |
 | Dotfiles Homebrew paths | `/opt/homebrew/...` (via `$BREW_PREFIX`) | guarded by `command -v brew` / `$BREW_PREFIX`; no-op when brew is absent |
-| Shell integrations | zsh: zoxide, fzf, `zsh-autosuggestions`, `zsh-syntax-highlighting`; Bash receives the matching cross-platform hooks | Bash: zoxide, fzf + `/usr/share/bash-completion/`; **no zsh on Linux** |
+| Shell integrations | zsh: zoxide, fzf, direnv, `zsh-autosuggestions`, `zsh-syntax-highlighting`; Bash receives the matching cross-platform hooks | Bash: zoxide, fzf, direnv + `/usr/share/bash-completion/`; **no zsh on Linux** — the test suite runs the Linux path and fails if it produces any zsh file, if a zsh package reaches `PACKAGES_APT`, or if postflight looks for zsh configuration there |
 | Shell config files | regular `bashrc`, `bash_profile`, `profile`, `zshenv`, `zprofile`, `zshrc`, `inputrc`, `nanorc`, `tmux.conf` | regular `bashrc`, `bash_profile`, `profile`, `inputrc`, `nanorc`, `tmux.conf` (no zsh files) |

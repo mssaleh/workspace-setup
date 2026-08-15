@@ -158,9 +158,56 @@ git config -f "$HOME/.gitconfig" 'url.git@github.com:.pushInsteadOf' 'https://gi
 stage_dotfiles
 [[ "$(git config -f "$HOME/.gitconfig" --get 'url.git@github.com:.pushInsteadOf')" == 'https://github.com/mssaleh/' ]]
 
+# ── Linux is bash-only ─────────────────────────────────────────────────────
+# Checked by running the Linux path rather than by reading the guards, and run
+# on every host — a Mac has to be able to catch a change that would ship zsh to
+# Linux. Nothing here needs zsh to be installed, because the assertion is that
+# no zsh file is produced. A zsh dotfile on a Linux host would be worse than
+# none: the shell would exist with no configuration behind it.
+(
+  linux_home="$TEST_TMP/linux-only-home"
+  mkdir -p "$linux_home"
+  HOME="$linux_home"
+  # shellcheck disable=SC2030 # confined to this subshell on purpose
+  OS_KIND=linux
+  BREW_BIN=''
+  export HOME OS_KIND BREW_BIN
+  stage_dotfiles >/dev/null 2>&1
+
+  produced=$(find "$linux_home" -name '.zsh*' -o -name 'zsh*' | wc -l)
+  if [[ "$produced" != 0 ]]; then
+    printf 'FAIL: the Linux path produced zsh files:\n' >&2
+    find "$linux_home" -name '.zsh*' -o -name 'zsh*' >&2
+    exit 1
+  fi
+  # It must still have done its real work, or the check above passes vacuously.
+  [[ -f "$linux_home/.bashrc" && -f "$linux_home/.profile" ]] || {
+    printf 'FAIL: the Linux path produced no bash dotfiles either\n' >&2
+    exit 1
+  }
+
+  # Postflight must not go looking for zsh files on Linux; each one it lists is
+  # a file it will report as missing.
+  #
+  # The output is captured before being searched, rather than piped into
+  # `grep -q`. Under `set -o pipefail` that pipeline reports failure even on a
+  # match: grep closes the pipe as soon as it matches, postflight_configs dies
+  # of SIGPIPE, and pipefail takes the pipeline's status from it — so the `if`
+  # never fires and the check silently passes no matter what.
+  # shellcheck disable=SC2034 # counters read by the sourced postflight function
+  POSTFLIGHT_PASSES=0 POSTFLIGHT_FAILURES=0
+  configs_report=$(postflight_configs 2>&1 || true)
+  if grep -qi 'zsh' <<< "$configs_report"; then
+    printf 'FAIL: Linux postflight checks for zsh configuration:\n' >&2
+    grep -i 'zsh' <<< "$configs_report" >&2
+    exit 1
+  fi
+) || exit 1
+
 # A host that shares one skill store between agents through its own directory
 # links keeps that layout: the copies converge onto the shared file instead of
 # replacing the links or reporting a conflict. Skills ship on macOS only.
+# shellcheck disable=SC2031 # the block above ran in a subshell; OS_KIND is intact
 if [[ "$OS_KIND" != macos ]]; then
   printf 'dotfiles stage tests: ok (linux; macOS-only zsh and skill assertions skipped)\n'
   exit 0

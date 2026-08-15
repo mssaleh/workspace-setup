@@ -52,4 +52,19 @@ array_has node "${PACKAGES_BREW[@]}"
   exit 1
 }
 
+# Linux is bash-only. zsh and its plugins are Homebrew-owned and macOS-owned;
+# adding any of them to the apt list would put a second interactive shell on a
+# Linux host that nothing configures, tests, or converges — dotfiles/zshrc is
+# installed only on macOS, so the shell would run with no configuration at all.
+for _zsh_pkg in "${PACKAGES_APT[@]}"; do
+  case "$_zsh_pkg" in
+    zsh|zsh-*)
+      printf 'Linux is bash-only; remove %s from PACKAGES_APT\n' "$_zsh_pkg" >&2
+      exit 1
+      ;;
+  esac
+done
+array_has zsh-autosuggestions "${PACKAGES_BREW[@]}"
+array_has zsh-syntax-highlighting "${PACKAGES_BREW[@]}"
+
 printf 'provider manifest tests: ok\n'
