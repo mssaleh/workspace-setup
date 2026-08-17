@@ -38,6 +38,13 @@ setopt INTERACTIVE_COMMENTS
 if [[ -n "${BREW_PREFIX:-}" && -d "$BREW_PREFIX/share/zsh/site-functions" ]]; then
   fpath=("$BREW_PREFIX/share/zsh/site-functions" $fpath)
 fi
+# The user completion directory outranks anything a package manager ships: it
+# is where the dotfiles stage places completions that correct a provider's
+# broken ones (currently _himalaya — the brew-shipped file is a captured
+# status line with no #compdef tag; the stub explains itself).
+if [[ -d "$HOME/.local/share/zsh/site-functions" ]]; then
+  fpath=("$HOME/.local/share/zsh/site-functions" $fpath)
+fi
 autoload -Uz compinit && compinit
 zstyle ':completion:*' matcher-list 'm:{a-zA-Z}={A-Za-z}'
 zstyle ':completion:*' menu select

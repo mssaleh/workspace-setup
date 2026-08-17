@@ -1,0 +1,23 @@
+# shellcheck shell=bash
+# Sourced lazily by bash-completion on the first `himalaya <Tab>`. No static
+# script is shipped because himalaya ≥ 2.0 cannot print one to stdout —
+# `himalaya completion bash` writes <dir>/himalaya.bash and prints a status
+# line — so generating from the binary on PATH at first use is what keeps the
+# completion in step with whatever version is installed, through every
+# upgrade. The Homebrew formula captures that status line as its completion
+# files, which is why ~/.bashrc puts himalaya on BASH_COMPLETION_COMPAT_IGNORE
+# and this loader is the completion provider on macOS and Linux alike.
+_himalaya_load_completion() {
+  local dir loaded=1
+  command -v himalaya >/dev/null 2>&1 || return 1
+  dir=$(mktemp -d "${TMPDIR:-/tmp}/himalaya-completion.XXXXXX") || return 1
+  if command himalaya completion bash --dir "$dir" >/dev/null 2>&1 \
+      && [[ -r "$dir/himalaya.bash" ]]; then
+    # shellcheck disable=SC1091 # generated into $dir by the line above
+    . "$dir/himalaya.bash"
+    loaded=0
+  fi
+  rm -rf "$dir"
+  return "$loaded"
+}
+_himalaya_load_completion

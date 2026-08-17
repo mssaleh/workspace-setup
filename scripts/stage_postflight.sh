@@ -49,12 +49,14 @@ postflight_configs() {
     "$HOME/.config/uv/uv.toml"
     "$HOME/.claude/settings.json"
     "$HOME/.codex/rules/default.rules"
+    "$HOME/.local/share/bash-completion/completions/himalaya"
   )
   if [[ "$OS_KIND" == macos ]]; then
     files+=(
       "$HOME/.zshenv"
       "$HOME/.zprofile"
       "$HOME/.zshrc"
+      "$HOME/.local/share/zsh/site-functions/_himalaya"
     )
     [[ -z "${SKIP_CONTAINER:-}" ]] && files+=("$HOME/.config/container/config.toml")
   else
@@ -332,6 +334,46 @@ postflight_shell_paths() {
   fi
 
   postflight_vendor_toolchain_paths
+}
+
+# The bash-completion compat directory is sourced eagerly by every interactive
+# shell, so one corrupt file there greets every new terminal with a syntax
+# error. The himalaya Homebrew formula ships exactly that: himalaya's
+# completion command writes files and prints a status line, and the formula
+# captures the status line. The probe runs the shell a login actually gets and
+# looks for complaints from the compat directory, so it also notices the next
+# formula that ships a broken file — whatever ~/.bashrc's ignore list says.
+postflight_completions() {
+  local probe_bash=/bin/bash noise
+  # bash-completion@2 needs bash ≥ 4.2; on macOS that is the brew bash the
+  # login shell actually is, never Apple's 3.2 at /bin/bash.
+  [[ "$OS_KIND" == macos && -x "$BREW_PREFIX/bin/bash" ]] \
+    && probe_bash="$BREW_PREFIX/bin/bash"
+  # -i satisfies ~/.bashrc's interactivity gate. Without a tty bash also emits
+  # job-control warnings, so only compat-directory complaints count.
+  # shellcheck disable=SC2016 # expansions belong to the clean child shell
+  noise=$(env -i HOME="$HOME" USER="${USER:-$(id -un)}" \
+    PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+    "$probe_bash" --noprofile --norc -i -c '. "$HOME/.bashrc"' 2>&1 >/dev/null \
+    | grep -F 'bash_completion.d' || true)
+  if [[ -z "$noise" ]]; then
+    postflight_pass "interactive bash startup sources no broken completion files"
+  else
+    postflight_fail "bash startup reports broken completion files: $noise"
+  fi
+
+  # The himalaya loader must produce a completion, not merely exist — this is
+  # what actually exercises `himalaya completion bash --dir` end to end.
+  if command -v himalaya >/dev/null 2>&1; then
+    # shellcheck disable=SC2016 # expansions belong to the clean child shell
+    if "$probe_bash" --noprofile --norc -c \
+        '. "$HOME/.local/share/bash-completion/completions/himalaya" && complete -p himalaya' \
+        >/dev/null 2>&1; then
+      postflight_pass "himalaya bash completion regenerates from the installed binary"
+    else
+      postflight_fail "himalaya completion loader produced no completion"
+    fi
+  fi
 }
 
 # STM32CubeCLT ships /etc/profile.d/cubeclt-bin-path_<version>.sh, which
@@ -651,6 +693,7 @@ stage_postflight() {
   postflight_agent_skills
   postflight_packages
   postflight_shell_paths
+  postflight_completions
   postflight_upstream_tools
   postflight_headless_credentials
   postflight_containers

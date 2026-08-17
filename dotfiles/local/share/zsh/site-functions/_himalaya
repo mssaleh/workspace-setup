@@ -1,0 +1,22 @@
+#compdef himalaya
+# Autoloaded by compinit on the first `himalaya <Tab>`; this file body runs as
+# the initial _himalaya function. himalaya ≥ 2.0 cannot print its completion
+# script to stdout — `himalaya completion zsh` writes <dir>/_himalaya and
+# prints a status line — and the Homebrew formula captures that stdout, so the
+# _himalaya in $BREW_PREFIX/share/zsh/site-functions is a status line with no
+# #compdef tag. This stub sits earlier on fpath, generates the real script
+# from the binary on PATH, sources it (which replaces this very function), and
+# re-dispatches — so the completion matches whatever version is installed,
+# through every upgrade.
+local _himalaya_dir
+command -v himalaya >/dev/null 2>&1 || return 1
+_himalaya_dir=$(mktemp -d "${TMPDIR:-/tmp}/himalaya-completion.XXXXXX") || return 1
+command himalaya completion zsh --dir "$_himalaya_dir" >/dev/null 2>&1
+if [[ -r "$_himalaya_dir/_himalaya" ]]; then
+  source "$_himalaya_dir/_himalaya"
+  rm -rf "$_himalaya_dir"
+  _himalaya "$@"
+  return
+fi
+rm -rf "$_himalaya_dir"
+return 1

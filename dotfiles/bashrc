@@ -195,10 +195,22 @@ HISTIGNORE='exit:ls:ll:la:cd:cd -:cd ..:pwd:clear:history:bg:fg:jobs:reset:y'
 shopt -s histappend
 shopt -s checkwinsize
 
-# Completion. Homebrew tools drop bash completions into
-# $BREW_PREFIX/etc/bash_completion.d; bash-completion@2 lazy-loads them.
-# On Linux, the path is /usr/share/bash-completion/bash_completion (apt's
-# bash-completion package). Source whichever exists via _source_first.
+# Completion. bash-completion@2's entry point sources every file in its compat
+# directory ($BREW_PREFIX/etc/bash_completion.d on macOS, /etc/bash_completion.d
+# on Linux) eagerly, right here at startup; per-command completions elsewhere —
+# including ~/.local/share/bash-completion/completions — load lazily on first
+# Tab. On Linux the entry point is /usr/share/bash-completion/bash_completion
+# (apt's bash-completion package). Source whichever exists via _source_first.
+#
+# himalaya is excluded from the compat directory: himalaya ≥ 2.0 writes its
+# completion script to a file and prints a status line to stdout, while the
+# Homebrew formula still captures stdout — so every brew install/upgrade ships
+# a one-line status message that is a bash syntax error into a location every
+# interactive shell sources. The patterns are |-separated extglob alternatives.
+# Working himalaya completion comes from the loader the dotfiles stage places
+# in ~/.local/share/bash-completion/completions/himalaya, which regenerates
+# the real script from the installed binary on first use.
+BASH_COMPLETION_COMPAT_IGNORE="${BASH_COMPLETION_COMPAT_IGNORE:+${BASH_COMPLETION_COMPAT_IGNORE}|}himalaya"
 if [[ -n "${BREW_PREFIX:-}" ]]; then
   _source_first "$BREW_PREFIX/etc/profile.d/bash_completion.sh" \
                 /usr/share/bash-completion/bash_completion \

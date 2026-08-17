@@ -445,6 +445,22 @@ stage_dotfiles() {
   install_repo_config "$repo" dotfiles/tmux.conf "$HOME/.tmux.conf"
   install_repo_config "$repo" dotfiles/nanorc    "$HOME/.nanorc"
 
+  # himalaya completion, generated from the installed binary on first Tab.
+  # himalaya ≥ 2.0 writes its completion script to a file and prints a status
+  # line, while the Homebrew formula captures stdout — so the completion files
+  # brew ships are one-line syntax errors, reinstated by every upgrade.
+  # ~/.bashrc skips brew's copy (BASH_COMPLETION_COMPAT_IGNORE) and
+  # bash-completion lazy-loads this loader instead; zsh gets a #compdef stub on
+  # fpath ahead of brew's site-functions. On Linux the upstream himalaya
+  # artifact ships no completion at all, so the loader is the provider there
+  # too. Linux stays bash-only, so the zsh stub is macOS-owned.
+  install_repo_config "$repo" dotfiles/local/share/bash-completion/completions/himalaya \
+    "$HOME/.local/share/bash-completion/completions/himalaya"
+  if [[ "$OS_KIND" == macos ]]; then
+    install_repo_config "$repo" dotfiles/local/share/zsh/site-functions/_himalaya \
+      "$HOME/.local/share/zsh/site-functions/_himalaya"
+  fi
+
   stage_git_config "$repo"
   stage_npm_config
 
