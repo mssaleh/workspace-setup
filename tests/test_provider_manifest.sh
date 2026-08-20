@@ -32,6 +32,14 @@ if array_has container "${PACKAGES_BREW[@]}"; then
 fi
 array_has opencode "${PROVIDERS_LINUX_UPSTREAM[@]}"
 
+# A Kitty client sends TERM=xterm-kitty over ordinary SSH regardless of
+# whether the target has a desktop. Both the database entry and the tool used
+# to verify or compile it belong to the Linux baseline.
+array_has kitty-terminfo "${PACKAGES_APT[@]}"
+array_has ncurses-bin "${PACKAGES_APT[@]}"
+[[ "$KITTY_TERMINFO_SOURCE_URL" == \
+  https://raw.githubusercontent.com/kovidgoyal/kitty/*/terminfo/kitty.terminfo ]]
+
 # Compose is intentionally the narrow Homebrew compatibility layer.
 array_has container-compose "${PACKAGES_BREW[@]}"
 

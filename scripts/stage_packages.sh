@@ -52,6 +52,75 @@ install_executable_if_path_free() {
   fi
 }
 
+# Test the terminal database ncurses will use in an ordinary SSH session.
+# Kitty exports TERMINFO inside its own windows, so an unqualified infocmp can
+# accidentally validate Kitty's private application tree while the default
+# database used by ssh, sudo, and detached tmux sessions remains incomplete.
+xterm_kitty_terminfo_available() {
+  command -v infocmp >/dev/null 2>&1 || return 1
+  (
+    unset TERMINFO TERMINFO_DIRS
+    infocmp xterm-kitty >/dev/null 2>&1
+  )
+}
+
+ensure_xterm_kitty_terminfo() {
+  if xterm_kitty_terminfo_available; then
+    ok "xterm-kitty terminfo is available without Kitty's private environment"
+    return 0
+  fi
+
+  local compiled_entry="$HOME/.terminfo/x/xterm-kitty"
+  local setup_link_target="$HOME/.local/kitty.app/lib/kitty/terminfo/x/xterm-kitty"
+  if [[ -L "$compiled_entry" ]]; then
+    if [[ "$(readlink "$compiled_entry")" == "$setup_link_target" ]]; then
+      # This exact link is setup-owned and cannot provide terminfo when the app
+      # tree is absent or unreadable. The baseline entry below replaces it.
+      rm -f -- "$compiled_entry"
+      info "cleared setup-owned xterm-kitty link that is unavailable to ncurses"
+    else
+      fail "preserving user-owned terminfo link that blocks xterm-kitty: $compiled_entry"
+    fi
+  fi
+
+  command -v tic >/dev/null 2>&1 \
+    || fail "tic is required to install xterm-kitty terminfo for SSH sessions"
+
+  local source_path='' downloaded_source=''
+  local candidate
+  for candidate in \
+    "$HOME/.local/kitty.app/lib/kitty/terminfo/kitty.terminfo" \
+    /Applications/kitty.app/Contents/Resources/kitty/terminfo/kitty.terminfo \
+    /Applications/kitty.app/Contents/Resources/terminfo/kitty.terminfo; do
+    if [[ -f "$candidate" ]]; then
+      source_path="$candidate"
+      break
+    fi
+  done
+
+  if [[ -z "$source_path" ]]; then
+    downloaded_source=$(mktemp "${TMPDIR:-/tmp}/kitty-terminfo.XXXXXX") \
+      || fail "could not create a temporary file for xterm-kitty terminfo"
+    info "downloading Kitty's official terminal capability definition…"
+    if ! curl -fsSL "$KITTY_TERMINFO_SOURCE_URL" -o "$downloaded_source"; then
+      rm -f -- "$downloaded_source"
+      fail "could not download xterm-kitty terminfo from Kitty's official repository"
+    fi
+    source_path="$downloaded_source"
+  fi
+
+  mkdir -p "$HOME/.terminfo"
+  if ! tic -x -o "$HOME/.terminfo" "$source_path"; then
+    [[ -z "$downloaded_source" ]] || rm -f -- "$downloaded_source"
+    fail "could not compile xterm-kitty terminfo into ~/.terminfo"
+  fi
+  [[ -z "$downloaded_source" ]] || rm -f -- "$downloaded_source"
+
+  xterm_kitty_terminfo_available \
+    || fail "xterm-kitty terminfo is still unavailable on the default search path"
+  ok "xterm-kitty terminfo installed for graphical and headless sessions"
+}
+
 # Configure the NodeSource apt repository. Each step is a no-op when the state
 # it produces is already on disk, so the common case touches nothing and skips
 # the apt update entirely. Returns non-zero if the repo could not be trusted,
@@ -455,4 +524,9 @@ stage_packages() {
     # 7zip package provides `7z`, but the official 7-Zip binary is `7zz`
     ensure_local_command_alias 7zz 7z
   fi
+
+  # TERM describes the client terminal, not whether this host has a desktop.
+  # Keep this outside SKIP_FONT and every GUI-specific stage so a plain Kitty
+  # SSH session can run ncurses applications on a headless target.
+  ensure_xterm_kitty_terminfo
 }

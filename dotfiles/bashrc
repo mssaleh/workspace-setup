@@ -342,8 +342,8 @@ function ds() {
          "$host" -- tmux new -A -D -s main
 }
 
-# Plain `ssh` now preserves xterm-kitty for managed Ubuntu hosts. `s` is the
-# explicit compatibility path for legacy hosts that lack kitty's terminfo.
+# Managed hosts install xterm-kitty terminfo without a GUI dependency, so plain
+# `ssh` preserves TERM. `s` advertises xterm-256color to unmanaged hosts.
 function s() { TERM=xterm-256color command ssh "$@"; }
 
 # ks: opt in to Kitty's ssh kitten for hosts where you want Kitty integration.

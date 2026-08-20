@@ -25,13 +25,13 @@ Apple Container requires Apple silicon and macOS 26 or later. On an older/Intel 
 | Stage | What |
 |---|---|
 | **bootstrap** | Discovers Homebrew at its actual prefix or installs it (macOS); ensures curl + git (Linux). |
-| **packages** | Installs the cross-platform CLI toolbox: `eza`, `fd`, `bat`, `ripgrep` (`rg`), `fzf`, `zoxide`, `yazi`, `git`, `git-delta` (`delta`), `lazygit`, `gh`, `tmux`, `mosh`, `rsync`, `rclone`, `nmap`, `jq`, `yq`, `pandoc`, `7zz` (`7z`), `node`, `uv`, `ruff`, `helm`, `kubectl`, `cosign`, `ffmpeg`, `poppler` (`poppler-utils`), `nano`, `himalaya`, `ncdu`, `shellcheck`, `pre-commit`, … On Linux it also installs the **Claude Desktop** app from Anthropic's official apt repository (skip with `SKIP_CLAUDE_DESKTOP=1`). |
+| **packages** | Installs the cross-platform CLI toolbox: `eza`, `fd`, `bat`, `ripgrep` (`rg`), `fzf`, `zoxide`, `yazi`, `git`, `git-delta` (`delta`), `lazygit`, `gh`, `tmux`, `mosh`, `rsync`, `rclone`, `nmap`, `jq`, `yq`, `pandoc`, `7zz` (`7z`), `node`, `uv`, `ruff`, `helm`, `kubectl`, `cosign`, `ffmpeg`, `poppler` (`poppler-utils`), `nano`, `himalaya`, `ncdu`, `shellcheck`, `pre-commit`, … It installs `xterm-kitty` terminfo as a non-GUI SSH capability on every host. On Linux it also installs the **Claude Desktop** app from Anthropic's official apt repository (skip with `SKIP_CLAUDE_DESKTOP=1`). |
 | **docker** | Linux only: installs the official **Docker Engine** + **Docker Compose v2** from download.docker.com. A complete, responsive official installation is a no-op on rerun. |
 | **toolchains** | Installs upstream **rustup**, Astral's standalone **uv/uvx** (plus its receipt), native Claude Code and Codex CLIs, and upstream opencode on Linux. The separate Homebrew `uv` formula remains an intentional backup. |
 | **configuration** | Converges ordinary files under `$HOME`; repairs old links into temporary checkouts, atomically upgrades exact known historical versions, semantically merges supported JSON/TOML/Git formats, preserves ambiguous user-owned content, and installs the coding-agent skills into each agent home. |
 | **containers** | macOS only: installs Apple Container from the signed package on Apple's GitHub release, ensures Rosetta, and starts it with kernel installation enabled. `container-compose` is supplied separately by Homebrew. |
 | **ssh** | Generates an ed25519 keypair if none exists, locks down `~/.ssh` permissions (700 dir, 600 files), and wires up the host-local SSH agent (macOS: Keychain; Linux: systemd user unit) without replacing an agent-forwarding socket supplied by `sshd`. Does **not** push to GitHub — run `gh auth login` manually. |
-| **fonts + terminal** | Installs JetBrainsMono Nerd Font and Kitty via Kitty's upstream installer on both platforms, then creates the standard `~/.local/bin/{kitty,kitten}` links. On macOS it also installs Maccy/LibreOffice and imports Apple Terminal defaults once. On Linux it installs application entries, window class, icons, and terminfo without selecting a default terminal; the active desktop or user owns that choice. |
+| **fonts + terminal** | Installs JetBrainsMono Nerd Font and Kitty via Kitty's upstream installer on both platforms, then creates the standard `~/.local/bin/{kitty,kitten}` links. On macOS it also installs Maccy/LibreOffice and imports Apple Terminal defaults once. On Linux it installs application entries, window class, and icons without selecting a default terminal; the active desktop or user owns that choice. |
 | **terminal profile** | Gives GNOME's Ptyxis the same *behaviour* as Kitty — 100000 lines of scrollback, a login shell so `/etc/profile.d` is read, no audible bell — and deliberately leaves its *appearance* alone. Ptyxis keeps Ubuntu's palette and `Monospace 10` because looking different from Kitty is how you tell at a glance which terminal a window belongs to. A setting the user has changed themselves is preserved and reported, never overwritten. |
 | **postflight** | Verifies provider packages, regular-file configuration, clean-shell PATH resolution, upstream artifacts, and the active container runtime as one coherent result. |
 
@@ -40,6 +40,21 @@ does not select a default terminal. Interactive and non-interactive SSH shells
 start without `DISPLAY`, `WAYLAND_DISPLAY`, a window manager, or a desktop bus.
 When `sshd` supplies `SSH_AUTH_SOCK`, shell startup and setup stages preserve it;
 host-local agent work uses an explicitly scoped socket instead.
+
+`xterm-kitty` terminfo is part of the non-GUI package baseline and remains
+installed when `SKIP_FONT=1`. Debian/Ubuntu use the lightweight
+`kitty-terminfo` package; hosts without that package compile Kitty's official
+definition into `~/.terminfo`. Postflight resolves the entry with Kitty's
+private `TERMINFO` environment removed, matching a plain SSH session.
+
+For immediate recovery in a shell that reports
+`Error opening terminal: xterm-kitty`, use a universally available terminal
+description, rerun setup, and reconnect:
+
+```bash
+export TERM=xterm-256color
+bash setup.sh
+```
 
 Kitty and tmux are configured as one clipboard path for coding agents: OSC 52
 writes work locally and through SSH/Mosh/tmux, while clipboard reads always ask
@@ -93,7 +108,7 @@ All optional:
 |---|---|---|
 | `GIT_NAME` | `Your Name` | Name for `~/.gitconfig` `[user].name` |
 | `GIT_EMAIL` | `you@example.com` | Email for `~/.gitconfig` `[user].email` |
-| `SKIP_FONT` | (unset) | Set to `1` to skip the fonts + terminal stage |
+| `SKIP_FONT` | (unset) | Set to `1` to skip graphical terminal features; SSH terminfo remains installed |
 | `SKIP_SSH` | (unset) | Set to `1` to skip SSH key generation |
 | `SKIP_DOCKER` | (unset) | Set to `1` to skip the Docker Engine install stage (Linux only) |
 | `SKIP_CONTAINER` | (unset) | Set to `1` to skip Apple Container installation/startup (macOS only) |
@@ -446,7 +461,8 @@ The script detects the OS and adapts:
 | Tools not in default apt repo (helm, kubectl, himalaya, ruff, yazi, opencode) | Homebrew formula | official apt repo (helm, kubectl) / official installers (himalaya, opencode) / GitHub release → `~/.local/bin` (ruff, yazi) |
 | Node.js | Homebrew `node` (plus a pinned `node@24` keg) | **NodeSource** apt repo (`deb.nodesource.com`), major set by `NODE_MAJOR` in `lib/manifest.sh`; signing key fingerprint verified. Ubuntu's own `nodejs` trails upstream by several majors and its separately versioned `npm` package drags an older nodejs in with it, so neither name stays in `PACKAGES_APT`. The repo and keyring are written only when their content differs, so a re-run performs no apt work at all |
 | npm global prefix | `~/.npm/packages` via `~/.npmrc` (`prefix` + `cache`) — set on both platforms so `npm i -g` never needs sudo | same |
-| Kitty | upstream app installer → `/Applications/kitty.app` | upstream app installer → `~/.local/kitty.app`, plus desktop integration the installer omits: absolute-path `.desktop` entries, `StartupWMClass`, a "New Window" action, the scalable icon in the hicolor theme, and `~/.terminfo`; terminal preference remains owned by the desktop or user |
+| Kitty | upstream app installer → `/Applications/kitty.app` | upstream app installer → `~/.local/kitty.app`, plus desktop integration the installer omits: absolute-path `.desktop` entries, `StartupWMClass`, a "New Window" action, and the scalable icon in the hicolor theme; terminal preference remains owned by the desktop or user |
+| `xterm-kitty` terminfo | default database or Kitty's official definition compiled into `~/.terminfo` | `kitty-terminfo` apt package, with the same per-user fallback when unavailable; independent of Kitty, X11, Wayland, and `SKIP_FONT` |
 | Kitty config | `kitty.conf` + `platform-macos.conf` → `platform.conf`: Cmd-based keymap, `font_size 14`, powerline tabs, `macos_*` options | `kitty.conf` + `platform-linux.conf` → `platform.conf`: Ctrl+Shift keymap, `font_size 11` (matches GNOME's `monospace-font-name`), flat tabs. Cmd is **not** usable — kitty aliases it to Super, which GNOME Shell grabs first, so the bindings load silently and never fire |
 | Kitty window decorations | native macOS title bar | `linux_display_server auto` follows the active desktop session, using native Wayland on Wayland and X11 on X11; Wayland title bars use system colors, and `Ctrl+Shift+P` is left to terminal applications. |
 | Dotfiles Homebrew paths | `/opt/homebrew/...` (via `$BREW_PREFIX`) | guarded by `command -v brew` / `$BREW_PREFIX`; no-op when brew is absent |

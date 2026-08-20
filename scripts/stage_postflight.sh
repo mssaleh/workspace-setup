@@ -41,6 +41,19 @@ postflight_kitty_display_backend() {
   esac
 }
 
+postflight_xterm_kitty_terminfo() {
+  # Ignore Kitty's private TERMINFO export. SSH, sudo, and detached sessions
+  # must be able to resolve the entry from the ordinary ncurses search path.
+  if command -v infocmp >/dev/null 2>&1 && (
+      unset TERMINFO TERMINFO_DIRS
+      infocmp xterm-kitty >/dev/null 2>&1
+    ); then
+    postflight_pass "xterm-kitty terminfo is available to headless SSH sessions"
+  else
+    postflight_fail "xterm-kitty terminfo is unavailable outside Kitty's private environment"
+  fi
+}
+
 postflight_desktop_ssh_agent() {
   local expected_socket="$1" advertised_socket="$2"
   if [[ -z "$advertised_socket" ]]; then
@@ -579,12 +592,6 @@ postflight_upstream_tools() {
       else
         postflight_fail "kitty desktop entry is missing or does not point at the installed binary"
       fi
-      if [[ -e "$HOME/.terminfo/x/xterm-kitty" ]]; then
-        postflight_pass "xterm-kitty terminfo is on the default search path"
-      else
-        postflight_fail "xterm-kitty terminfo is not linked into ~/.terminfo"
-      fi
-
       # GNOME can only match a window back to its launcher, offer right-click
       # actions, and render a crisp dock icon when the entry and icon theme say
       # so. Each of these is invisible when missing — the app still starts.
@@ -707,6 +714,7 @@ stage_postflight() {
   postflight_ssh_agent
   postflight_agent_skills
   postflight_packages
+  postflight_xterm_kitty_terminfo
   postflight_shell_paths
   postflight_completions
   postflight_upstream_tools

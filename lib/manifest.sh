@@ -47,11 +47,20 @@ PACKAGES_APT=(
   direnv
   ffmpeg poppler-utils nano
   ncdu smartmontools xsel pkg-config
-  ca-certificates gnupg lsb-release unzip xz-utils fontconfig
+  ca-certificates gnupg lsb-release unzip xz-utils fontconfig ncurses-bin
   eza chafa cosign mosh
+  # Remote shells inherit TERM=xterm-kitty even when this host has no GUI.
+  # This package is only terminal capability metadata; it does not install
+  # Kitty, X11, Wayland, or any graphical runtime.
+  kitty-terminfo
   # Kitty's automatic backend selection also supports an X11 desktop session.
   libxcb-xkb1
 )
+
+# Official source used only when the host's package database has no
+# xterm-kitty entry. This covers headless macOS and older Debian-family
+# releases without making Kitty itself or a graphical session a prerequisite.
+KITTY_TERMINFO_SOURCE_URL=https://raw.githubusercontent.com/kovidgoyal/kitty/master/terminfo/kitty.terminfo
 
 # Documentation/inventory for non-default-repository providers. These names
 # are intentionally not fed to brew or apt.

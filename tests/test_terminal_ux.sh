@@ -68,15 +68,22 @@ grep -qE '^[[:space:]]*map[[:space:]]+ctrl\+shift\+f3[[:space:]]+command_palette
   "$TEST_ROOT/dotfiles/config/kitty/platform-linux.conf" \
   || fail_test 'Linux kitty keymap lacks the non-conflicting command-palette binding'
 
-# macOS zsh keeps directory jumping available and keeps plain ssh from silently
-# changing TERM. `s` remains the explicit legacy-host escape hatch.
+# macOS zsh keeps directory jumping available.
 grep -Fq 'zoxide init zsh' "$TEST_ROOT/dotfiles/zshrc" \
   || fail_test 'zsh does not initialize zoxide'
-if grep -qE '^[[:space:]]*function[[:space:]]+ssh\(' "$TEST_ROOT/dotfiles/zshrc"; then
-  fail_test 'zsh still overrides the standard ssh command'
-fi
-grep -Fq 'TERM=xterm-256color command ssh "$@"' "$TEST_ROOT/dotfiles/zshrc" \
-  || fail_test 'zsh compatibility SSH helper is missing'
+
+# Plain ssh preserves the client TERM in both supported shells. Only the
+# explicit `s` compatibility helper advertises xterm-256color to an unmanaged
+# host that does not have the client's terminfo entry.
+for shell_rc in bashrc zshrc; do
+  if grep -qE '^[[:space:]]*function[[:space:]]+ssh\(' \
+      "$TEST_ROOT/dotfiles/$shell_rc"; then
+    fail_test "$shell_rc overrides the standard ssh command"
+  fi
+  grep -Fq 'TERM=xterm-256color command ssh "$@"' \
+    "$TEST_ROOT/dotfiles/$shell_rc" \
+    || fail_test "$shell_rc compatibility SSH helper is missing"
+done
 
 # A second source in the same Bash process must not duplicate PROMPT_COMMAND.
 mkdir -p "$TEST_TMP/home"

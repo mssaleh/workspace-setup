@@ -12,8 +12,9 @@
 # Environment variables (all optional — defaults are sensible):
 #   GIT_NAME   — your name for git commits            (default: "Your Name")
 #   GIT_EMAIL  — your email for git commits           (default: "you@example.com")
-#   SKIP_FONT  — set to 1 to skip the fonts + terminal stage (Nerd Font, kitty,
-#                and on macOS the casks + Apple Terminal profile)
+#   SKIP_FONT  — set to 1 to skip graphical terminal features (Nerd Font,
+#                Kitty, and on macOS the casks + Apple Terminal profile).
+#                xterm-kitty terminfo remains a non-GUI SSH requirement.
 #   SKIP_SSH   — set to 1 to skip SSH key generation
 #   SKIP_DOCKER — set to 1 to skip Docker Engine (Linux only)
 #   SKIP_CONTAINER — set to 1 to skip Apple Container (macOS only)

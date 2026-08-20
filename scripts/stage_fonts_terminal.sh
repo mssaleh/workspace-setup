@@ -118,8 +118,8 @@ install_kitty_upstream() {
 
 # The upstream binary installer unpacks a self-contained ~/.local/kitty.app and
 # stops there: it does not touch PATH or the application menu. On macOS the .app
-# bundle is enough, but Linux desktop launchers, icons, and terminfo are separate
-# steps documented at https://sw.kovidgoyal.net/kitty/binary/. Installing those
+# bundle is enough, but Linux desktop launchers and icons are separate steps
+# documented at https://sw.kovidgoyal.net/kitty/binary/. Installing those
 # artifacts makes Kitty available without selecting it as the default terminal.
 # Everything below is derived from the installed tree, so it is regenerated on
 # each run rather than preserved: the desktop entries embed absolute paths into
@@ -190,17 +190,6 @@ ENTRY
   fi
 
   clear_setup_terminal_preference
-
-  # kitty sets TERM=xterm-kitty and ships the matching terminfo inside its own
-  # tree, exported via TERMINFO to its children. Anything that loses that
-  # variable while keeping TERM — sudo with env_reset, a detached tmux server,
-  # an incoming ssh session — then has no entry to read. A link into ~/.terminfo
-  # puts it on ncurses' default search path and closes that gap.
-  local ti_src="$app/lib/kitty/terminfo/x/xterm-kitty"
-  if [[ -f "$ti_src" ]]; then
-    mkdir -p "$HOME/.terminfo/x"
-    ensure_cli_symlink "$ti_src" "$HOME/.terminfo/x/xterm-kitty"
-  fi
 
   ok "kitty desktop integration installed"
 }

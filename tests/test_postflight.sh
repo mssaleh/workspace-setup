@@ -59,6 +59,9 @@ chmod +x "$HOME/.cargo/bin/rustup"
 # shellcheck disable=SC2016 # literal content for the fixture's future shell
 printf '%s\n' 'export PATH="$HOME/.cargo/bin:$PATH"' > "$HOME/.cargo/env"
 printf '%s\n' '{}' > "$HOME/.config/uv/uv-receipt.json"
+# The end-to-end fixture has no real terminal database under its isolated HOME.
+# A focused test exercises installation and TERMINFO isolation directly.
+infocmp() { [[ "${1:-}" == xterm-kitty ]]; }
 # A correctly provisioned Mac keeps Claude Code's credentials in its file store,
 # because the login Keychain cannot serve them to an ssh session.
 mkdir -p "$HOME/.claude"
