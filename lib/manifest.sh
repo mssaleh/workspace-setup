@@ -49,8 +49,7 @@ PACKAGES_APT=(
   ncdu smartmontools xsel pkg-config
   ca-certificates gnupg lsb-release unzip xz-utils fontconfig
   eza chafa cosign mosh
-  # Kitty is deliberately run through XWayland for GNOME/Mutter title bars;
-  # its X11 backend requires libxcb-xkb.so.1 at startup.
+  # Kitty's automatic backend selection also supports an X11 desktop session.
   libxcb-xkb1
 )
 

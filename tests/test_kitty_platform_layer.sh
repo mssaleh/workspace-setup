@@ -54,22 +54,44 @@ fi
 if grep -qE '^[[:space:]]*map[[:space:]]+[^#]*\b(super|cmd|command)\+' "$KITTY_SRC/platform-linux.conf"; then
   fail_test 'platform-linux.conf binds Super, which GNOME Shell intercepts'
 fi
-# This host deliberately uses XWayland so GNOME/Mutter owns the title bar and
-# OS-window controls instead of Kitty drawing its Wayland client decoration.
-grep -qE '^[[:space:]]*linux_display_server[[:space:]]+x11' "$KITTY_SRC/platform-linux.conf" \
-  || fail_test 'platform-linux.conf must select X11 for the GNOME title bar'
+# Kitty must follow the active session instead of requiring XWayland on a
+# native Wayland desktop.
+grep -qE '^[[:space:]]*linux_display_server[[:space:]]+auto' "$KITTY_SRC/platform-linux.conf" \
+  || fail_test 'platform-linux.conf must select the display backend automatically'
 grep -qE '^[[:space:]]*wayland_titlebar_color[[:space:]]+system' "$KITTY_SRC/platform-linux.conf" \
-  || fail_test 'platform-linux.conf drops the Wayland fallback title bar colour'
+  || fail_test 'platform-linux.conf drops the Wayland title bar colour'
 
-# The selected backend dlopens libxcb-xkb.so.1, so the package must remain in
-# the Ubuntu manifest.
+# Automatic selection also supports X11 sessions, so keep the X11 backend's
+# runtime library available in the package inventory.
 # shellcheck disable=SC1091
 . "$TEST_ROOT/lib/manifest.sh"
 _has_xcb=0
 for _pkg in "${PACKAGES_APT[@]}"; do
   [[ "$_pkg" == libxcb-xkb1 ]] && _has_xcb=1
 done
-((_has_xcb)) || fail_test 'X11 Kitty requires libxcb-xkb1 in PACKAGES_APT'
+((_has_xcb)) || fail_test 'automatic Kitty backend selection must support an X11 session'
+
+# Display-backend validation accepts every Kitty-supported selection without
+# coupling a valid Wayland setting to an X11 library lookup.
+for display_server in auto wayland x11; do
+  display_config="$TEST_TMP/display-$display_server.conf"
+  printf 'linux_display_server %s\n' "$display_server" > "$display_config"
+  POSTFLIGHT_FAILURES=0
+  postflight_kitty_display_backend "$display_config" >/dev/null
+  [[ "$POSTFLIGHT_FAILURES" == 0 ]] \
+    || fail_test "postflight rejects the valid $display_server display backend"
+done
+display_config="$TEST_TMP/display-default.conf"
+: > "$display_config"
+POSTFLIGHT_FAILURES=0
+postflight_kitty_display_backend "$display_config" >/dev/null
+[[ "$POSTFLIGHT_FAILURES" == 0 ]] \
+  || fail_test 'postflight rejects Kitty default automatic backend selection'
+printf 'linux_display_server invalid\n' > "$display_config"
+POSTFLIGHT_FAILURES=0
+postflight_kitty_display_backend "$display_config" >/dev/null 2>&1
+[[ "$POSTFLIGHT_FAILURES" == 1 ]] \
+  || fail_test 'postflight accepts an invalid display backend'
 
 # ── 3. No layer may bind the same key twice ─────────────────────────────────
 # Hand-translating a keymap across modifiers is exactly where a duplicate slips
@@ -141,6 +163,7 @@ fi
 # install_regular_file can only upgrade a file it recognises; an unrecorded
 # hash turns the next release into a "user-owned, preserved" conflict on every
 # already-configured host.
+# shellcheck disable=SC2034 # config_hash_is_known reads this global override
 KNOWN_CONFIG_HASHES_FILE="$TEST_ROOT/lib/known-config-hashes.tsv"
 for src in "$KITTY_SRC"/*.conf "$KITTY_SRC"/*.session; do
   [[ -f "$src" ]] || continue

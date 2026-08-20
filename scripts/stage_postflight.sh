@@ -23,6 +23,24 @@ postflight_mode() {
   fi
 }
 
+postflight_kitty_display_backend() {
+  local config="$1" configured
+  configured=$(awk '
+    $1 == "linux_display_server" { value = $2 }
+    END { print value }
+  ' "$config" 2>/dev/null)
+  configured=${configured:-auto}
+
+  case "$configured" in
+    auto|wayland|x11)
+      postflight_pass "kitty Linux display backend is valid ($configured)"
+      ;;
+    *)
+      postflight_fail "kitty platform.conf has an invalid linux_display_server value: $configured"
+      ;;
+  esac
+}
+
 postflight_configs() {
   local files=(
     "$HOME/.bashrc"
@@ -591,12 +609,7 @@ postflight_upstream_tools() {
         postflight_fail "kitty platform.conf is missing or still carries Cmd-based bindings"
       fi
 
-      if grep -qE '^[[:space:]]*linux_display_server[[:space:]]+x11' "$kitty_platform" 2>/dev/null \
-          && ldconfig -p 2>/dev/null | grep -Fq 'libxcb-xkb.so.1'; then
-        postflight_pass "kitty uses GNOME-framed X11 and its required XKB library is present"
-      else
-        postflight_fail "kitty needs the X11 backend plus libxcb-xkb.so.1 for GNOME window controls"
-      fi
+      postflight_kitty_display_backend "$kitty_platform"
     fi
   fi
 }
