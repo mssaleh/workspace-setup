@@ -30,10 +30,16 @@ Apple Container requires Apple silicon and macOS 26 or later. On an older/Intel 
 | **toolchains** | Installs upstream **rustup**, Astral's standalone **uv/uvx** (plus its receipt), native Claude Code and Codex CLIs, and upstream opencode on Linux. The separate Homebrew `uv` formula remains an intentional backup. |
 | **configuration** | Converges ordinary files under `$HOME`; repairs old links into temporary checkouts, atomically upgrades exact known historical versions, semantically merges supported JSON/TOML/Git formats, preserves ambiguous user-owned content, and installs the coding-agent skills into each agent home. |
 | **containers** | macOS only: installs Apple Container from the signed package on Apple's GitHub release, ensures Rosetta, and starts it with kernel installation enabled. `container-compose` is supplied separately by Homebrew. |
-| **ssh** | Generates an ed25519 keypair if none exists, locks down `~/.ssh` permissions (700 dir, 600 files), wires up the SSH agent (macOS: Keychain; Linux: systemd user unit). Does **not** push to GitHub — run `gh auth login` manually. |
-| **fonts + terminal** | Installs JetBrainsMono Nerd Font and Kitty via Kitty's upstream installer on both platforms, then creates the standard `~/.local/bin/{kitty,kitten}` links. On macOS it also installs Maccy/LibreOffice and imports Apple Terminal defaults once. On Linux it finishes the desktop-side install the upstream installer leaves out — application entries, window class, icon theme, terminal preference, terminfo — so Kitty behaves like an installed GNOME application rather than a binary on `PATH`. |
+| **ssh** | Generates an ed25519 keypair if none exists, locks down `~/.ssh` permissions (700 dir, 600 files), and wires up the host-local SSH agent (macOS: Keychain; Linux: systemd user unit) without replacing an agent-forwarding socket supplied by `sshd`. Does **not** push to GitHub — run `gh auth login` manually. |
+| **fonts + terminal** | Installs JetBrainsMono Nerd Font and Kitty via Kitty's upstream installer on both platforms, then creates the standard `~/.local/bin/{kitty,kitten}` links. On macOS it also installs Maccy/LibreOffice and imports Apple Terminal defaults once. On Linux it installs application entries, window class, icons, and terminfo without selecting a default terminal; the active desktop or user owns that choice. |
 | **terminal profile** | Gives GNOME's Ptyxis the same *behaviour* as Kitty — 100000 lines of scrollback, a login shell so `/etc/profile.d` is read, no audible bell — and deliberately leaves its *appearance* alone. Ptyxis keeps Ubuntu's palette and `Monospace 10` because looking different from Kitty is how you tell at a glance which terminal a window belongs to. A setting the user has changed themselves is preserved and reported, never overwritten. |
 | **postflight** | Verifies provider packages, regular-file configuration, clean-shell PATH resolution, upstream artifacts, and the active container runtime as one coherent result. |
+
+Desktop features and headless access are independent. Linux desktop integration
+does not select a default terminal. Interactive and non-interactive SSH shells
+start without `DISPLAY`, `WAYLAND_DISPLAY`, a window manager, or a desktop bus.
+When `sshd` supplies `SSH_AUTH_SOCK`, shell startup and setup stages preserve it;
+host-local agent work uses an explicitly scoped socket instead.
 
 Kitty and tmux are configured as one clipboard path for coding agents: OSC 52
 writes work locally and through SSH/Mosh/tmux, while clipboard reads always ask
@@ -119,9 +125,9 @@ curl -fsSL https://raw.githubusercontent.com/mssaleh/workspace-setup/main/setup.
 
 ## System-level files you install yourself
 
-Four things a `$HOME`-only setup cannot reach. Each is reviewed, each is
-reversible by deleting the file, and postflight reports the two that can regress
-on their own. Nothing here is required for the rest of the setup to work.
+These optional system-level changes are outside the `$HOME`-only setup. Each is
+reviewed and reversible. Nothing here is required for the rest of the setup to
+work.
 
 ### STM32CubeCLT shadowing the system build tools — `system/profile.d/`
 
@@ -202,15 +208,15 @@ docker network inspect pool-check --format '{{range .IPAM.Config}}{{.Subnet}}{{e
 docker network rm pool-check >/dev/null
 ```
 
-### A second SSH agent — no file, three commands
+### Desktop and remote SSH agents
 
-A GNOME desktop runs gnome-keyring's GCR agent alongside the OpenSSH systemd
-socket. `gcr-ssh-agent.socket` is ordered `After=ssh-agent.socket` and its
-`ExecStartPost` runs `systemctl --user set-environment SSH_AUTH_SOCK=…/gcr/ssh`,
-so it deliberately wins — and a runtime `set-environment` also beats
-`~/.config/environment.d/10-ssh-agent.conf`. Shells correct themselves, but GUI
-applications inherit the manager's value, so a key added from a terminal is
-invisible to an editor's git integration.
+A GNOME desktop can run gnome-keyring's GCR agent alongside the OpenSSH systemd
+socket. GUI applications may use that desktop agent. Incoming SSH sessions are
+independent: a socket supplied by `sshd`, including an agent-forwarding socket,
+is authoritative and shell startup preserves it. Without forwarding, an SSH
+shell can use the local OpenSSH systemd socket.
+
+To make GUI applications use the same OpenSSH agent as local terminal shells:
 
 ```bash
 systemctl --user mask gcr-ssh-agent.socket gcr-ssh-agent.service
@@ -218,21 +224,14 @@ systemctl --user stop gcr-ssh-agent.service gcr-ssh-agent.socket
 systemctl --user set-environment "SSH_AUTH_SOCK=$XDG_RUNTIME_DIR/openssh_agent"
 ```
 
-Both of the last two lines matter. `mask` only prevents future starts, so
-without the `stop` the GCR agent keeps serving until the next login. And the
-third line is deliberately **not** `systemctl --user restart ssh-agent.socket`:
-that unit carries `ExecStopPre=… unset-environment SSH_AUTH_SOCK`, and stopping
-the socket kills the agent process along with every key already loaded into it.
-
-Confirm one agent, without logging out:
+Confirm the desktop manager's selection without logging out:
 
 ```bash
 systemctl --user show-environment | grep SSH_AUTH_SOCK   # …/openssh_agent
 ssh-add -l                                               # keys still loaded
 ```
 
-To undo: `systemctl --user unmask gcr-ssh-agent.socket gcr-ssh-agent.service`
-and log back in.
+This desktop choice does not alter an active or future SSH-forwarding socket.
 
 ### Making the PATH fix reach already-running GUI applications
 
@@ -438,7 +437,7 @@ The script detects the OS and adapts:
 | Package manager | Homebrew | apt-get (Ubuntu/Debian) |
 | Container runtime | Apple `container` CLI (Apple-signed release pkg) + Homebrew `container-compose` | **Docker Engine** (official, from download.docker.com) + Docker Compose v2 |
 | Apple Terminal defaults | applied (Clear Dark profile, scalar keys only) | skipped |
-| SSH agent | macOS Keychain (launchd-managed `com.openssh.ssh-agent`, `--apple-use-keychain`) | systemd user unit (Ubuntu 26.04+: socket-activated; Ubuntu 24.04: headless drop-in), explicit OpenSSH socket selection, linger + `AddKeysToAgent yes`; passphrase typed once per boot |
+| SSH agent | macOS Keychain (launchd-managed `com.openssh.ssh-agent`, `--apple-use-keychain`) | systemd user unit (Ubuntu 26.04+: socket-activated; Ubuntu 24.04: headless drop-in), forwarding-aware local socket fallback, linger + `AddKeysToAgent yes`; passphrase typed once per boot |
 | SSH key passphrase | passphrase-less (Keychain + FileVault protect the on-disk key) | passphrase-protected by default (override with `SSH_KEY_PASSPHRASE=none` for disposable VMs) |
 | Nerd Font | brew cask (`JetBrainsMono Nerd Font`) | GitHub release → `~/.local/share/fonts` (`JetBrainsMono Nerd Font Mono` variant — single-width icons for TUI alignment) |
 | Maccy clipboard manager | brew cask | skipped (Linux has its own clipboard managers) |
@@ -447,7 +446,7 @@ The script detects the OS and adapts:
 | Tools not in default apt repo (helm, kubectl, himalaya, ruff, yazi, opencode) | Homebrew formula | official apt repo (helm, kubectl) / official installers (himalaya, opencode) / GitHub release → `~/.local/bin` (ruff, yazi) |
 | Node.js | Homebrew `node` (plus a pinned `node@24` keg) | **NodeSource** apt repo (`deb.nodesource.com`), major set by `NODE_MAJOR` in `lib/manifest.sh`; signing key fingerprint verified. Ubuntu's own `nodejs` trails upstream by several majors and its separately versioned `npm` package drags an older nodejs in with it, so neither name stays in `PACKAGES_APT`. The repo and keyring are written only when their content differs, so a re-run performs no apt work at all |
 | npm global prefix | `~/.npm/packages` via `~/.npmrc` (`prefix` + `cache`) — set on both platforms so `npm i -g` never needs sudo | same |
-| Kitty | upstream app installer → `/Applications/kitty.app` | upstream app installer → `~/.local/kitty.app`, plus desktop integration the installer omits: absolute-path `.desktop` entries, `StartupWMClass`, a "New Window" action, the scalable icon in the hicolor theme, `xdg-terminals.list`, and `~/.terminfo` |
+| Kitty | upstream app installer → `/Applications/kitty.app` | upstream app installer → `~/.local/kitty.app`, plus desktop integration the installer omits: absolute-path `.desktop` entries, `StartupWMClass`, a "New Window" action, the scalable icon in the hicolor theme, and `~/.terminfo`; terminal preference remains owned by the desktop or user |
 | Kitty config | `kitty.conf` + `platform-macos.conf` → `platform.conf`: Cmd-based keymap, `font_size 14`, powerline tabs, `macos_*` options | `kitty.conf` + `platform-linux.conf` → `platform.conf`: Ctrl+Shift keymap, `font_size 11` (matches GNOME's `monospace-font-name`), flat tabs. Cmd is **not** usable — kitty aliases it to Super, which GNOME Shell grabs first, so the bindings load silently and never fire |
 | Kitty window decorations | native macOS title bar | `linux_display_server auto` follows the active desktop session, using native Wayland on Wayland and X11 on X11; Wayland title bars use system colors, and `Ctrl+Shift+P` is left to terminal applications. |
 | Dotfiles Homebrew paths | `/opt/homebrew/...` (via `$BREW_PREFIX`) | guarded by `command -v brew` / `$BREW_PREFIX`; no-op when brew is absent |

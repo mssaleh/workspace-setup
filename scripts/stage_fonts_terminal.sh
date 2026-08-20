@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/stage_fonts_terminal.sh — fonts, terminal defaults, and upstream kitty.
+# scripts/stage_fonts_terminal.sh — fonts and terminal application integration.
 
 install_brew_cask_if_missing() {
   local cask="$1" existing_artifact=""
@@ -35,6 +35,19 @@ ensure_cli_symlink() {
   fi
   ln -s "$target" "$link"
   info "linked $link → $target"
+}
+
+clear_setup_terminal_preference() {
+  local term_list="$HOME/.config/xdg-terminals.list"
+
+  # Terminal selection belongs to the active desktop and the user. Remove only
+  # the exact single-entry preference owned by this setup; preserve every other
+  # list, including one that names Kitty alongside fallback choices.
+  if [[ -f "$term_list" && ! -L "$term_list" ]] \
+      && printf 'kitty.desktop\n' | cmp -s - "$term_list"; then
+    rm -f -- "$term_list"
+    info "left the default terminal unset for the desktop or user to choose"
+  fi
 }
 
 install_terminal_profile_if_missing() {
@@ -104,14 +117,13 @@ install_kitty_upstream() {
 }
 
 # The upstream binary installer unpacks a self-contained ~/.local/kitty.app and
-# stops there: it does not touch PATH, the application menu, or the desktop's
-# terminal preference. On macOS the .app bundle is enough, but on Linux those
-# are separate steps documented at https://sw.kovidgoyal.net/kitty/binary/, and
-# skipping them leaves kitty invisible to GNOME — not in the app grid, not
-# offered as the terminal, not usable for "Open in Terminal". Everything below
-# is derived from the installed tree, so it is regenerated on each run rather
-# than preserved: the desktop entries embed absolute paths into ~/.local
-# kitty.app that must follow the app if it moves or is reinstalled.
+# stops there: it does not touch PATH or the application menu. On macOS the .app
+# bundle is enough, but Linux desktop launchers, icons, and terminfo are separate
+# steps documented at https://sw.kovidgoyal.net/kitty/binary/. Installing those
+# artifacts makes Kitty available without selecting it as the default terminal.
+# Everything below is derived from the installed tree, so it is regenerated on
+# each run rather than preserved: the desktop entries embed absolute paths into
+# ~/.local/kitty.app that must follow the app if it moves or is reinstalled.
 install_kitty_desktop_integration() {
   local app="$HOME/.local/kitty.app"
   local apps_dir="$HOME/.local/share/applications"
@@ -177,18 +189,7 @@ ENTRY
     gtk-update-icon-cache -qtf "$HOME/.local/share/icons/hicolor" >/dev/null 2>&1 || true
   fi
 
-  # xdg-terminal-exec is what Ubuntu's "Open in Terminal" and
-  # org.gnome.desktop.default-applications.terminal now dispatch through; it
-  # reads an ordered preference list. Create it, but treat an existing list as
-  # a user choice rather than reordering it.
-  local term_list="$HOME/.config/xdg-terminals.list"
-  if [[ ! -e "$term_list" ]]; then
-    mkdir -p "$(dirname "$term_list")"
-    printf 'kitty.desktop\n' > "$term_list"
-    info "set kitty as the preferred terminal (xdg-terminals.list)"
-  elif ! grep -qx 'kitty.desktop' "$term_list"; then
-    warn "preserving your terminal preference in $term_list (kitty.desktop not listed)"
-  fi
+  clear_setup_terminal_preference
 
   # kitty sets TERM=xterm-kitty and ships the matching terminfo inside its own
   # tree, exported via TERMINFO to its children. Anything that loses that

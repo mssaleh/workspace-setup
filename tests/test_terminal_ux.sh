@@ -35,6 +35,29 @@ if [[ " $clipboard_line " == *' read-clipboard '* \
   fail_test 'kitty allows silent clipboard reads'
 fi
 
+# Kitty is installed as a desktop application, but terminal selection belongs
+# to the active desktop and the user. The exact setup-owned preference is
+# cleared; a user-authored list remains untouched.
+(
+  HOME="$TEST_TMP/terminal-preference-home"
+  export HOME
+  mkdir -p "$HOME/.config"
+  # shellcheck disable=SC1091
+  . "$TEST_ROOT/lib/log.sh"
+  # shellcheck disable=SC1091
+  . "$TEST_ROOT/scripts/stage_fonts_terminal.sh"
+
+  printf 'kitty.desktop\n' > "$HOME/.config/xdg-terminals.list"
+  clear_setup_terminal_preference >/dev/null
+  [[ ! -e "$HOME/.config/xdg-terminals.list" ]] \
+    || fail_test 'setup-owned Kitty default terminal preference was retained'
+
+  printf 'org.gnome.Ptyxis.desktop\nkitty.desktop\n' > "$HOME/.config/xdg-terminals.list"
+  clear_setup_terminal_preference >/dev/null
+  grep -Fxq 'org.gnome.Ptyxis.desktop' "$HOME/.config/xdg-terminals.list" \
+    || fail_test 'user-owned terminal preference was changed'
+) || exit 1
+
 # Ctrl+Shift+P belongs to terminal applications and coding agents; do not
 # intercept it at the emulator layer.
 if grep -qE '^[[:space:]]*map[[:space:]]+ctrl\+shift\+p([[:space:]>]|$)' \
@@ -58,6 +81,19 @@ grep -Fq 'TERM=xterm-256color command ssh "$@"' "$TEST_ROOT/dotfiles/zshrc" \
 # A second source in the same Bash process must not duplicate PROMPT_COMMAND.
 mkdir -p "$TEST_TMP/home"
 cp "$TEST_ROOT/dotfiles/bashrc" "$TEST_TMP/home/.bashrc"
+# An interactive SSH shell must start without a graphical environment and keep
+# the agent socket supplied by sshd.
+# shellcheck disable=SC2016 # expansion belongs to the child Bash process
+ssh_agent_value=$(env -i HOME="$TEST_TMP/home" USER=test HOSTNAME=remote \
+    TERM=xterm-256color PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+    SSH_CONNECTION='192.0.2.10 50000 192.0.2.20 22' \
+    SSH_CLIENT='192.0.2.10 50000 22' SSH_TTY=/dev/pts/1 \
+    SSH_AUTH_SOCK=/tmp/ssh-forwarded-agent \
+    /bin/bash --noprofile --rcfile "$TEST_TMP/home/.bashrc" -ic \
+      'printf "%s" "$SSH_AUTH_SOCK"' 2>/dev/null)
+[[ "$ssh_agent_value" == /tmp/ssh-forwarded-agent ]] \
+  || fail_test 'headless interactive SSH startup changed the sshd agent socket'
+
 # shellcheck disable=SC2016 # expansions belong to the child Bash process
 if ! env -i HOME="$TEST_TMP/home" USER=test TERM=dumb \
     PATH=/usr/bin:/bin:/usr/sbin:/sbin \

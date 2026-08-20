@@ -58,9 +58,25 @@ ssh_agent_has_default_identity() {
     | awk -v wanted="$fingerprint" '$2 == wanted { found = 1 } END { exit !found }'
 }
 
+ssh_agent_has_default_identity_at() {
+  local socket="$1"
+  SSH_AUTH_SOCK="$socket" ssh_agent_has_default_identity
+}
+
 linux_ssh_agent_socket() {
   local runtime_dir="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
   printf '%s/openssh_agent\n' "$runtime_dir"
+}
+
+macos_ssh_agent_socket() {
+  local socket=""
+  if command -v launchctl >/dev/null 2>&1; then
+    socket=$(launchctl getenv SSH_AUTH_SOCK 2>/dev/null || true)
+  fi
+  if [[ -z "$socket" && -z "${SSH_CONNECTION:-}" ]]; then
+    socket=${SSH_AUTH_SOCK:-}
+  fi
+  [[ -n "$socket" ]] && printf '%s\n' "$socket"
 }
 
 stage_ssh() {
@@ -103,27 +119,28 @@ stage_ssh() {
 
   # --- Wire up the SSH agent ---
   if [[ "$OS_KIND" == macos ]]; then
-    # macOS: the launchd-managed agent (com.openssh.ssh-agent) is always
-    # running. Add the key to the Keychain-backed agent so the passphrase
-    # (if any) is stored in Keychain and the key survives reboot.
-    if ssh_agent_has_default_identity; then
+    # Address the launchd-managed agent explicitly so an `ssh -A` socket in the
+    # current remote session remains untouched.
+    local agent_socket
+    agent_socket=$(macos_ssh_agent_socket)
+    if [[ -n "$agent_socket" ]] \
+        && ssh_agent_has_default_identity_at "$agent_socket"; then
       ok "key already loaded in agent"
-    else
+    elif [[ -n "$agent_socket" ]]; then
       info "adding key to macOS Keychain-backed SSH agent…"
-      ssh-add --apple-use-keychain "$HOME/.ssh/id_ed25519" 2>/dev/null \
-        || ssh-add "$HOME/.ssh/id_ed25519" 2>/dev/null \
+      SSH_AUTH_SOCK="$agent_socket" ssh-add --apple-use-keychain "$HOME/.ssh/id_ed25519" 2>/dev/null \
+        || SSH_AUTH_SOCK="$agent_socket" ssh-add "$HOME/.ssh/id_ed25519" 2>/dev/null \
         || warn "could not add key to agent (you may need to run 'ssh-add ~/.ssh/id_ed25519' manually)"
+    else
+      warn "macOS launchd SSH agent is unavailable; preserving the current session's agent environment"
     fi
 
   elif [[ "$OS_KIND" == linux ]]; then
-    # Desktop sessions may inherit GCR's different agent socket. Select the
-    # OpenSSH socket before activating the unit so service-based releases also
-    # receive the correct SSH_AUTH_SOCK at process start.
+    # Address the local OpenSSH agent explicitly. The setup may itself be
+    # running through `ssh -A`; its SSH_AUTH_SOCK belongs to sshd and must stay
+    # unchanged for the lifetime of that remote session.
     local agent_socket
     agent_socket=$(linux_ssh_agent_socket)
-    export SSH_AUTH_SOCK="$agent_socket"
-    systemctl --user set-environment SSH_AUTH_SOCK="$agent_socket" 2>/dev/null \
-      || warn "could not update the current user-manager SSH_AUTH_SOCK"
 
     # Linux: enable the systemd user ssh-agent if a unit is shipped.
     # - Ubuntu 26.04: ships ssh-agent.socket (WantedBy=sockets.target, headless-ready).
@@ -201,12 +218,15 @@ DROPIN
     # with a passphrase-protected key, this prompts once for the passphrase
     # (via the TTY). AddKeysToAgent yes in ~/.ssh/config means future
     # connections don't re-prompt within the same boot.
-    if [[ -n "${SSH_AUTH_SOCK:-}" ]] && ssh_agent_has_default_identity; then
+    if [[ -S "$agent_socket" ]] \
+        && ssh_agent_has_default_identity_at "$agent_socket"; then
       ok "key already loaded in agent"
-    else
+    elif [[ -S "$agent_socket" ]]; then
       info "loading key into the SSH agent (you'll be prompted for the passphrase if the key has one)…"
-      ssh-add "$HOME/.ssh/id_ed25519" \
+      SSH_AUTH_SOCK="$agent_socket" ssh-add "$HOME/.ssh/id_ed25519" \
         || warn "could not add key to agent (run: ssh-add ~/.ssh/id_ed25519)"
+    else
+      warn "local OpenSSH agent is unavailable; preserving the current session's agent environment"
     fi
 
     cat <<'OPT'

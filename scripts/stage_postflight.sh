@@ -41,6 +41,17 @@ postflight_kitty_display_backend() {
   esac
 }
 
+postflight_desktop_ssh_agent() {
+  local expected_socket="$1" advertised_socket="$2"
+  if [[ -z "$advertised_socket" ]]; then
+    info "the desktop user manager advertises no SSH agent socket"
+  elif [[ "$advertised_socket" == "$expected_socket" ]]; then
+    postflight_pass "GUI applications inherit the OpenSSH agent socket"
+  else
+    info "desktop applications use a separate SSH agent ($advertised_socket); SSH sessions remain independent"
+  fi
+}
+
 postflight_configs() {
   local files=(
     "$HOME/.bashrc"
@@ -179,22 +190,13 @@ postflight_ssh_agent() {
     postflight_fail "loginctl linger is disabled for $USER"
   fi
 
-  # A GNOME desktop also runs gnome-keyring's GCR agent, which announces its own
-  # socket to the systemd user manager at runtime and so overrides
-  # ~/.config/environment.d/10-ssh-agent.conf. Shells correct themselves, but
-  # every GUI-launched application inherits the manager's value — so a key added
-  # from a terminal would be invisible to the editor's git integration. What
-  # matters is the socket the manager actually advertises, not which units exist.
+  # A desktop session can advertise a separate agent to GUI applications. That
+  # manager environment is independent of incoming SSH sessions: sshd supplies
+  # forwarded sockets directly, and the shell startup files preserve them.
   local advertised_socket
   advertised_socket=$(systemctl --user show-environment 2>/dev/null \
     | sed -n 's/^SSH_AUTH_SOCK=//p')
-  if [[ -z "$advertised_socket" ]]; then
-    postflight_fail "the systemd user manager advertises no SSH_AUTH_SOCK"
-  elif [[ "$advertised_socket" == "$expected_socket" ]]; then
-    postflight_pass "GUI applications inherit the OpenSSH agent socket"
-  else
-    postflight_fail "a second SSH agent is advertised to GUI applications ($advertised_socket) — mask it: systemctl --user mask gcr-ssh-agent.socket gcr-ssh-agent.service"
-  fi
+  postflight_desktop_ssh_agent "$expected_socket" "$advertised_socket"
 
   fingerprint=$(ssh-keygen -lf "$HOME/.ssh/id_ed25519.pub" 2>/dev/null \
     | awk 'NR == 1 { print $2; exit }')

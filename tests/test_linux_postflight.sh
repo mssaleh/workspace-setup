@@ -29,6 +29,19 @@ mode_probe="$TEST_TMP/mode-probe"
 chmod 0600 "$mode_probe"
 [[ "$(postflight_mode "$mode_probe")" == 600 ]]
 
+# A desktop agent is independent of SSH sessions and cannot make a headless
+# postflight fail. Matching the local OpenSSH socket remains a positive check.
+POSTFLIGHT_PASSES=0
+POSTFLIGHT_FAILURES=0
+postflight_desktop_ssh_agent /run/user/1000/openssh_agent \
+  /run/user/1000/gcr/ssh >/dev/null
+[[ "$POSTFLIGHT_FAILURES" == 0 && "$POSTFLIGHT_PASSES" == 0 ]]
+postflight_desktop_ssh_agent /run/user/1000/openssh_agent '' >/dev/null
+[[ "$POSTFLIGHT_FAILURES" == 0 && "$POSTFLIGHT_PASSES" == 0 ]]
+postflight_desktop_ssh_agent /run/user/1000/openssh_agent \
+  /run/user/1000/openssh_agent >/dev/null
+[[ "$POSTFLIGHT_FAILURES" == 0 && "$POSTFLIGHT_PASSES" == 1 ]]
+
 make_executable() {
   printf '%s\n' '#!/bin/sh' 'exit 0' > "$1"
   chmod +x "$1"

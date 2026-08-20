@@ -161,22 +161,20 @@ esac
 case $- in *i*) ;; *) return ;; esac
 
 # SSH agent socket — on Linux the systemd user ssh-agent.socket exposes its
-# socket at $XDG_RUNTIME_DIR/openssh_agent, but it's set in the systemd user
-# manager environment, not automatically in every shell. Set it here if unset
-# so the agent is actually used. Guarded on `[[ -z $SSH_AUTH_SOCK ]]` so that
-# `ssh -A` agent forwarding into this host is NOT clobbered (the forwarded
-# socket comes through sshd, which sets SSH_AUTH_SOCK itself). macOS doesn't
-# need this — launchd sets SSH_AUTH_SOCK for every shell via the system agent.
+# socket at $XDG_RUNTIME_DIR/openssh_agent. An incoming SSH session owns every
+# nonempty SSH_AUTH_SOCK supplied by sshd, so preserve it without probing or
+# replacing it. A desktop shell can select the local OpenSSH socket instead of
+# a competing desktop agent, and an SSH session without forwarding can use the
+# local socket as a fallback. macOS uses its launchd-managed system agent.
 if [[ -n "${XDG_RUNTIME_DIR:-}" && "$(uname -s)" != Darwin ]]; then
   _local_agent=
   [[ -S "$XDG_RUNTIME_DIR/openssh_agent" ]] && _local_agent="$XDG_RUNTIME_DIR/openssh_agent"
   [[ -z "$_local_agent" && -S "$XDG_RUNTIME_DIR/ssh-agent.socket" ]] \
     && _local_agent="$XDG_RUNTIME_DIR/ssh-agent.socket"
-  # GUI sessions may inherit GCR's separate agent. Prefer the same OpenSSH
-  # systemd socket used headlessly, but never replace a working forwarded agent
-  # received from `ssh -A`.
+  # GUI sessions may inherit GCR's separate agent. Prefer the local OpenSSH
+  # socket there, while treating a nonempty SSH-session value as authoritative.
   if [[ -n "$_local_agent" ]] \
-      && { [[ -z "${SSH_CONNECTION:-}" ]] || [[ -z "${SSH_AUTH_SOCK:-}" ]] || [[ ! -S "${SSH_AUTH_SOCK:-}" ]]; }; then
+      && { [[ -z "${SSH_CONNECTION:-}" ]] || [[ -z "${SSH_AUTH_SOCK:-}" ]]; }; then
     export SSH_AUTH_SOCK="$_local_agent"
   fi
   unset _local_agent
