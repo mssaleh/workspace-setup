@@ -16,6 +16,8 @@ mkdir -p "$HOME"
 # shellcheck disable=SC1091
 . "$TEST_ROOT/lib/log.sh"
 # shellcheck disable=SC1091
+. "$TEST_ROOT/lib/upstream.sh"
+# shellcheck disable=SC1091
 . "$TEST_ROOT/lib/manifest.sh"
 # shellcheck disable=SC1091
 . "$TEST_ROOT/scripts/stage_packages.sh"

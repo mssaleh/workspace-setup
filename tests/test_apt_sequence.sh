@@ -121,6 +121,9 @@ fi
 # shellcheck source=lib/apt.sh
 # shellcheck disable=SC1091
 . "$HELPERS"
+# shellcheck source=lib/upstream.sh
+# shellcheck disable=SC1091
+. "$TEST_ROOT/lib/upstream.sh"
 # shellcheck disable=SC1091
 . "$TEST_ROOT/scripts/stage_packages.sh"
 sudo() { "$@"; }          # the fixtures are ordinary files in a temp directory

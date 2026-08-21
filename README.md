@@ -59,6 +59,29 @@ start without `DISPLAY`, `WAYLAND_DISPLAY`, a window manager, or a desktop bus.
 When `sshd` supplies `SSH_AUTH_SOCK`, shell startup and setup stages preserve it;
 host-local agent work uses an explicitly scoped socket instead.
 
+### Publisher-installed tools track their upstream release
+
+apt carries a packaged tool forward: the candidate moves and the package
+follows. A tool installed straight from its publisher has nothing doing that
+job, so a guard that asks only *is the file there?* pins it at whatever version
+first landed. A host provisioned by this project was found running himalaya
+1.2.0 against an upstream 2.1.0 — far enough behind that the completion
+interface had changed underneath it and the shell integration had stopped
+working, with nothing in any run saying so.
+
+`ruff`, `yazi`, `himalaya` and `opencode` are now compared each run against the
+release their project publishes, resolved from the `releases/latest` redirect
+rather than the GitHub API — the API is rate limited per address, and being
+rate limited must not look like *no upgrade available*. `yq` and `cosign` are
+compared byte for byte against the publisher's checksum instead, because their
+version output cannot be parsed reliably: `cosign version` reports its Go
+toolchain as `GoVersion: go1.25.0`, and matching that would leave a current
+tool looking permanently behind.
+
+Nothing is replaced unless it identifies itself. An unreachable publisher, an
+unparseable version, or a file this project did not put there all mean *leave
+it alone and say so* — a failed probe must never cost someone a working tool.
+
 ### Repositories are registered before anything is installed
 
 On Linux the package stage runs in two phases: it registers every vendor
@@ -434,7 +457,7 @@ If your machine shares a single skill store across agents (e.g. `~/.agents/skill
 bash tests/run.sh
 ```
 
-The suite runs against temporary `HOME` directories and never touches the real one. It covers convergence decisions (install / no-op / legacy-link repair / known-version upgrade / merge / preserved conflict), the provider manifest, the order in which the Linux stage registers apt repositories and installs from them, Linux command aliases, clean-shell PATH resolution for bash and zsh, Nano tab safety, the Kitty/tmux clipboard chain, shell hook idempotence, SSH-agent identity matching, postflight on both platforms, and the streamed `curl | bash` payload bootstrap.
+The suite runs against temporary `HOME` directories and never touches the real one. It covers convergence decisions (install / no-op / legacy-link repair / known-version upgrade / merge / preserved conflict), the provider manifest, the order in which the Linux stage registers apt repositories and installs from them, whether publisher-installed tools are kept on their current release, Linux command aliases, clean-shell PATH resolution for bash and zsh, Nano tab safety, the Kitty/tmux clipboard chain, shell hook idempotence, SSH-agent identity matching, postflight on both platforms, and the streamed `curl | bash` payload bootstrap.
 
 ## Repository structure
 
@@ -445,6 +468,7 @@ workspace-setup/
 │   ├── log.sh                     # logging + stage runner
 │   ├── os.sh                      # OS detection + package manager abstraction
 │   ├── apt.sh                     # apt repository/package primitives (keys, sources, candidates)
+│   ├── upstream.sh                # keeping publisher-installed artifacts on their current release
 │   ├── manifest.sh                # source-only platform/provider ownership manifest
 │   ├── config.sh                  # atomic, state-aware regular-file convergence
 │   └── known-config-hashes.tsv    # historical source hashes (never installed)
@@ -505,7 +529,7 @@ The script detects the OS and adapts:
 | Ninja | Homebrew `ninja` | `ninja-build` from the distribution — Ubuntu ships the current upstream release, and Ninja publishes no apt repository |
 | Git | Homebrew `git` | Ubuntu: `ppa:git-core/ppa`, the PPA git-scm.com names for the current stable Git; Debian: distribution package |
 | GitHub CLI | Homebrew `gh` | GitHub's own archive (`cli.github.com`), every key in the downloaded keyring checked against the declared fingerprints. The distribution build trails upstream by tens of minor releases |
-| Tools not in default apt repo (helm, kubectl, himalaya, ruff, yazi, opencode) | Homebrew formula | official apt repo (helm, kubectl) / official installers (himalaya, opencode) / GitHub release → `~/.local/bin` (ruff, yazi) |
+| Tools not in default apt repo (helm, kubectl, himalaya, ruff, yazi, opencode) | Homebrew formula | official apt repo (helm, kubectl) / official installers (himalaya, opencode) / GitHub release → `~/.local/bin` (ruff, yazi). Each run compares what is installed against what the project publishes and upgrades when they differ — see below |
 | `yq` and `cosign` | Homebrew `yq` (mikefarah) and `cosign` | upstream release → `~/.local/bin`, checksum verified against the publisher's own list. **Not** the distribution packages: Ubuntu's `yq` is kislyuk's jq wrapper — a different program with a different command language — and its `cosign` is a whole major behind. A setup for parity between a Mac and a Linux box cannot give the same command name to two different programs. A distribution build left installed alongside is preserved; `~/.local/bin` wins on PATH and postflight names the ambiguity |
 | Node.js | Homebrew `node` (plus a pinned `node@24` keg) | **NodeSource** apt repo (`deb.nodesource.com`), major set by `NODE_MAJOR` in `lib/manifest.sh`; signing key fingerprint verified. Ubuntu's own `nodejs` trails upstream by several majors and its separately versioned `npm` package drags an older nodejs in with it, so neither name stays in `PACKAGES_APT`, and `/etc/apt/preferences.d/nodesource.pref` puts the distribution's `nodejs`, `npm`, `nodejs-doc` and `libnode-dev` below zero so apt cannot select them at all. The pin is written alongside the repository and never without it. The repo and keyring are written only when their content differs, so a re-run performs no apt work at all |
 | npm global prefix | `~/.npm/packages` via `~/.npmrc` (`prefix` + `cache`) — set on both platforms so `npm i -g` never needs sudo | same |

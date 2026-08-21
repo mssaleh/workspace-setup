@@ -13,6 +13,8 @@ mkdir -p "$HOME/.local/bin" "$TEST_TMP/providers"
 # shellcheck disable=SC1091
 . "$TEST_ROOT/lib/log.sh"
 # shellcheck disable=SC1091
+. "$TEST_ROOT/lib/upstream.sh"
+# shellcheck disable=SC1091
 . "$TEST_ROOT/scripts/stage_packages.sh"
 
 make_provider() {

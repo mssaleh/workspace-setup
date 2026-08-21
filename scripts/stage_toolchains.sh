@@ -92,12 +92,9 @@ stage_toolchains() {
   # --- OpenCode — Homebrew owns it on macOS; upstream owns it on Linux ---
   if [[ "$OS_KIND" == linux ]]; then
     local opencode_bin="$HOME/.opencode/bin/opencode"
-    if [[ -x "$opencode_bin" ]]; then
-      ok "opencode upstream install already present ($("$opencode_bin" --version 2>/dev/null || echo present))"
-    elif [[ -e "$opencode_bin" || -L "$opencode_bin" ]]; then
-      warn "preserving an existing path that blocks the upstream opencode artifact: $opencode_bin"
-    else
-      info "installing opencode (official upstream installer)…"
+    # The upstream installer replaces what it finds, so re-running it is how a
+    # host that has fallen behind catches up.
+    if upstream_artifact_needed opencode "$opencode_bin" "$opencode_bin" --version; then
       curl -fsSL https://opencode.ai/install \
         | SHELL="${SHELL:-/bin/bash}" bash -s -- --no-modify-path
     fi

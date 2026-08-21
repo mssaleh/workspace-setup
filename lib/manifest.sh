@@ -59,6 +59,19 @@ PACKAGES_APT=(
   libxcb-xkb1
 )
 
+# Upstream projects whose releases this setup installs directly, as
+# "<command>:<owner/repo>". Nothing carries these forward the way apt carries a
+# packaged tool, so each run compares what is installed against what the
+# project publishes and upgrades when they differ. Colon-delimited rather than
+# an associative array because macOS still ships bash 3.2 as /bin/bash, which
+# is the interpreter a fresh Mac runs this with.
+UPSTREAM_RELEASE_PROJECTS=(
+  ruff:astral-sh/ruff
+  yazi:sxyazi/yazi
+  himalaya:pimalaya/himalaya
+  opencode:anomalyco/opencode
+)
+
 # Single-binary releases installed into ~/.local/bin on Linux, which the
 # shipped shell files put ahead of /usr/bin. Each publisher names the artifact
 # by dpkg architecture and posts a checksum file beside it; the checksum comes

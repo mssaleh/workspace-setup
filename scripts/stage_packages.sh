@@ -33,24 +33,6 @@ ensure_local_command_alias() {
   info "linked $alias_name → $provider_name"
 }
 
-install_executable_if_path_free() {
-  local src="$1" dst="$2" label="$3" dir base tmp
-  if [[ -x "$dst" ]]; then
-    return 0
-  fi
-  if [[ -e "$dst" || -L "$dst" ]]; then
-    warn "preserving existing path that blocks the $label artifact: $dst"
-    return 0
-  fi
-  dir=$(dirname "$dst")
-  base=$(basename "$dst")
-  mkdir -p "$dir"
-  tmp=$(mktemp "$dir/.${base}.install.XXXXXX") || return 1
-  if ! cp "$src" "$tmp" || ! chmod 0755 "$tmp" || ! mv "$tmp" "$dst"; then
-    rm -f "$tmp"
-    return 1
-  fi
-}
 
 # install_verified_binary <label> <url> <expected sha256> <destination>
 # Downloads a single-binary release, refuses it unless it hashes to what the
@@ -58,7 +40,7 @@ install_executable_if_path_free() {
 # hash a truncated or partial transfer installs as a working-looking executable
 # that fails later, somewhere else.
 install_verified_binary() {
-  local label="$1" url="$2" want="$3" dst="$4" tmp got rc=0
+  local label="$1" url="$2" want="$3" dst="$4" mode="${5:-install}" tmp got rc=0
 
   if [[ -z "$want" ]]; then
     warn "$label: could not read the published checksum — skipping rather than installing unverified"
@@ -70,7 +52,7 @@ install_verified_binary() {
     rm -rf "$tmp"
     return 1
   fi
-  got=$(sha256sum "$tmp/artifact" 2>/dev/null | cut -d" " -f1)
+  got=$(upstream_sha256 "$tmp/artifact")
   if [[ "$got" != "$want" ]]; then
     warn "$label: checksum mismatch — skipping for safety"
     warn "  expected $want"
@@ -78,9 +60,40 @@ install_verified_binary() {
     rm -rf "$tmp"
     return 1
   fi
-  install_executable_if_path_free "$tmp/artifact" "$dst" "$label" || rc=1
+  if [[ "$mode" == upgrade ]]; then
+    install_executable_replacing "$tmp/artifact" "$dst" "$label" || rc=1
+  else
+    install_executable_if_path_free "$tmp/artifact" "$dst" "$label" || rc=1
+  fi
   rm -rf "$tmp"
   return "$rc"
+}
+
+# install_or_upgrade_verified_binary <label> <url> <expected sha256> <dest>
+# Installs the artifact when it is missing and replaces it when the published
+# checksum says the one on disk is a different release. A checksum that could
+# not be fetched leaves an existing artifact exactly where it is: not knowing
+# what upstream publishes is never a reason to disturb a working tool.
+install_or_upgrade_verified_binary() {
+  local label="$1" url="$2" want="$3" dst="$4"
+
+  if upstream_binary_is_current "$dst" "$want"; then
+    ok "$label is the current upstream release"
+    return 0
+  fi
+  if [[ -x "$dst" && -z "$want" ]]; then
+    ok "$label is installed; the published release could not be confirmed"
+    return 0
+  fi
+  if [[ -x "$dst" ]]; then
+    info "$label differs from the published release — upgrading…"
+    install_verified_binary "$label" "$url" "$want" "$dst" upgrade \
+      && ok "$label upgraded → $dst"
+    return
+  fi
+  info "installing $label (upstream release)…"
+  install_verified_binary "$label" "$url" "$want" "$dst" \
+    && ok "$label installed → $dst"
 }
 
 # The yq release publishes one row per artifact with the hashes in the order
@@ -364,6 +377,25 @@ install_nodesource_pin() {
   fi
 }
 
+# report_apt_removals <package> — say what installing this would take with it.
+#
+# The NodeSource package conflicts with the distribution's separate npm, and on
+# a host where someone has run `apt install npm` that one conflict cascades:
+# a real machine here had 129 packages scheduled for removal, none of which the
+# run would have mentioned. Naming them first turns a surprise into a decision
+# somebody can interrupt.
+report_apt_removals() {
+  local pkg="$1" removals count
+  removals=$(sudo "${APT_ENV[@]}" "$PKGMGR" install -s -y "$pkg" 2>/dev/null \
+    | awk '/^(Remv|Purg) / { print $2 }' | sort -u)
+  count=$(printf '%s' "$removals" | grep -c . || true)
+  ((count)) || return 0
+  warn "installing $pkg removes $count other package(s):"
+  printf '%s\n' "$removals" | head -12 | sed 's/^/    /' >&2
+  ((count > 12)) && printf '    … and %s more\n' "$((count - 12))" >&2
+  warn "  they are distribution packages that depend on the build being replaced"
+}
+
 # The NodeSource package declares Conflicts/Replaces against the distribution's
 # separate `npm` package, so apt retires that one on its own rather than
 # refusing the install; the NodeSource build carries its own matching npm.
@@ -572,6 +604,7 @@ stage_packages() {
     else
       if [[ -n "$node_installed" && "$node_installed" != *nodesource* ]]; then
         info "replacing the distribution Node.js ($node_installed) with NodeSource ${NODE_MAJOR}.x…"
+        report_apt_removals nodejs
       else
         info "installing Node.js ${NODE_MAJOR}.x (NodeSource apt repo)…"
       fi
@@ -625,19 +658,17 @@ stage_packages() {
 
     if [[ -n "$rust_triple" ]]; then
       # --- ruff (Astral Python linter/formatter, not in apt) — flat URL ---
-      if [[ -x "$HOME/.local/bin/ruff" ]]; then
-        ok "ruff upstream artifact already installed"
-      elif [[ -e "$HOME/.local/bin/ruff" || -L "$HOME/.local/bin/ruff" ]]; then
-        warn "preserving existing path that blocks the upstream ruff artifact: $HOME/.local/bin/ruff"
-      else
+      # The release is an archive rather than a bare binary, so currency is
+      # decided by the version ruff reports against the version the project
+      # published, not by a checksum.
+      if upstream_artifact_needed ruff "$HOME/.local/bin/ruff" ruff --version; then
         local tmp; tmp=$(mktemp -d)
-        info "installing ruff (GitHub release)…"
         if curl -fsSL "https://github.com/astral-sh/ruff/releases/latest/download/ruff-${rust_triple}.tar.gz" \
             -o "$tmp/ruff.tar.gz" 2>/dev/null \
             && tar -xzf "$tmp/ruff.tar.gz" -C "$tmp" 2>/dev/null \
-            && install_executable_if_path_free \
-              "$tmp/ruff-${rust_triple}/ruff" "$HOME/.local/bin/ruff" ruff; then
-          ok "ruff installed → ~/.local/bin/ruff"
+            && upstream_place_artifact ruff \
+              "$tmp/ruff-${rust_triple}/ruff" "$HOME/.local/bin/ruff"; then
+          ok "ruff → ~/.local/bin/ruff"
         else
           warn "ruff download or installation failed (skipped)"
         fi
@@ -645,29 +676,22 @@ stage_packages() {
       fi
 
       # --- yazi (TUI file manager, not in apt) — flat URL, .zip archive ---
-      if [[ -x "$HOME/.local/bin/yazi" && -x "$HOME/.local/bin/ya" ]]; then
-        ok "yazi upstream artifacts already installed"
-      elif { [[ ! -e "$HOME/.local/bin/yazi" && ! -L "$HOME/.local/bin/yazi" ]] \
-          || [[ ! -e "$HOME/.local/bin/ya" && ! -L "$HOME/.local/bin/ya" ]]; }; then
+      # yazi ships two executables and both come from the same release, so the
+      # version yazi reports governs the pair.
+      if upstream_artifact_needed yazi "$HOME/.local/bin/yazi" yazi --version; then
         local tmp; tmp=$(mktemp -d)
-        info "installing yazi (GitHub release)…"
         if curl -fsSL "https://github.com/sxyazi/yazi/releases/latest/download/yazi-${rust_triple}.zip" \
             -o "$tmp/yazi.zip" 2>/dev/null \
             && unzip -o "$tmp/yazi.zip" -d "$tmp" >/dev/null 2>&1 \
-            && install_executable_if_path_free \
-              "$tmp/yazi-${rust_triple}/yazi" "$HOME/.local/bin/yazi" yazi \
-            && install_executable_if_path_free \
-              "$tmp/yazi-${rust_triple}/ya" "$HOME/.local/bin/ya" yazi; then
-          ok "yazi installed → ~/.local/bin/yazi"
+            && upstream_place_artifact yazi \
+              "$tmp/yazi-${rust_triple}/yazi" "$HOME/.local/bin/yazi" \
+            && upstream_place_artifact yazi \
+              "$tmp/yazi-${rust_triple}/ya" "$HOME/.local/bin/ya"; then
+          ok "yazi → ~/.local/bin/yazi"
         else
           warn "yazi download or installation failed (skipped)"
         fi
         rm -rf "$tmp"
-      else
-        [[ -x "$HOME/.local/bin/yazi" ]] || \
-          warn "preserving existing path that blocks the upstream yazi artifact: $HOME/.local/bin/yazi"
-        [[ -x "$HOME/.local/bin/ya" ]] || \
-          warn "preserving existing path that blocks the upstream yazi helper: $HOME/.local/bin/ya"
       fi
     fi
 
@@ -679,28 +703,19 @@ stage_packages() {
     local dpkg_arch; dpkg_arch=$(dpkg --print-architecture 2>/dev/null || true)
     case "$dpkg_arch" in
       amd64|arm64)
-        if [[ -x "$HOME/.local/bin/yq" ]]; then
-          ok "yq upstream artifact already installed"
-        else
-          info "installing yq (mikefarah upstream release)…"
-          install_verified_binary yq \
-            "$YQ_RELEASE_BASE/yq_linux_${dpkg_arch}" \
-            "$(yq_published_sha256 "yq_linux_${dpkg_arch}")" \
-            "$HOME/.local/bin/yq" \
-            && ok "yq installed → ~/.local/bin/yq"
-        fi
+        # The published checksum decides both questions at once: whether the
+        # artifact needs installing and whether the one already there is the
+        # current release. Nothing is downloaded when the bytes already match.
+        install_or_upgrade_verified_binary yq \
+          "$YQ_RELEASE_BASE/yq_linux_${dpkg_arch}" \
+          "$(yq_published_sha256 "yq_linux_${dpkg_arch}")" \
+          "$HOME/.local/bin/yq"
 
-        if [[ -x "$HOME/.local/bin/cosign" ]]; then
-          ok "cosign upstream artifact already installed"
-        else
-          info "installing cosign (Sigstore upstream release)…"
-          install_verified_binary cosign \
-            "$COSIGN_RELEASE_BASE/cosign-linux-${dpkg_arch}" \
-            "$(curl -fsSL "$COSIGN_RELEASE_BASE/cosign_checksums.txt" 2>/dev/null \
-               | awk -v f="cosign-linux-${dpkg_arch}" '$2 == f { print $1; exit }')" \
-            "$HOME/.local/bin/cosign" \
-            && ok "cosign installed → ~/.local/bin/cosign"
-        fi
+        install_or_upgrade_verified_binary cosign \
+          "$COSIGN_RELEASE_BASE/cosign-linux-${dpkg_arch}" \
+          "$(curl -fsSL "$COSIGN_RELEASE_BASE/cosign_checksums.txt" 2>/dev/null \
+             | awk -v f="cosign-linux-${dpkg_arch}" '$2 == f { print $1; exit }')" \
+          "$HOME/.local/bin/cosign"
         ;;
       *)
         warn "yq and cosign publish no release for architecture '${dpkg_arch:-unknown}' — skipping"
@@ -708,15 +723,16 @@ stage_packages() {
     esac
 
     # --- himalaya (CLI email client, not in apt) — official install script ---
-    if [[ -x "$HOME/.local/bin/himalaya" ]]; then
-      ok "himalaya upstream artifact already installed"
-    elif [[ -e "$HOME/.local/bin/himalaya" || -L "$HOME/.local/bin/himalaya" ]]; then
-      warn "preserving existing path that blocks the upstream himalaya artifact: $HOME/.local/bin/himalaya"
-    else
-      info "installing himalaya (official install script)…"
+    # Re-running the vendor script upgrades in place, so a host that has fallen
+    # behind is brought forward rather than left on whatever first landed. That
+    # is not cosmetic: himalaya changed its completion interface between 1.x
+    # and 2.x, and a host pinned on 1.2.0 had a shell integration that could no
+    # longer generate anything.
+    if upstream_artifact_needed himalaya "$HOME/.local/bin/himalaya" \
+        "$HOME/.local/bin/himalaya" --version; then
       if curl -fsSL https://raw.githubusercontent.com/pimalaya/himalaya/master/install.sh 2>/dev/null \
-        | PREFIX="$HOME/.local" sh 2>/dev/null; then
-        ok "himalaya installed → ~/.local/bin/himalaya"
+        | PREFIX="$HOME/.local" sh >/dev/null 2>&1; then
+        ok "himalaya $("$HOME/.local/bin/himalaya" --version 2>/dev/null | awk '{print $2}') → ~/.local/bin/himalaya"
       else
         warn "himalaya install script failed (skipped)"
       fi

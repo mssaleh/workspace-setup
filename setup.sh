@@ -150,6 +150,8 @@ fi
 # shellcheck disable=SC1091
 . "$(repo_dir)/lib/apt.sh"
 # shellcheck disable=SC1091
+. "$(repo_dir)/lib/upstream.sh"
+# shellcheck disable=SC1091
 . "$(repo_dir)/lib/manifest.sh"
 # shellcheck disable=SC1091
 . "$(repo_dir)/lib/config.sh"
