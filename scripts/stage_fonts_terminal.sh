@@ -137,25 +137,33 @@ install_kitty_desktop_integration() {
       warn "kitty: $entry missing from the installed app; skipping desktop entry"
       continue
     fi
-    # Rewrite the relative Exec/Icon/TryExec keys to absolute paths. The shipped
-    # entries say `Exec=kitty`, which only resolves for a desktop environment
-    # that already has ~/.local/bin on its PATH — GNOME's session PATH usually
-    # does not include it, so the launcher silently fails to start.
-    sed -e "s|^Icon=kitty$|Icon=$icon|" \
-        -e "s|^TryExec=kitty$|TryExec=$app/bin/kitty|" \
-        -e "s|^Exec=kitty|Exec=$app/bin/kitty|" \
-        "$src" > "$apps_dir/$entry"
-  done
+    # One redirection writes the whole entry, so the file is always exactly one
+    # generation of this function's output. Emitting the additions as a second,
+    # appending statement would make them conditional on the destination
+    # existing rather than on this run having just regenerated it — and when the
+    # installed app does not ship the source entry, that appends to the previous
+    # run's file, growing another "[Desktop Action new-window]" group every run.
+    # desktop-file-validate rejects such a file: two groups may not share a
+    # name.
+    {
+      # Rewrite the relative Exec/Icon/TryExec keys to absolute paths. The
+      # shipped entries say `Exec=kitty`, which only resolves for a desktop
+      # environment that already has ~/.local/bin on its PATH — GNOME's session
+      # PATH usually does not include it, so the launcher silently fails to
+      # start.
+      sed -e "s|^Icon=kitty$|Icon=$icon|" \
+          -e "s|^TryExec=kitty$|TryExec=$app/bin/kitty|" \
+          -e "s|^Exec=kitty|Exec=$app/bin/kitty|" \
+          "$src"
 
-  # The shipped entry describes a terminal but not an *application* as GNOME
-  # models one: without StartupWMClass a window cannot be matched back to its
-  # launcher, without Actions the dock icon has no right-click "New Window",
-  # and without Keywords the overview only matches the literal string "kitty".
-  # These are appended rather than sed-ed in because upstream ships no such
-  # keys to rewrite.
-  local kitty_entry="$apps_dir/kitty.desktop"
-  if [[ -f "$kitty_entry" ]]; then
-    cat >> "$kitty_entry" <<ENTRY
+      # The shipped entry describes a terminal but not an *application* as
+      # GNOME models one: without StartupWMClass a window cannot be matched
+      # back to its launcher, without Actions the dock icon has no right-click
+      # "New Window", and without Keywords the overview only matches the
+      # literal string "kitty". Upstream ships no such keys to rewrite, so they
+      # are emitted here rather than sed-ed in.
+      if [[ "$entry" == kitty.desktop ]]; then
+        cat <<ENTRY
 StartupWMClass=kitty
 Keywords=shell;prompt;command;commandline;cmd;console;
 Actions=new-window;
@@ -165,7 +173,9 @@ Name=New Window
 Exec=$app/bin/kitty
 Icon=$icon
 ENTRY
-  fi
+      fi
+    } > "$apps_dir/$entry"
+  done
 
   # Icon in the hicolor theme too, so anything reading by icon name rather than
   # by absolute path (notification daemons, some docks) still finds it. Install

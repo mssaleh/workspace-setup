@@ -1,0 +1,188 @@
+#!/usr/bin/env bash
+# lib/apt.sh — apt repository and package primitives.
+#
+# These are mechanisms, not policy: which archives a host trusts and which
+# packages it installs are decided by the stages and by lib/manifest.sh. They
+# live here because more than one stage needs them — the package stage
+# registers every vendor archive with them and the Docker stage one more — and
+# a helper that only exists inside whichever stage happens to be sourced first
+# is a dependency waiting to break.
+#
+# Every one of them is guarded by the state it produces, so a host that is
+# already configured performs no download, no write, and no apt update.
+
+# apt_keyring_fingerprints <keyring> — print each primary key's fingerprint.
+apt_keyring_fingerprints() {
+  gpg --show-keys --with-colons "$1" 2>/dev/null \
+    | awk -F: '$1 == "pub" { want = 1; next } $1 == "fpr" && want { print $10; want = 0 }'
+}
+
+# apt_keyring_is_trusted <keyring> <fingerprint...> — true when the keyring
+# exists and every key it carries is one of the declared fingerprints. Checking
+# every key, rather than just looking for one, is what stops an extra key
+# smuggled into the download from being handed to apt as trusted.
+apt_keyring_is_trusted() {
+  local keyring="$1" fp expected found seen=0
+  shift
+  [[ -s "$keyring" ]] || return 1
+  while read -r fp; do
+    [[ -n "$fp" ]] || continue
+    seen=1
+    found=0
+    for expected in "$@"; do
+      [[ "$fp" == "$expected" ]] && { found=1; break; }
+    done
+    ((found)) || return 1
+  done < <(apt_keyring_fingerprints "$keyring")
+  ((seen))
+}
+
+# apt_trust_repo_key <label> <key-url> <keyring> <fingerprint...>
+# Downloads and installs a repository key only after confirming it carries
+# exactly the declared fingerprints. Returns non-zero without touching the
+# system when it cannot, which leaves the host on the distribution package
+# rather than trusting an unverified archive.
+#
+# A keyring path ending in .asc is written armoured; every other path is
+# dearmoured to the binary form. apt reads both, and matching the form the
+# publisher documents is what keeps a re-run comparing equal.
+apt_trust_repo_key() {
+  local label="$1" url="$2" keyring="$3"
+  shift 3
+  local key installable rc=0
+
+  if apt_keyring_is_trusted "$keyring" "$@"; then
+    return 0
+  fi
+
+  key=$(mktemp) || return 1
+  if ! curl -fsSL "$url" -o "$key" 2>/dev/null; then
+    warn "$label: could not download the signing key from $url — skipping"
+    rm -f "$key"
+    return 1
+  fi
+
+  installable=$(mktemp) || { rm -f "$key"; return 1; }
+  if [[ "$keyring" == *.asc ]]; then
+    cp "$key" "$installable"
+  # gpg --dearmor accepts an armoured or an already-binary key and emits the
+  # binary keyring apt expects, so a failure here means the download is not an
+  # OpenPGP key at all.
+  elif ! gpg --dearmor < "$key" > "$installable" 2>/dev/null; then
+    warn "$label: the download from $url is not an OpenPGP key — skipping"
+    rm -f "$key" "$installable"
+    return 1
+  fi
+
+  if ! apt_keyring_is_trusted "$installable" "$@"; then
+    warn "$label: the downloaded key does not match the declared fingerprints — skipping for safety"
+    warn "  expected: $*"
+    warn "  received: $(apt_keyring_fingerprints "$installable" | tr '\n' ' ')"
+    rc=1
+  else
+    sudo install -m 0755 -d "$(dirname "$keyring")"
+    sudo install -m 0644 "$installable" "$keyring" || rc=1
+  fi
+  rm -f "$key" "$installable"
+  return "$rc"
+}
+
+# apt_write_sources <path> <content> — install a sources file only when its
+# content differs. Prints "changed" when it wrote, so the caller can decide
+# whether an apt update is owed.
+#
+# Both the comparison and the write terminate the content with exactly one
+# newline. Callers build it with $(printf ...), which strips trailing newlines,
+# while every file apt and these publishers write ends in one — without
+# normalising, the comparison would never match and this would rewrite the
+# file and re-refresh the index on every single run.
+apt_write_sources() {
+  local path="$1" content="$2"
+  if [[ -r "$path" ]] && printf '%s\n' "$content" | cmp -s - "$path"; then
+    return 0
+  fi
+  sudo install -m 0755 -d "$(dirname "$path")"
+  if ! printf '%s\n' "$content" | sudo tee "$path" >/dev/null; then
+    warn "could not write the apt source list at $path"
+    return 1
+  fi
+  printf 'changed\n'
+}
+
+# apt_repo_is_configured <uri> — true when some apt source names this archive.
+#
+# A vendor package must never be installed unless its own archive is what is
+# offering it. Registering the archive and installing from it are separate
+# phases, so the install has to re-establish that: without this check a failed
+# registration falls through to whatever else answers to the same name. A name
+# no distribution carries today is not reserved — Debian already owns `helm` as
+# a source package, for the unrelated Emacs framework — and a release is free to
+# start publishing a binary under any of these names.
+apt_repo_is_configured() {
+  grep -rqsF "$1" /etc/apt/sources.list.d /etc/apt/sources.list 2>/dev/null
+}
+
+# apt_install_candidate <package> [label] — install the package, or upgrade it
+# when the archive now offers a version other than the installed one. Comparing
+# against the candidate is what moves a host off a distribution build after a
+# vendor repository is added, while keeping a converged host a no-op.
+apt_install_candidate() {
+  local pkg="$1" label="${2:-$1}" installed candidate
+  installed=$(dpkg-query -W -f='${Version}' "$pkg" 2>/dev/null || true)
+  candidate=$(apt-cache policy "$pkg" 2>/dev/null | awk '/Candidate:/{print $2}')
+
+  if [[ -z "$candidate" || "$candidate" == '(none)' ]]; then
+    warn "$label: no installation candidate in this host's repositories — skipping"
+    return 1
+  fi
+  if [[ -n "$installed" && "$installed" == "$candidate" ]]; then
+    ok "$label already at the newest available version ($installed)"
+    return 0
+  fi
+  info "installing $label $candidate…"
+  sudo "${APT_ENV[@]}" "$PKGMGR" install -y "$pkg" \
+    || { warn "$label install failed (skipped)"; return 1; }
+}
+
+# distro_codename — the release codename apt suites are named after.
+distro_codename() {
+  local codename=''
+  if [[ -r /etc/os-release ]]; then
+    codename=$(awk -F= '$1 == "VERSION_CODENAME" { gsub(/"/, "", $2); print $2 }' /etc/os-release)
+  fi
+  if [[ -z "$codename" ]] && command -v lsb_release >/dev/null 2>&1; then
+    codename=$(lsb_release -cs 2>/dev/null || true)
+  fi
+  printf '%s\n' "$codename"
+}
+
+# vendor_command_state <package> <command> — who owns this capability now.
+#   managed  the vendor package is installed and its command resolves
+#   foreign  something else already provides the command; leave it alone
+#   wanted   neither, so the archive should be registered and the package
+#            installed
+# Registration and installation both consult this, so a command another
+# provider owns never gets an apt source added behind its back.
+vendor_command_state() {
+  local pkg="$1" cmd="$2"
+  if dpkg -s "$pkg" >/dev/null 2>&1 && command -v "$cmd" >/dev/null 2>&1; then
+    printf 'managed\n'
+  elif command -v "$cmd" >/dev/null 2>&1; then
+    printf 'foreign\n'
+  else
+    printf 'wanted\n'
+  fi
+}
+
+# apt_gui_app_wanted <package> <skip-value> — true when a desktop application
+# should be installed here: not opted out, not already installed, and on an
+# architecture its publisher builds for. The GUI applications in this setup all
+# publish for amd64 and arm64 only.
+apt_gui_app_wanted() {
+  local pkg="$1" skip="$2" arch
+  [[ -z "$skip" ]] || return 1
+  dpkg -s "$pkg" >/dev/null 2>&1 && return 1
+  arch=$(dpkg --print-architecture 2>/dev/null || true)
+  [[ "$arch" == amd64 || "$arch" == arm64 ]]
+}
+

@@ -59,13 +59,19 @@ stage_docker() {
 
   # --- 1. Pre-clean conflicting packages (Docker docs canonical command) ---
   # Removes the distro's docker.io, the EOL docker-compose v1, docker-doc,
-  # podman-docker, and the standalone containerd/runc (replaced by containerd.io).
-  # `apt remove` is harmless if none are installed. We swallow the exit code
-  # because apt errors if the package list is empty (the `|| true` handles it).
-  info "removing any conflicting packages (docker.io, docker-compose, podman-docker, containerd, runc)…"
-  # shellcheck disable=SC2046 # intentional word splitting: each package name is a separate arg to apt remove
-  local conflicts; conflicts=$(dpkg --get-selections docker.io docker-compose docker-compose-v2 docker-doc podman-docker containerd runc 2>/dev/null | cut -f1)
+  # podman-docker, and the standalone containerd/runc (replaced by
+  # containerd.io).
+  #
+  # Only packages dpkg reports as `install` are passed on. --get-selections
+  # also lists a package in `deinstall` state — removed, config files kept —
+  # and a host that once had docker.io installed keeps that entry forever, so
+  # taking the name regardless of status would run a pointless apt transaction
+  # on every rerun.
+  local conflicts
+  conflicts=$(dpkg --get-selections "${DOCKER_CONFLICTING_PACKAGES[@]}" 2>/dev/null \
+    | awk '$2 == "install" { print $1 }')
   if [[ -n "$conflicts" ]]; then
+    info "removing conflicting packages: $(tr '\n' ' ' <<< "$conflicts")"
     # shellcheck disable=SC2086 # intentional word splitting: each package is a separate arg
     sudo "${APT_ENV[@]}" "$PKGMGR" remove $conflicts >/dev/null 2>&1 || true
   fi
@@ -75,15 +81,16 @@ stage_docker() {
   # deprecated"). The 2026 pattern: place the ASCII-armored key in
   # /etc/apt/keyrings/ and reference it via Signed-By: in the deb822 .sources
   # file (or signed-by= in the one-line .list format).
-  info "adding Docker's official GPG key to /etc/apt/keyrings/docker.asc…"
-  sudo "${APT_ENV[@]}" "$PKGMGR" update >/dev/null 2>&1 || true
-  sudo "${APT_ENV[@]}" "$PKGMGR" install -y ca-certificates curl >/dev/null 2>&1 || true
-  sudo install -m 0755 -d /etc/apt/keyrings
-  if ! sudo curl -fsSL "https://download.docker.com/linux/$docker_repo_os/gpg" -o /etc/apt/keyrings/docker.asc 2>/dev/null; then
-    warn "could not download Docker GPG key (download.docker.com unreachable?) — skipping Docker Engine"
+  #
+  # apt_trust_repo_key verifies the fingerprint before trusting the download
+  # and leaves an already-correct keyring alone, so this is a no-op on a host
+  # that is only here because one Docker package went missing.
+  sudo "${APT_ENV[@]}" "$PKGMGR" install -y ca-certificates curl gnupg >/dev/null 2>&1 || true
+  if ! apt_trust_repo_key Docker "${DOCKER_APT_URI_BASE}/${docker_repo_os}/gpg" \
+      "$DOCKER_KEYRING" "$DOCKER_KEY_FINGERPRINT"; then
+    warn "could not establish Docker's signing key — skipping Docker Engine"
     return 1
   fi
-  sudo chmod a+r /etc/apt/keyrings/docker.asc
 
   # --- 3. Add the apt repository (deb822 .sources format — official 2026 form) ---
   # The suite is the Ubuntu/Debian codename. Architecture is resolved
@@ -110,15 +117,15 @@ stage_docker() {
     return 1
   fi
 
-  info "adding Docker $docker_repo_os apt repo (deb822 format) for $codename / $arch…"
-  sudo tee /etc/apt/sources.list.d/docker.sources >/dev/null <<EOF
-Types: deb
-URIs: https://download.docker.com/linux/$docker_repo_os
-Suites: $codename
-Components: stable
-Architectures: $arch
-Signed-By: /etc/apt/keyrings/docker.asc
-EOF
+  # Written only when it differs, so a host whose repository is already correct
+  # is not made to re-refresh its whole package index to learn nothing.
+  local repo_changed
+  repo_changed=$(apt_write_sources /etc/apt/sources.list.d/docker.sources \
+    "$(printf 'Types: deb\nURIs: %s/%s\nSuites: %s\nComponents: stable\nArchitectures: %s\nSigned-By: %s\n' \
+      "$DOCKER_APT_URI_BASE" "$docker_repo_os" "$codename" "$arch" "$DOCKER_KEYRING")")
+  if [[ -n "$repo_changed" ]]; then
+    info "added the Docker $docker_repo_os apt repo (deb822) for $codename / $arch"
+  fi
 
   # --- 4. Install Docker Engine + Compose v2 + BuildKit ---
   # Packages (verified present in resolute/stable/binary-{amd64,arm64}/Packages):

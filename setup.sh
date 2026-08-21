@@ -2,6 +2,8 @@
 # setup.sh — one-shot workspace setup for macOS and Linux.
 # Usage:
 #   curl -fsSL https://url/setup.sh | bash
+#   # or, on a Linux host that has wget but not curl:
+#   wget -qO- https://url/setup.sh | bash
 #   # or, from a clone:
 #   bash setup.sh
 #
@@ -20,6 +22,7 @@
 #   SKIP_CONTAINER — set to 1 to skip Apple Container (macOS only)
 #   SKIP_LIBREOFFICE — set to 1 to skip LibreOffice (both platforms)
 #   SKIP_CLAUDE_DESKTOP — set to 1 to skip the Claude Desktop app (Linux only)
+#   SKIP_CODEX_APP — set to 1 to skip the Codex app (Linux only)
 #   SKIP_HEADLESS_CREDENTIALS — set to 1 to skip the check that credentials are
 #                reachable without a GUI session (macOS only)
 #   SSH_KEY_PASSPHRASE — set to "none" for a passphrase-less Linux key
@@ -46,11 +49,53 @@ repo_dir() {
   printf '%s\n' "${REPO_DIR}"
 }
 
-# ── Bootstrap from curl|bash ──────────────────────────────────────────────
-# If BASH_SOURCE is empty (piped via curl), fetch a source archive into a
-# temporary directory. This deliberately does not require git: curl and tar
-# are present on supported macOS and Ubuntu/Debian hosts. The payload is
-# removed on every exit; configuration is copied out as regular files.
+# _setup_fetch <url> <destination> — retrieve the payload archive.
+#
+# The one-liner is usually written with curl, but curl is not a given. On
+# Debian and Ubuntu it is Priority: optional while wget is Priority: standard,
+# so a minimal install is more likely to have wget than curl — and a script
+# that fetches its own payload with curl fails on exactly those hosts, before
+# it has reached the stage that would install curl for it. Either tool is
+# accepted here; every later stage runs after the bootstrap stage has installed
+# curl, so this is the only place the choice matters.
+#
+# macOS is curl-only on purpose: it ships /usr/bin/curl and does not ship wget,
+# which arrives with Homebrew — and installing Homebrew is one of the things
+# this script is here to do.
+_setup_fetch() {
+  local url="$1" dest="$2" path
+  # A file:// URL is a local path. Copying it directly keeps a documented
+  # REPO_ARCHIVE_URL override behaving the same way on every host: curl reads
+  # that scheme and wget does not.
+  path=${url#file://}
+  if [[ "$url" != "$path" && "$path" == /* ]]; then
+    cp -- "$path" "$dest"
+    return
+  fi
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "$url" -o "$dest"
+    return
+  fi
+  if command -v wget >/dev/null 2>&1; then
+    # wget leaves an empty file behind when the transfer fails, which would
+    # otherwise be unpacked as a truncated archive.
+    if wget -q -O "$dest" "$url"; then
+      return 0
+    fi
+    rm -f -- "$dest"
+    return 1
+  fi
+  printf 'workspace-setup: neither curl nor wget is available to fetch the payload\n' >&2
+  printf '  install one first, e.g. sudo apt-get install -y curl\n' >&2
+  return 1
+}
+
+# ── Bootstrap from a piped one-liner ─────────────────────────────────────
+# If BASH_SOURCE is empty (the script was piped in), fetch a source archive
+# into a temporary directory. This deliberately does not require git: a
+# download tool and tar are present on supported macOS and Ubuntu/Debian
+# hosts. The payload is removed on every exit; configuration is copied out as
+# regular files.
 if [[ -z "${BASH_SOURCE[0]:-}" ]] || [[ ! -f "$(dirname "${BASH_SOURCE[0]:-$0}")/lib/log.sh" ]]; then
   _setup_tmp_base=${TMPDIR:-/tmp}
   _setup_tmp_base=${_setup_tmp_base%/}
@@ -85,7 +130,7 @@ if [[ -z "${BASH_SOURCE[0]:-}" ]] || [[ ! -f "$(dirname "${BASH_SOURCE[0]:-$0}")
     REPO_ARCHIVE_URL="${REPO_ARCHIVE_URL:-https://github.com/mssaleh/workspace-setup/archive/refs/heads/main.tar.gz}"
     _setup_archive="${_setup_payload_root}/payload.tar.gz"
     printf 'workspace-setup: fetching temporary payload from %s\n' "${REPO_ARCHIVE_URL}" >&2
-    curl -fsSL "${REPO_ARCHIVE_URL}" -o "${_setup_archive}" || {
+    _setup_fetch "${REPO_ARCHIVE_URL}" "${_setup_archive}" || {
       printf 'workspace-setup: could not download payload\n' >&2
       exit 1
     }
@@ -102,6 +147,8 @@ fi
 . "$(repo_dir)/lib/log.sh"
 # shellcheck disable=SC1091
 . "$(repo_dir)/lib/os.sh"
+# shellcheck disable=SC1091
+. "$(repo_dir)/lib/apt.sh"
 # shellcheck disable=SC1091
 . "$(repo_dir)/lib/manifest.sh"
 # shellcheck disable=SC1091

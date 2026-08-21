@@ -47,7 +47,7 @@ make_executable() {
   chmod +x "$1"
 }
 
-for tool in uv uvx claude codex ruff yazi ya himalaya; do
+for tool in uv uvx claude codex ruff yazi ya himalaya yq cosign; do
   make_executable "$HOME/.local/bin/$tool"
 done
 make_executable "$HOME/.cargo/bin/rustup"
@@ -63,50 +63,110 @@ make_executable "$TEST_TMP/system/helm"
 printf '%s\n' '#!/bin/sh' "printf 'v%s.0.0\\n' \"${NODE_MAJOR}\"" > "$TEST_TMP/system/node"
 chmod +x "$TEST_TMP/system/node"
 
-# The architecture branch must answer too: the Claude Desktop check consults
-# it, and a stub that only understands `-s` would silently skip that check
-# instead of exercising it.
+# cmake and ninja are checked by resolving them and reading the version they
+# report, so the stubs have to answer --version rather than merely exist.
+printf '%s\n' '#!/bin/sh' "printf 'cmake version 4.4.2\\n'" > "$TEST_TMP/system/cmake"
+printf '%s\n' '#!/bin/sh' "printf '1.13.2\\n'" > "$TEST_TMP/system/ninja"
+chmod +x "$TEST_TMP/system/cmake" "$TEST_TMP/system/ninja"
+
+# The architecture branch must answer too: the Claude Desktop and Codex app
+# checks consult it, and a stub that only understands `-s` would silently skip
+# those checks instead of exercising them.
+installed_packages='kubectl helm libreoffice claude-desktop chatgpt'
 dpkg() {
   case "$1" in
-    -s) [[ "$2" == kubectl || "$2" == helm || "$2" == libreoffice || "$2" == claude-desktop ]] ;;
+    -s) [[ " $installed_packages " == *" $2 "* ]] ;;
     --print-architecture) printf 'amd64\n' ;;
     *) return 1 ;;
   esac
+}
+
+# Node's provenance is read from the package database and from what apt would
+# still offer, neither of which may come from the host running the suite.
+nodejs_pkg_version="${NODE_MAJOR}.0.0-1nodesource1"
+dpkg-query() {
+  [[ "$*" == *nodejs* ]] || return 1
+  printf '%s\n' "$nodejs_pkg_version"
+}
+nodejs_extra_origin=''
+apt-cache() {
+  [[ "$1" == policy && "$2" == nodejs ]] || return 1
+  printf '%s\n' 'nodejs:' \
+    "  Installed: $nodejs_pkg_version" \
+    "  Candidate: $nodejs_pkg_version" \
+    '  Version table:' \
+    " *** $nodejs_pkg_version 600" \
+    '        500 https://deb.nodesource.com/node_24.x nodistro/main amd64 Packages' \
+    '        100 /var/lib/dpkg/status'
+  [[ -z "$nodejs_extra_origin" ]] || printf '%s\n' \
+    "     22.22.1+dfsg-1ubuntu1 $nodejs_extra_origin" \
+    '        500 http://archive.ubuntu.com/ubuntu resolute/universe amd64 Packages'
 }
 
 POSTFLIGHT_PASSES=0
 POSTFLIGHT_FAILURES=0
 postflight_upstream_tools
 [[ "$POSTFLIGHT_FAILURES" == 0 ]]
-[[ "$POSTFLIGHT_PASSES" == 10 ]]
+[[ "$POSTFLIGHT_PASSES" == 15 ]]
 
-# Both GUI applications are opt-out, and opting out must remove the check
-# rather than fail it — a headless host is a supported configuration.
+# Every GUI application is opt-out, and opting out must remove the check rather
+# than fail it — a headless host is a supported configuration.
 POSTFLIGHT_PASSES=0
 POSTFLIGHT_FAILURES=0
-SKIP_LIBREOFFICE=1 SKIP_CLAUDE_DESKTOP=1 postflight_upstream_tools
+SKIP_LIBREOFFICE=1 SKIP_CLAUDE_DESKTOP=1 SKIP_CODEX_APP=1 postflight_upstream_tools
 [[ "$POSTFLIGHT_FAILURES" == 0 ]]
-[[ "$POSTFLIGHT_PASSES" == 8 ]]
+[[ "$POSTFLIGHT_PASSES" == 12 ]]
 
 # A missing GUI application on a host that expects it is a real failure.
-dpkg() {
-  case "$1" in
-    -s) [[ "$2" == kubectl || "$2" == helm ]] ;;
-    --print-architecture) printf 'amd64\n' ;;
-    *) return 1 ;;
-  esac
-}
+installed_packages='kubectl helm'
 POSTFLIGHT_PASSES=0
 POSTFLIGHT_FAILURES=0
 postflight_upstream_tools
-[[ "$POSTFLIGHT_FAILURES" == 2 ]]
-dpkg() {
-  case "$1" in
-    -s) [[ "$2" == kubectl || "$2" == helm || "$2" == libreoffice || "$2" == claude-desktop ]] ;;
-    --print-architecture) printf 'amd64\n' ;;
-    *) return 1 ;;
-  esac
-}
+[[ "$POSTFLIGHT_FAILURES" == 3 ]]
+installed_packages='kubectl helm libreoffice claude-desktop chatgpt'
+
+# ── Node.js must be NodeSource's, and nothing else may be able to supply it ──
+# A distribution nodejs still installable at a non-negative priority is the
+# failure the apt pin exists to prevent, and the version Node reports cannot
+# reveal it: apt will hand over the distribution build at the next upgrade.
+POSTFLIGHT_PASSES=0
+POSTFLIGHT_FAILURES=0
+nodejs_extra_origin=500
+postflight_upstream_tools
+[[ "$POSTFLIGHT_FAILURES" == 1 ]]
+
+# Pinned below zero, the same entry is unreachable and the host is compliant.
+POSTFLIGHT_PASSES=0
+POSTFLIGHT_FAILURES=0
+nodejs_extra_origin=-1
+postflight_upstream_tools
+[[ "$POSTFLIGHT_FAILURES" == 0 ]]
+nodejs_extra_origin=''
+
+# A nodejs that did not come from NodeSource fails on provenance alone, however
+# current the version it reports.
+POSTFLIGHT_PASSES=0
+POSTFLIGHT_FAILURES=0
+nodejs_pkg_version="${NODE_MAJOR}.0.0-1ubuntu1"
+postflight_upstream_tools
+[[ "$POSTFLIGHT_FAILURES" == 1 ]]
+nodejs_pkg_version="${NODE_MAJOR}.0.0-1nodesource1"
+
+# ── A same-named different program must not satisfy the parity check ───────
+# The distribution's yq is kislyuk's jq wrapper, not the mikefarah program
+# Homebrew installs. Resolving the name proves nothing; resolving it to the
+# upstream artifact is the whole assertion.
+mkdir -p "$TEST_TMP/system"
+make_executable "$TEST_TMP/system/yq"
+POSTFLIGHT_PASSES=0
+POSTFLIGHT_FAILURES=0
+mv "$HOME/.local/bin/yq" "$TEST_TMP/yq.hidden"
+hash -r
+postflight_upstream_tools
+(( POSTFLIGHT_FAILURES >= 1 ))
+mv "$TEST_TMP/yq.hidden" "$HOME/.local/bin/yq"
+rm -f "$TEST_TMP/system/yq"
+hash -r
 
 # The verification must catch a partially missing upstream provider artifact.
 rm "$HOME/.local/bin/ruff"

@@ -7,14 +7,32 @@ The setup payload is disposable. `curl | bash` downloads it into a temporary dir
 ## Quick start
 
 ```bash
-# One-shot (curl | bash):
+# One-shot:
 curl -fsSL https://raw.githubusercontent.com/mssaleh/workspace-setup/main/setup.sh | bash
+
+# On a Linux host that has wget but not curl:
+wget -qO- https://raw.githubusercontent.com/mssaleh/workspace-setup/main/setup.sh | bash
 
 # Or clone and run:
 git clone https://github.com/mssaleh/workspace-setup.git
 cd workspace-setup
 bash setup.sh
 ```
+
+Either download tool carries the whole bootstrap. curl is the usual way to
+write a one-liner but it is not a given: on Debian and Ubuntu `curl` is
+`Priority: optional` while `wget` is `Priority: standard`, so a minimal install
+is likelier to have wget. Piping the script in is only half of it — the script
+then fetches its own payload archive, and it accepts either tool for that too.
+Everything after the bootstrap stage can rely on curl, because that stage
+installs it.
+
+macOS is curl-only, and deliberately so: it ships `/usr/bin/curl` and does not
+ship wget, which arrives with Homebrew — and installing Homebrew is one of the
+things this script is here to do.
+
+A `file://` archive works with neither tool installed, so `REPO_ARCHIVE_URL`
+can point at a local copy on an air-gapped host.
 
 Re-running is safe: every stage inspects the provider's real artifacts and only applies missing deltas. If you run from a clone, the clone is not needed afterward and can be deleted.
 
@@ -25,7 +43,7 @@ Apple Container requires Apple silicon and macOS 26 or later. On an older/Intel 
 | Stage | What |
 |---|---|
 | **bootstrap** | Discovers Homebrew at its actual prefix or installs it (macOS); ensures curl + git (Linux). |
-| **packages** | Installs the cross-platform CLI toolbox: `eza`, `fd`, `bat`, `ripgrep` (`rg`), `fzf`, `zoxide`, `yazi`, `git`, `git-delta` (`delta`), `lazygit`, `gh`, `tmux`, `mosh`, `rsync`, `rclone`, `nmap`, `jq`, `yq`, `pandoc`, `7zz` (`7z`), `node`, `uv`, `ruff`, `helm`, `kubectl`, `cosign`, `ffmpeg`, `poppler` (`poppler-utils`), `nano`, `himalaya`, `ncdu`, `shellcheck`, `pre-commit`, … It installs `xterm-kitty` terminfo as a non-GUI SSH capability on every host. On Linux it also installs the **Claude Desktop** app from Anthropic's official apt repository (skip with `SKIP_CLAUDE_DESKTOP=1`). |
+| **packages** | Installs the cross-platform CLI toolbox: `eza`, `fd`, `bat`, `ripgrep` (`rg`), `fzf`, `zoxide`, `yazi`, `git`, `git-delta` (`delta`), `lazygit`, `gh`, `tmux`, `mosh`, `rsync`, `rclone`, `nmap`, `jq`, `yq`, `pandoc`, `7zz` (`7z`), `cmake`, `ninja`, `node`, `uv`, `ruff`, `helm`, `kubectl`, `cosign`, `ffmpeg`, `poppler` (`poppler-utils`), `nano`, `himalaya`, `ncdu`, `shellcheck`, `pre-commit`, … It installs `xterm-kitty` terminfo as a non-GUI SSH capability on every host. On Linux it registers **every** vendor archive before installing anything (see below), then installs the toolbox, the **Claude Desktop** app (skip with `SKIP_CLAUDE_DESKTOP=1`) and the **Codex app** (skip with `SKIP_CODEX_APP=1`). |
 | **docker** | Linux only: installs the official **Docker Engine** + **Docker Compose v2** from download.docker.com. A complete, responsive official installation is a no-op on rerun. |
 | **toolchains** | Installs upstream **rustup**, Astral's standalone **uv/uvx** (plus its receipt), native Claude Code and Codex CLIs, and upstream opencode on Linux. The separate Homebrew `uv` formula remains an intentional backup. |
 | **configuration** | Converges ordinary files under `$HOME`; repairs old links into temporary checkouts, atomically upgrades exact known historical versions, semantically merges supported JSON/TOML/Git formats, preserves ambiguous user-owned content, and installs the coding-agent skills into each agent home. |
@@ -40,6 +58,28 @@ does not select a default terminal. Interactive and non-interactive SSH shells
 start without `DISPLAY`, `WAYLAND_DISPLAY`, a window manager, or a desktop bus.
 When `sshd` supplies `SSH_AUTH_SOCK`, shell startup and setup stages preserve it;
 host-local agent work uses an explicitly scoped socket instead.
+
+### Repositories are registered before anything is installed
+
+On Linux the package stage runs in two phases: it registers every vendor
+archive it will use — `ppa:git-core/ppa`, `cli.github.com`, `apt.kitware.com`,
+`pkgs.k8s.io`, `packages.buildkite.com`, `downloads.claude.ai`,
+`deb.nodesource.com`, `ppa:libreoffice/ppa` — and only then installs a package.
+
+The order is the point. apt resolves a name against the archives configured at
+that moment, so a repository added after the install has already run cannot
+influence it: the distribution build lands first, and until something replaces
+it the host runs software this setup did not choose. Node.js is the sharp case
+— the distribution's `nodejs` is reachable as a dependency alternative
+(`nodeenv`, which `pre-commit` pulls in, declares `gcc | nodejs`), and the apt
+pin that forecloses that only protects installs that come after it, so the pin
+is written with its repository in phase one.
+
+Registering everything up front also collapses what would otherwise be an apt
+index refresh per repository into a single one. `tests/test_apt_sequence.sh`
+asserts the ordering, that the registration phase installs no toolbox package,
+that exactly one index refresh covers all of them, and that writing a source
+list twice changes nothing the second time.
 
 `xterm-kitty` terminfo is part of the non-GUI package baseline and remains
 installed when `SKIP_FONT=1`. Debian/Ubuntu use the lightweight
@@ -68,7 +108,7 @@ This is automation for a conventional hand-configured machine, not a settings ma
 | Capability | Owner |
 |---|---|
 | macOS CLI toolbox, selected casks, `container-compose`, backup `uv` | Homebrew |
-| Linux base toolbox | apt; official vendor repositories where required; `ppa:libreoffice/ppa` on Ubuntu |
+| Linux base toolbox | apt; official vendor repositories where the distribution build is too far behind to use; `ppa:libreoffice/ppa` and `ppa:git-core/ppa` on Ubuntu |
 | Rust, PATH-winning `uv`, Claude, Codex, Kitty, Linux opencode | each project's upstream installer |
 | Apple Container | Apple-signed installer package |
 | Configuration | ordinary files at their native paths |
@@ -114,6 +154,7 @@ All optional:
 | `SKIP_CONTAINER` | (unset) | Set to `1` to skip Apple Container installation/startup (macOS only) |
 | `SKIP_LIBREOFFICE` | (unset) | Set to `1` to skip LibreOffice — a GUI application, so set this on a headless host (both platforms) |
 | `SKIP_CLAUDE_DESKTOP` | (unset) | Set to `1` to skip the Claude Desktop app — it is a GUI application, so set this on a headless host (Linux only) |
+| `SKIP_CODEX_APP` | (unset) | Set to `1` to skip the Codex app — it is a GUI application, so set this on a headless host (Linux only) |
 | `SKIP_HEADLESS_CREDENTIALS` | (unset) | Set to `1` to skip the check that credentials are reachable without a GUI session, on a Mac only ever used at its own keyboard (macOS only) |
 | `SSH_KEY_PASSPHRASE` | (unset) | Linux uses an interactive passphrase by default; set `none` for a disposable host |
 | `REPO_ARCHIVE_URL` | GitHub `main` archive | Source archive used for the temporary `curl\|bash` payload |
@@ -393,7 +434,7 @@ If your machine shares a single skill store across agents (e.g. `~/.agents/skill
 bash tests/run.sh
 ```
 
-The suite runs against temporary `HOME` directories and never touches the real one. It covers convergence decisions (install / no-op / legacy-link repair / known-version upgrade / merge / preserved conflict), the provider manifest, Linux command aliases, clean-shell PATH resolution for bash and zsh, Nano tab safety, the Kitty/tmux clipboard chain, shell hook idempotence, SSH-agent identity matching, postflight on both platforms, and the streamed `curl | bash` payload bootstrap.
+The suite runs against temporary `HOME` directories and never touches the real one. It covers convergence decisions (install / no-op / legacy-link repair / known-version upgrade / merge / preserved conflict), the provider manifest, the order in which the Linux stage registers apt repositories and installs from them, Linux command aliases, clean-shell PATH resolution for bash and zsh, Nano tab safety, the Kitty/tmux clipboard chain, shell hook idempotence, SSH-agent identity matching, postflight on both platforms, and the streamed `curl | bash` payload bootstrap.
 
 ## Repository structure
 
@@ -403,6 +444,7 @@ workspace-setup/
 ├── lib/
 │   ├── log.sh                     # logging + stage runner
 │   ├── os.sh                      # OS detection + package manager abstraction
+│   ├── apt.sh                     # apt repository/package primitives (keys, sources, candidates)
 │   ├── manifest.sh                # source-only platform/provider ownership manifest
 │   ├── config.sh                  # atomic, state-aware regular-file convergence
 │   └── known-config-hashes.tsv    # historical source hashes (never installed)
@@ -458,8 +500,14 @@ The script detects the OS and adapts:
 | Maccy clipboard manager | brew cask | skipped (Linux has its own clipboard managers) |
 | LibreOffice | brew cask | Ubuntu: `ppa:libreoffice/ppa` (the packaging team's PPA — the distribution build lags upstream); Debian: distribution package. Skip either with `SKIP_LIBREOFFICE=1` |
 | Claude Desktop | skipped (install from claude.ai) | official Anthropic apt repo, key fingerprint verified (skip with `SKIP_CLAUDE_DESKTOP=1`); beta, amd64/arm64 only |
+| Codex app | skipped (`brew install --cask codex`) | OpenAI's own apt repo, registered by the package they publish at `persistent.oaistatic.com` — they document no standalone signing key, so that package is the bootstrap and every later version arrives through apt. Fetched only while the repo is absent; the repo URI and keyring fingerprint are checked afterwards (skip with `SKIP_CODEX_APP=1`); amd64/arm64 only. Distinct from the Codex **CLI**, which stays upstream-owned on both platforms |
+| CMake | Homebrew `cmake` | Ubuntu LTS: Kitware's own archive (`apt.kitware.com`), key fingerprint verified, then handed to `kitware-archive-keyring` so the annual key rotation arrives through apt. Ubuntu releases Kitware does not publish for, and Debian, keep the distribution package |
+| Ninja | Homebrew `ninja` | `ninja-build` from the distribution — Ubuntu ships the current upstream release, and Ninja publishes no apt repository |
+| Git | Homebrew `git` | Ubuntu: `ppa:git-core/ppa`, the PPA git-scm.com names for the current stable Git; Debian: distribution package |
+| GitHub CLI | Homebrew `gh` | GitHub's own archive (`cli.github.com`), every key in the downloaded keyring checked against the declared fingerprints. The distribution build trails upstream by tens of minor releases |
 | Tools not in default apt repo (helm, kubectl, himalaya, ruff, yazi, opencode) | Homebrew formula | official apt repo (helm, kubectl) / official installers (himalaya, opencode) / GitHub release → `~/.local/bin` (ruff, yazi) |
-| Node.js | Homebrew `node` (plus a pinned `node@24` keg) | **NodeSource** apt repo (`deb.nodesource.com`), major set by `NODE_MAJOR` in `lib/manifest.sh`; signing key fingerprint verified. Ubuntu's own `nodejs` trails upstream by several majors and its separately versioned `npm` package drags an older nodejs in with it, so neither name stays in `PACKAGES_APT`. The repo and keyring are written only when their content differs, so a re-run performs no apt work at all |
+| `yq` and `cosign` | Homebrew `yq` (mikefarah) and `cosign` | upstream release → `~/.local/bin`, checksum verified against the publisher's own list. **Not** the distribution packages: Ubuntu's `yq` is kislyuk's jq wrapper — a different program with a different command language — and its `cosign` is a whole major behind. A setup for parity between a Mac and a Linux box cannot give the same command name to two different programs. A distribution build left installed alongside is preserved; `~/.local/bin` wins on PATH and postflight names the ambiguity |
+| Node.js | Homebrew `node` (plus a pinned `node@24` keg) | **NodeSource** apt repo (`deb.nodesource.com`), major set by `NODE_MAJOR` in `lib/manifest.sh`; signing key fingerprint verified. Ubuntu's own `nodejs` trails upstream by several majors and its separately versioned `npm` package drags an older nodejs in with it, so neither name stays in `PACKAGES_APT`, and `/etc/apt/preferences.d/nodesource.pref` puts the distribution's `nodejs`, `npm`, `nodejs-doc` and `libnode-dev` below zero so apt cannot select them at all. The pin is written alongside the repository and never without it. The repo and keyring are written only when their content differs, so a re-run performs no apt work at all |
 | npm global prefix | `~/.npm/packages` via `~/.npmrc` (`prefix` + `cache`) — set on both platforms so `npm i -g` never needs sudo | same |
 | Kitty | upstream app installer → `/Applications/kitty.app` | upstream app installer → `~/.local/kitty.app`, plus desktop integration the installer omits: absolute-path `.desktop` entries, `StartupWMClass`, a "New Window" action, and the scalable icon in the hicolor theme; terminal preference remains owned by the desktop or user |
 | `xterm-kitty` terminfo | default database or Kitty's official definition compiled into `~/.terminfo` | `kitty-terminfo` apt package, with the same per-user fallback when unavailable; independent of Kitty, X11, Wayland, and `SKIP_FONT` |

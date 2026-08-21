@@ -41,6 +41,37 @@ postflight_kitty_display_backend() {
   esac
 }
 
+# True when apt offers no nodejs outside NodeSource. `apt-cache policy` prints
+# one priority line per candidate version; anything not from deb.nodesource.com
+# has to be below zero for the NodeSource build to be the only option apt will
+# ever install or upgrade to.
+postflight_nodejs_is_nodesource_only() {
+  command -v apt-cache >/dev/null 2>&1 || return 1
+  apt-cache policy nodejs 2>/dev/null | awk '
+    /^ *(\*\*\*)? *[0-9]/ && $0 !~ /^ +[0-9]+ / { priority = ($1 == "***") ? $3 : $2; next }
+    /deb\.nodesource\.com/ { next }
+    /^ +[0-9]+ +http/ && priority + 0 >= 0 { rogue = 1 }
+    END { exit rogue ? 1 : 0 }
+  '
+}
+
+# postflight_parity_command <name> <expected artifact path>
+# The command resolves, and it resolves to the upstream artifact this setup
+# installs rather than to a same-named different program. Comparing the
+# resolved path rather than a version string keeps this true across upstream
+# releases: the question is which file answers to the name, not what it prints.
+postflight_parity_command() {
+  local name="$1" expected="$2" resolved
+  resolved=$(command -v "$name" 2>/dev/null || true)
+  if [[ -z "$resolved" ]]; then
+    postflight_fail "$name is not on PATH"
+  elif [[ -e "$expected" && "$resolved" -ef "$expected" ]]; then
+    postflight_pass "$name resolves to the upstream artifact macOS also gets"
+  else
+    postflight_fail "$name resolves to ${resolved}, not the upstream artifact at $expected"
+  fi
+}
+
 postflight_xterm_kitty_terminfo() {
   # Ignore Kitty's private TERMINFO export. SSH, sudo, and detached sessions
   # must be able to resolve the entry from the ordinary ncurses search path.
@@ -486,7 +517,9 @@ postflight_upstream_tools() {
       "$HOME/.local/bin/ruff" \
       "$HOME/.local/bin/yazi" \
       "$HOME/.local/bin/ya" \
-      "$HOME/.local/bin/himalaya"; do
+      "$HOME/.local/bin/himalaya" \
+      "$HOME/.local/bin/yq" \
+      "$HOME/.local/bin/cosign"; do
       [[ -x "$artifact" ]] || linux_upstream_missing+=("$artifact")
     done
     if ((${#linux_upstream_missing[@]} == 0)); then
@@ -522,6 +555,65 @@ postflight_upstream_tools() {
       postflight_pass "Node.js $node_version matches the declared ${NODE_MAJOR}.x line"
     else
       postflight_fail "Node.js $node_version is not the declared ${NODE_MAJOR}.x line"
+    fi
+
+    # ...and it must be the NodeSource package, with the distribution's build
+    # pinned out of reach. Version alone cannot show that: the check that
+    # matters is that apt has no distribution candidate left to fall back to.
+    local node_pkg_version
+    node_pkg_version=$(dpkg-query -W -f='${Version}' nodejs 2>/dev/null || true)
+    if [[ "$node_pkg_version" != *nodesource* ]]; then
+      postflight_fail "the installed nodejs package (${node_pkg_version:-none}) is not the NodeSource build"
+    elif postflight_nodejs_is_nodesource_only; then
+      postflight_pass "NodeSource is the only apt source that can supply Node.js"
+    else
+      postflight_fail "the distribution Node.js is still installable; $NODESOURCE_PREFERENCES_FILE does not pin it out"
+    fi
+
+    # yq and cosign exist under the same command name on both platforms but
+    # would be different software if they came from the distribution: Ubuntu's
+    # yq is kislyuk's jq wrapper rather than the mikefarah program Homebrew
+    # installs, and its cosign is a major behind. Resolving the name is not
+    # enough — what answers to it has to be the same thing macOS gets.
+    postflight_parity_command yq "$HOME/.local/bin/yq"
+    postflight_parity_command cosign "$HOME/.local/bin/cosign"
+
+    # A distribution build left installed alongside is not an error — PATH puts
+    # ~/.local/bin first — but it is an ambiguity worth naming, because a script
+    # that calls /usr/bin/yq by absolute path gets the other program.
+    local shadowed=() shadowed_pkg
+    for shadowed_pkg in yq cosign; do
+      if dpkg -s "$shadowed_pkg" >/dev/null 2>&1; then
+        shadowed+=("$shadowed_pkg")
+      fi
+    done
+    if ((${#shadowed[@]})); then
+      info "a distribution build of ${shadowed[*]} is also installed; ~/.local/bin wins on PATH, absolute paths do not"
+    fi
+
+    # cmake and ninja are build tools, not GUI extras: a host missing either
+    # cannot configure or build the C/C++ projects this toolbox exists for.
+    local build_tool_missing=() build_tool
+    for build_tool in cmake ninja; do
+      command -v "$build_tool" >/dev/null 2>&1 || build_tool_missing+=("$build_tool")
+    done
+    if ((${#build_tool_missing[@]} == 0)); then
+      postflight_pass "cmake $(cmake --version 2>/dev/null | awk 'NR==1{print $3}') and ninja $(ninja --version 2>/dev/null) are usable"
+    else
+      postflight_fail "missing build tools: ${build_tool_missing[*]}"
+    fi
+
+    # The Codex app is optional (GUI app, amd64/arm64 only), so its absence is
+    # only a failure when this host was expected to install it.
+    if [[ -n "${SKIP_CODEX_APP:-}" ]]; then
+      :
+    elif dpkg -s "$CODEX_APP_PACKAGE" >/dev/null 2>&1; then
+      postflight_pass "Codex app official apt package is installed"
+    else
+      case "$(dpkg --print-architecture 2>/dev/null || true)" in
+        amd64|arm64)
+          postflight_fail "Codex app apt package is missing (set SKIP_CODEX_APP=1 on a headless host)" ;;
+      esac
     fi
 
     if [[ -z "${SKIP_LIBREOFFICE:-}" ]]; then

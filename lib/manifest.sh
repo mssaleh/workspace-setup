@@ -21,6 +21,7 @@ PACKAGES_BREW=(
   mosh tmux rsync rclone nmap curl wget
   jq yq pandoc sevenzip
   direnv
+  cmake ninja
   node node@24 uv ruff
   helm kubernetes-cli cosign container-compose
   ffmpeg poppler nano
@@ -43,12 +44,13 @@ PACKAGES_APT=(
   git lazygit gh shellcheck
   git-filter-repo pre-commit git-delta
   tmux rsync rclone nmap wget curl
-  jq yq pandoc 7zip
+  jq pandoc 7zip
   direnv
+  cmake ninja-build
   ffmpeg poppler-utils nano
   ncdu smartmontools xsel pkg-config
   ca-certificates gnupg lsb-release unzip xz-utils fontconfig ncurses-bin
-  eza chafa cosign mosh
+  eza chafa mosh
   # Remote shells inherit TERM=xterm-kitty even when this host has no GUI.
   # This package is only terminal capability metadata; it does not install
   # Kitty, X11, Wayland, or any graphical runtime.
@@ -56,6 +58,14 @@ PACKAGES_APT=(
   # Kitty's automatic backend selection also supports an X11 desktop session.
   libxcb-xkb1
 )
+
+# Single-binary releases installed into ~/.local/bin on Linux, which the
+# shipped shell files put ahead of /usr/bin. Each publisher names the artifact
+# by dpkg architecture and posts a checksum file beside it; the checksum comes
+# over the same TLS session as the artifact, so it proves the download arrived
+# intact rather than proving who built it.
+YQ_RELEASE_BASE=https://github.com/mikefarah/yq/releases/latest/download
+COSIGN_RELEASE_BASE=https://github.com/sigstore/cosign/releases/latest/download
 
 # Official source used only when the host's package database has no
 # xterm-kitty entry. This covers headless macOS and older Debian-family
@@ -66,16 +76,134 @@ KITTY_TERMINFO_SOURCE_URL=https://raw.githubusercontent.com/kovidgoyal/kitty/mas
 # are intentionally not fed to brew or apt.
 PROVIDERS_COMMON_UPSTREAM=(rustup uv-standalone claude codex kitty)
 PROVIDERS_MACOS_UPSTREAM=(apple-container-signed-pkg rosetta)
-PROVIDERS_LINUX_UPSTREAM=(ruff yazi himalaya opencode)
-# nodejs comes from NodeSource rather than the distribution: Ubuntu ships a
-# Node major that trails upstream by a long way, and its separate `npm` package
-# is versioned independently of it. The NodeSource package bundles the matching
-# npm and tracks the current release line.
-PROVIDERS_LINUX_OFFICIAL_REPO=(kubectl helm docker-engine docker-compose-v2 claude-desktop nodejs)
+# yq and cosign are here for a different reason than the rest: the
+# distribution does package them, but not as the same software macOS gets.
+# Ubuntu's `yq` is kislyuk's jq wrapper, a different program with a different
+# command language from the mikefarah yq that Homebrew installs, and its
+# `cosign` is a whole major behind Homebrew's. A setup whose purpose is parity
+# between a Mac and a Linux box cannot hand the same command name to two
+# different programs, so both come from the upstream release that macOS
+# tracks — see YQ_RELEASE_BASE and COSIGN_RELEASE_BASE above.
+PROVIDERS_LINUX_UPSTREAM=(ruff yazi himalaya opencode yq cosign)
+# Capabilities the distribution either does not package or packages too far
+# behind to use, taken from the vendor's own signed archive instead. nodejs is
+# the clearest case: Ubuntu ships a Node major that trails upstream by a long
+# way, and its separate `npm` package is versioned independently of it, while
+# the NodeSource package bundles the matching npm and tracks the current line.
+PROVIDERS_LINUX_OFFICIAL_REPO=(
+  kubectl helm docker-engine docker-compose-v2 claude-desktop nodejs
+  cmake gh chatgpt
+)
 
 # The Node.js major series installed from NodeSource on Linux. Bump to move the
 # host onto a new release line; the stage reinstalls when the installed major
 # no longer matches.
 NODE_MAJOR=24
+
+# apt pin that makes NodeSource the only permitted source of the Node runtime.
+# The first stanza outranks a distribution archive's default 500; the second
+# denies every other origin, so `apt install nodejs` cannot fall back to the
+# distribution build and `apt install npm` — which depends on that build and
+# would displace NodeSource's, whose package already Provides: npm — is
+# refused outright.
+NODESOURCE_PREFERENCES_FILE=/etc/apt/preferences.d/nodesource.pref
+NODESOURCE_PINNED_PACKAGES=(nodejs npm nodejs-doc libnode-dev)
+
 # Ubuntu-only Launchpad PPAs. Debian falls back to the distribution package.
-PROVIDERS_UBUNTU_PPA=(libreoffice)
+# git-scm.com names ppa:git-core/ppa as the way to get the current stable Git
+# on Ubuntu; the distribution trails it by two minor releases.
+PROVIDERS_UBUNTU_PPA=(libreoffice git)
+
+# Third-party repositories whose packages also appear in PACKAGES_APT. They are
+# registered before the batch install so a fresh host resolves straight to the
+# newer candidate, and each name is re-checked afterwards so a host that already
+# carries the distribution build is moved across rather than left behind.
+APT_REPO_UPGRADED_PACKAGES=(git gh cmake)
+
+# ── vendor apt archives ────────────────────────────────────────────────────
+# One declaration per archive: where the key comes from, which fingerprint it
+# must carry, where the keyring lands, and what the source line points at. The
+# stage registers every one of these before it installs anything, so a package
+# is never fetched from the distribution first and replaced afterwards.
+#
+# A keyring path ending in .asc keeps the key armoured, which is the form that
+# publisher documents and apt accepts either way.
+
+# kubectl. Not in the distribution at all. The path pins a minor series; bump
+# KUBERNETES_MINOR to track a new one.
+KUBERNETES_MINOR=v1.36
+KUBERNETES_APT_URI="https://pkgs.k8s.io/core:/stable:/${KUBERNETES_MINOR}/deb"
+KUBERNETES_KEY_URL="https://pkgs.k8s.io/core:/stable:/${KUBERNETES_MINOR}/deb/Release.key"
+KUBERNETES_KEYRING=/etc/apt/keyrings/kubernetes-apt-keyring.gpg
+KUBERNETES_KEY_FINGERPRINT=DE15B14486CD377B9E876E1A234654DA9A296436
+
+# helm. No Debian or Ubuntu release publishes a binary package by this name;
+# the Emacs framework owns `helm` as a source package and ships it as
+# elpa-helm. The Buildkite-hosted archive is helm.sh's current official path;
+# its generic "any/ any" suite works on every Debian-family release.
+HELM_APT_URI=https://packages.buildkite.com/helm-linux/helm-debian/any/
+HELM_KEY_URL=https://packages.buildkite.com/helm-linux/helm-debian/gpgkey
+HELM_KEYRING=/usr/share/keyrings/helm.gpg
+HELM_KEY_FINGERPRINT=DDF78C3E6EBB2D2CC223C95C62BA89D07698DBC6
+
+# Claude Desktop. Linux support is beta and publishes for amd64/arm64 only.
+CLAUDE_DESKTOP_APT_URI=https://downloads.claude.ai/claude-desktop/apt/stable
+CLAUDE_DESKTOP_KEY_URL=https://downloads.claude.ai/claude-desktop/key.asc
+CLAUDE_DESKTOP_KEYRING=/usr/share/keyrings/claude-desktop-archive-keyring.asc
+CLAUDE_DESKTOP_KEY_FINGERPRINT=31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE
+
+# Node.js. NodeSource publish a setup_<major>.x script meant to be piped into
+# `sudo bash`; it is not used here because it rewrites the keyring and the
+# source list on every invocation, so a re-run is never a no-op.
+NODESOURCE_APT_URI="https://deb.nodesource.com/node_${NODE_MAJOR}.x"
+NODESOURCE_KEY_URL=https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key
+NODESOURCE_KEYRING=/usr/share/keyrings/nodesource.gpg
+NODESOURCE_SOURCES=/etc/apt/sources.list.d/nodesource.sources
+NODESOURCE_KEY_FINGERPRINT=6F71F525282841EEDAF851B42F59B5F99B1BE0B4
+
+# Docker Engine + Compose v2. The per-distribution URLs serve the same key.
+# The keyring path keeps the .asc suffix Docker's own instructions use.
+DOCKER_APT_URI_BASE=https://download.docker.com/linux
+DOCKER_KEYRING=/etc/apt/keyrings/docker.asc
+DOCKER_KEY_FINGERPRINT=9DC858229FC7DD38854AE2D88D81803C0EBFCD88
+
+# Distribution packages that conflict with the official Docker Engine. Docker's
+# own instructions remove these first; containerd and runc are superseded by
+# containerd.io, and docker-compose is the retired v1.
+DOCKER_CONFLICTING_PACKAGES=(
+  docker.io docker-compose docker-compose-v2 docker-doc podman-docker containerd runc
+)
+
+# CMake from Kitware's own archive. Ubuntu 26.04 ships 4.2.x while Kitware
+# publishes 4.4.x for the same release. The archive covers Ubuntu LTS releases
+# only and has no Debian suite, so a host it does not publish for keeps the
+# distribution package. Kitware rotate the signing key annually and ship
+# `kitware-archive-keyring` to carry the replacement, which is installed once
+# the repository is trusted.
+KITWARE_APT_URI=https://apt.kitware.com/ubuntu/
+KITWARE_KEY_URL=https://apt.kitware.com/keys/kitware-archive-latest.asc
+KITWARE_KEYRING=/usr/share/keyrings/kitware-archive-keyring.gpg
+KITWARE_KEY_FINGERPRINT=4DBEBE3EEC96E7B8C6EC5BE99E92FDC6C5B9BA75
+
+# GitHub's own archive for the `gh` CLI. Ubuntu 26.04 ships 2.46 against
+# upstream 2.98. GitHub sign the archive with more than one key and rotate
+# them, so every key in the downloaded keyring must be one of these — an
+# unrecognised key means the keyring is not the one GitHub published.
+GITHUB_CLI_APT_URI=https://cli.github.com/packages
+GITHUB_CLI_KEY_URL=https://cli.github.com/packages/githubcli-archive-keyring.gpg
+GITHUB_CLI_KEYRING=/etc/apt/keyrings/githubcli-archive-keyring.gpg
+GITHUB_CLI_KEY_FINGERPRINTS=(
+  2C6106201985B60E6C7AC87323F3D4EA75716059
+  7F38BBB59D064DBCB3D84D725612B36462313325
+)
+
+# The Codex desktop app, published by OpenAI as the `chatgpt` package. OpenAI
+# document no standalone key URL: the downloaded package's maintainer script is
+# what installs the keyring and registers the repository, and every later
+# version arrives through that repository. The bootstrap package is therefore
+# fetched only when the repository is not already configured.
+CODEX_APP_PACKAGE=chatgpt
+CODEX_APP_DEB_URL_BASE=https://persistent.oaistatic.com/codex-app-prod/linux/deb/latest
+CODEX_APP_REPO_URI=https://persistent.oaistatic.com/codex-app-prod/linux/deb
+CODEX_APP_KEYRING=/usr/share/keyrings/chatgpt-archive-keyring.gpg
+CODEX_APP_KEY_FINGERPRINT=3BFA0E4AE8B8CC16A2D9BA684A3B4A566C4660E4
