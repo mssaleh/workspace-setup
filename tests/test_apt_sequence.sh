@@ -1,16 +1,13 @@
 #!/usr/bin/env bash
 # The order in which the Linux package stage talks to apt is load-bearing, and
-# nothing about a successful run reveals when it is wrong. apt resolves a
-# package name against the archives configured at that moment, so a repository
-# registered after the install has already happened cannot influence it: the
-# distribution build lands first, and until something replaces it the host runs
-# software this setup did not choose. For Node.js it is worse than cosmetic —
-# the distribution's nodejs is reachable as a dependency alternative, and the
-# apt pin that forecloses that only protects installs that come after it.
+# a successful run never reveals when it is wrong: apt resolves a name against
+# the archives configured at that moment, so a repository registered too late
+# silently has no effect. Node.js is the sharp case — its distribution build is
+# reachable as a dependency alternative, and the pin only protects installs
+# that come after it.
 #
-# These assertions are made against the source rather than a live apt run
-# because the defect is structural: it is a statement appearing in the wrong
-# half of the stage, which is visible statically and invisible at runtime.
+# Asserted against the source, because the defect is a statement in the wrong
+# half of the stage: visible statically, invisible at runtime.
 # shellcheck disable=SC2016 # the patterns match the literal "$PKGMGR" text in the source
 set -euo pipefail
 

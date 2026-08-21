@@ -19,20 +19,9 @@ cd workspace-setup
 bash setup.sh
 ```
 
-Either download tool carries the whole bootstrap. curl is the usual way to
-write a one-liner but it is not a given: on Debian and Ubuntu `curl` is
-`Priority: optional` while `wget` is `Priority: standard`, so a minimal install
-is likelier to have wget. Piping the script in is only half of it — the script
-then fetches its own payload archive, and it accepts either tool for that too.
-Everything after the bootstrap stage can rely on curl, because that stage
-installs it.
-
-macOS is curl-only, and deliberately so: it ships `/usr/bin/curl` and does not
-ship wget, which arrives with Homebrew — and installing Homebrew is one of the
-things this script is here to do.
-
-A `file://` archive works with neither tool installed, so `REPO_ARCHIVE_URL`
-can point at a local copy on an air-gapped host.
+Either tool works on Linux, including for the payload the script fetches for
+itself. macOS uses curl, which it ships; it has no wget until Homebrew installs
+one. Point `REPO_ARCHIVE_URL` at a `file://` archive to run without either.
 
 Re-running is safe: every stage inspects the provider's real artifacts and only applies missing deltas. If you run from a clone, the clone is not needed afterward and can be deleted.
 
@@ -59,71 +48,6 @@ start without `DISPLAY`, `WAYLAND_DISPLAY`, a window manager, or a desktop bus.
 When `sshd` supplies `SSH_AUTH_SOCK`, shell startup and setup stages preserve it;
 host-local agent work uses an explicitly scoped socket instead.
 
-### Publisher-installed tools track their upstream release
-
-apt carries a packaged tool forward: the candidate moves and the package
-follows. A tool installed straight from its publisher has nothing doing that
-job, so a guard that asks only *is the file there?* pins it at whatever version
-first landed. A host provisioned by this project was found running himalaya
-1.2.0 against an upstream 2.1.0 — far enough behind that the completion
-interface had changed underneath it and the shell integration had stopped
-working, with nothing in any run saying so.
-
-`ruff`, `yazi`, `himalaya` and `opencode` are now compared each run against the
-release their project publishes, resolved from the `releases/latest` redirect
-rather than the GitHub API — the API is rate limited per address, and being
-rate limited must not look like *no upgrade available*. `yq` and `cosign` are
-compared byte for byte against the publisher's checksum instead, because their
-version output cannot be parsed reliably: `cosign version` reports its Go
-toolchain as `GoVersion: go1.25.0`, and matching that would leave a current
-tool looking permanently behind.
-
-Nothing is replaced unless it identifies itself. An unreachable publisher, an
-unparseable version, or a file this project did not put there all mean *leave
-it alone and say so* — a failed probe must never cost someone a working tool.
-
-### Repositories are registered before anything is installed
-
-On Linux the package stage runs in two phases: it registers every vendor
-archive it will use — `ppa:git-core/ppa`, `cli.github.com`, `apt.kitware.com`,
-`pkgs.k8s.io`, `packages.buildkite.com`, `downloads.claude.ai`,
-`deb.nodesource.com`, `ppa:libreoffice/ppa` — and only then installs a package.
-
-The order is the point. apt resolves a name against the archives configured at
-that moment, so a repository added after the install has already run cannot
-influence it: the distribution build lands first, and until something replaces
-it the host runs software this setup did not choose. Node.js is the sharp case
-— the distribution's `nodejs` is reachable as a dependency alternative
-(`nodeenv`, which `pre-commit` pulls in, declares `gcc | nodejs`), and the apt
-pin that forecloses that only protects installs that come after it, so the pin
-is written with its repository in phase one.
-
-Registering everything up front also collapses what would otherwise be an apt
-index refresh per repository into a single one. `tests/test_apt_sequence.sh`
-asserts the ordering, that the registration phase installs no toolbox package,
-that exactly one index refresh covers all of them, and that writing a source
-list twice changes nothing the second time.
-
-`xterm-kitty` terminfo is part of the non-GUI package baseline and remains
-installed when `SKIP_FONT=1`. Debian/Ubuntu use the lightweight
-`kitty-terminfo` package; hosts without that package compile Kitty's official
-definition into `~/.terminfo`. Postflight resolves the entry with Kitty's
-private `TERMINFO` environment removed, matching a plain SSH session.
-
-For immediate recovery in a shell that reports
-`Error opening terminal: xterm-kitty`, use a universally available terminal
-description, rerun setup, and reconnect:
-
-```bash
-export TERM=xterm-256color
-bash setup.sh
-```
-
-Kitty and tmux are configured as one clipboard path for coding agents: OSC 52
-writes work locally and through SSH/Mosh/tmux, while clipboard reads always ask
-for confirmation. tmux uses `set-clipboard on` specifically so applications in
-a pane—not only tmux copy mode—can copy results to the desktop clipboard.
-
 ## Ownership and convergence model
 
 This is automation for a conventional hand-configured machine, not a settings manager:
@@ -136,21 +60,13 @@ This is automation for a conventional hand-configured machine, not a settings ma
 | Apple Container | Apple-signed installer package |
 | Configuration | ordinary files at their native paths |
 
-Configuration decisions use only the observed target plus source history carried in the temporary payload.
+### What happens to files you have edited
 
-That source history is `lib/known-config-hashes.tsv`, and it is what makes an
-upgrade possible at all. Faced with a `~/.bashrc` that is neither missing nor
-byte-identical to the one being shipped, the only options are to overwrite it —
-losing whatever the user wrote — or to preserve it and report a conflict, in
-which case a fix can never reach a machine that already has the previous
-version. The inventory resolves that: a file matching any version this project
-has shipped is unmodified and safe to replace, and anything else is the user's.
-Recording it in the payload rather than in a receipt under `$HOME` is what keeps
-the target a conventional machine with nothing to clean up.
-
-**After changing anything under `dotfiles/`, run `tools/record-known-hashes.sh`.**
-It is idempotent, and `tests/run.sh` fails with that same instruction if it is
-forgotten.
+Your own content is never overwritten. A file is replaced only when it is
+missing, byte-identical to a version this project has shipped, or still the
+distribution's untouched `/etc/skel` copy. Anything else is preserved, reported,
+and fails postflight rather than being lost. Supported JSON/TOML/Git formats get
+the required keys merged in and keep everything else.
 
 | Observed target | Action |
 |---|---|
@@ -348,6 +264,28 @@ sudo sshd -t && sudo systemctl reload ssh
 Check whether it is already in place before reinstalling it:
 `sudo sshd -T | grep -E '^(passwordauthentication|pubkeyauthentication)'`.
 
+## Terminals and clipboard
+
+`xterm-kitty` terminfo is part of the non-GUI package baseline and remains
+installed when `SKIP_FONT=1`. Debian/Ubuntu use the lightweight
+`kitty-terminfo` package; hosts without that package compile Kitty's official
+definition into `~/.terminfo`. Postflight resolves the entry with Kitty's
+private `TERMINFO` environment removed, matching a plain SSH session.
+
+For immediate recovery in a shell that reports
+`Error opening terminal: xterm-kitty`, use a universally available terminal
+description, rerun setup, and reconnect:
+
+```bash
+export TERM=xterm-256color
+bash setup.sh
+```
+
+Kitty and tmux are configured as one clipboard path for coding agents: OSC 52
+writes work locally and through SSH/Mosh/tmux, while clipboard reads always ask
+for confirmation. tmux uses `set-clipboard on` specifically so applications in
+a pane—not only tmux copy mode—can copy results to the desktop clipboard.
+
 ## Working on a Mac over SSH
 
 A Mac you reach with `ssh` cannot use the login Keychain the way a desktop
@@ -451,15 +389,69 @@ The bundled `scripts/optimize-builder.sh` resizes the builder VM and preserves t
 
 If your machine shares a single skill store across agents (e.g. `~/.agents/skills/` with per-agent directory links), that layout is preserved — the files converge through the link onto the shared copy.
 
-## Tests
+## macOS-only vs Linux
 
-```bash
-bash tests/run.sh
-```
+The script detects the OS and adapts:
 
-The suite runs against temporary `HOME` directories and never touches the real one. It covers convergence decisions (install / no-op / legacy-link repair / known-version upgrade / merge / preserved conflict), the provider manifest, the order in which the Linux stage registers apt repositories and installs from them, whether publisher-installed tools are kept on their current release, Linux command aliases, clean-shell PATH resolution for bash and zsh, Nano tab safety, the Kitty/tmux clipboard chain, shell hook idempotence, SSH-agent identity matching, postflight on both platforms, and the streamed `curl | bash` payload bootstrap.
+| Component | macOS | Linux |
+|---|---|---|
+| Package manager | Homebrew | apt-get (Ubuntu/Debian) |
+| Container runtime | Apple `container` CLI (Apple-signed release pkg) + Homebrew `container-compose` | **Docker Engine** (official, from download.docker.com) + Docker Compose v2 |
+| Apple Terminal defaults | applied (Clear Dark profile, scalar keys only) | skipped |
+| SSH agent | macOS Keychain (launchd-managed `com.openssh.ssh-agent`, `--apple-use-keychain`) | systemd user unit (Ubuntu 26.04+: socket-activated; Ubuntu 24.04: headless drop-in), forwarding-aware local socket fallback, linger + `AddKeysToAgent yes`; passphrase typed once per boot |
+| SSH key passphrase | passphrase-less (Keychain + FileVault protect the on-disk key) | passphrase-protected by default (override with `SSH_KEY_PASSPHRASE=none` for disposable VMs) |
+| Nerd Font | brew cask (`JetBrainsMono Nerd Font`) | GitHub release → `~/.local/share/fonts` (`JetBrainsMono Nerd Font Mono` variant — single-width icons for TUI alignment) |
+| Maccy clipboard manager | brew cask | skipped (Linux has its own clipboard managers) |
+| LibreOffice | brew cask | Ubuntu: `ppa:libreoffice/ppa` (the packaging team's PPA — the distribution build lags upstream); Debian: distribution package. Skip either with `SKIP_LIBREOFFICE=1` |
+| Claude Desktop | skipped (install from claude.ai) | official Anthropic apt repo, key fingerprint verified (skip with `SKIP_CLAUDE_DESKTOP=1`); beta, amd64/arm64 only |
+| Codex app | skipped (`brew install --cask codex`) | OpenAI's own apt repo, registered by the package they publish at `persistent.oaistatic.com` — they document no standalone signing key, so that package is the bootstrap and every later version arrives through apt. Fetched only while the repo is absent; the repo URI and keyring fingerprint are checked afterwards (skip with `SKIP_CODEX_APP=1`); amd64/arm64 only. Distinct from the Codex **CLI**, which stays upstream-owned on both platforms |
+| CMake | Homebrew `cmake` | Ubuntu LTS: Kitware's own archive (`apt.kitware.com`), key fingerprint verified, then handed to `kitware-archive-keyring` so the annual key rotation arrives through apt. Ubuntu releases Kitware does not publish for, and Debian, keep the distribution package |
+| Ninja | Homebrew `ninja` | `ninja-build` from the distribution — Ubuntu ships the current upstream release, and Ninja publishes no apt repository |
+| Git | Homebrew `git` | Ubuntu: `ppa:git-core/ppa`, the PPA git-scm.com names for the current stable Git; Debian: distribution package |
+| GitHub CLI | Homebrew `gh` | GitHub's own archive (`cli.github.com`), every key in the downloaded keyring checked against the declared fingerprints. The distribution build trails upstream by tens of minor releases |
+| Tools not in default apt repo (helm, kubectl, himalaya, ruff, yazi, opencode) | Homebrew formula | official apt repo (helm, kubectl) / official installers (himalaya, opencode) / GitHub release → `~/.local/bin` (ruff, yazi). Each run compares what is installed against what the project publishes and upgrades when they differ — see below |
+| `yq` and `cosign` | Homebrew `yq` (mikefarah) and `cosign` | upstream release → `~/.local/bin`, checksum verified against the publisher's own list. **Not** the distribution packages: Ubuntu's `yq` is kislyuk's jq wrapper — a different program with a different command language — and its `cosign` is a whole major behind. A setup for parity between a Mac and a Linux box cannot give the same command name to two different programs. A distribution build left installed alongside is preserved; `~/.local/bin` wins on PATH and postflight names the ambiguity |
+| Node.js | Homebrew `node` (plus a pinned `node@24` keg) | **NodeSource** apt repo (`deb.nodesource.com`), major set by `NODE_MAJOR` in `lib/manifest.sh`; signing key fingerprint verified. Ubuntu's own `nodejs` trails upstream by several majors and its separately versioned `npm` package drags an older nodejs in with it, so neither name stays in `PACKAGES_APT`, and `/etc/apt/preferences.d/nodesource.pref` puts the distribution's `nodejs`, `npm`, `nodejs-doc` and `libnode-dev` below zero so apt cannot select them at all. The pin is written alongside the repository and never without it. The repo and keyring are written only when their content differs, so a re-run performs no apt work at all |
+| npm global prefix | `~/.npm/packages` via `~/.npmrc` (`prefix` + `cache`) — set on both platforms so `npm i -g` never needs sudo | same |
+| Kitty | upstream app installer → `/Applications/kitty.app` | upstream app installer → `~/.local/kitty.app`, plus desktop integration the installer omits: absolute-path `.desktop` entries, `StartupWMClass`, a "New Window" action, and the scalable icon in the hicolor theme; terminal preference remains owned by the desktop or user |
+| `xterm-kitty` terminfo | default database or Kitty's official definition compiled into `~/.terminfo` | `kitty-terminfo` apt package, with the same per-user fallback when unavailable; independent of Kitty, X11, Wayland, and `SKIP_FONT` |
+| Kitty config | `kitty.conf` + `platform-macos.conf` → `platform.conf`: Cmd-based keymap, `font_size 14`, powerline tabs, `macos_*` options | `kitty.conf` + `platform-linux.conf` → `platform.conf`: Ctrl+Shift keymap, `font_size 11` (matches GNOME's `monospace-font-name`), flat tabs. Cmd is **not** usable — kitty aliases it to Super, which GNOME Shell grabs first, so the bindings load silently and never fire |
+| Kitty window decorations | native macOS title bar | `linux_display_server auto` follows the active desktop session, using native Wayland on Wayland and X11 on X11; Wayland title bars use system colors, and `Ctrl+Shift+P` is left to terminal applications. |
+| Dotfiles Homebrew paths | `/opt/homebrew/...` (via `$BREW_PREFIX`) | guarded by `command -v brew` / `$BREW_PREFIX`; no-op when brew is absent |
+| Shell integrations | zsh: zoxide, fzf, direnv, `zsh-autosuggestions`, `zsh-syntax-highlighting`; Bash receives the matching cross-platform hooks | Bash: zoxide, fzf, direnv + `/usr/share/bash-completion/`; **no zsh on Linux** — the test suite runs the Linux path and fails if it produces any zsh file, if a zsh package reaches `PACKAGES_APT`, or if postflight looks for zsh configuration there |
+| Shell config files | regular `bashrc`, `bash_profile`, `profile`, `zshenv`, `zprofile`, `zshrc`, `inputrc`, `nanorc`, `tmux.conf` | regular `bashrc`, `bash_profile`, `profile`, `inputrc`, `nanorc`, `tmux.conf` (no zsh files) |
+| himalaya completion | brew's generated completion files are unusable (himalaya ≥ 2.0 writes its scripts to files and prints a status line; the formula captures stdout, so every upgrade ships a one-line syntax error). `~/.bashrc` keeps the broken compat file from being sourced (`BASH_COMPLETION_COMPAT_IGNORE`), and lazy loaders — `~/.local/share/bash-completion/completions/himalaya` for bash, a `_himalaya` stub on fpath for zsh — regenerate the real script from the installed binary on first Tab | the upstream artifact ships no completion at all; the same bash lazy loader provides it |
 
-## Repository structure
+## Working on this repo
+
+**After changing anything under `dotfiles/`, run `tools/record-known-hashes.sh`.**
+It is idempotent, and `tests/run.sh` fails with that same instruction if it is
+forgotten.
+
+### How it stays current
+
+**Distribution packages** come from the vendor's own archive where the
+distribution's build is too far behind to use — `ppa:git-core/ppa`,
+`cli.github.com`, `apt.kitware.com`, `pkgs.k8s.io`, `packages.buildkite.com`,
+`downloads.claude.ai`, `deb.nodesource.com`, `ppa:libreoffice/ppa`. On Linux
+every archive is registered before any package is installed, so a name resolves
+to the vendor's build the first time rather than being installed from the
+distribution and replaced afterwards. One index refresh covers them all.
+
+**Publisher-installed tools** — `ruff`, `yazi`, `himalaya`, `opencode`, `yq`,
+`cosign` — have no package manager carrying them forward, so each run compares
+what is installed against what the project publishes and upgrades when they
+differ. Nothing is replaced unless it identifies itself: an unreachable
+publisher, an unparseable version, or a file this project did not place all
+mean it is left alone and reported.
+
+**Node.js** comes only from NodeSource. `/etc/apt/preferences.d/nodesource.pref`
+puts the distribution's `nodejs`, `npm`, `nodejs-doc` and `libnode-dev` below
+zero, so apt cannot select them even as a dependency of something else. Where
+the distribution's `npm` is installed, replacing it can remove a large number of
+packages built on it; the run names them before it proceeds.
+
+### Repository structure
 
 ```
 workspace-setup/
@@ -509,35 +501,11 @@ workspace-setup/
 └── README.md
 ```
 
-## macOS-only vs Linux
+### Tests
 
-The script detects the OS and adapts:
+```bash
+bash tests/run.sh
+```
 
-| Component | macOS | Linux |
-|---|---|---|
-| Package manager | Homebrew | apt-get (Ubuntu/Debian) |
-| Container runtime | Apple `container` CLI (Apple-signed release pkg) + Homebrew `container-compose` | **Docker Engine** (official, from download.docker.com) + Docker Compose v2 |
-| Apple Terminal defaults | applied (Clear Dark profile, scalar keys only) | skipped |
-| SSH agent | macOS Keychain (launchd-managed `com.openssh.ssh-agent`, `--apple-use-keychain`) | systemd user unit (Ubuntu 26.04+: socket-activated; Ubuntu 24.04: headless drop-in), forwarding-aware local socket fallback, linger + `AddKeysToAgent yes`; passphrase typed once per boot |
-| SSH key passphrase | passphrase-less (Keychain + FileVault protect the on-disk key) | passphrase-protected by default (override with `SSH_KEY_PASSPHRASE=none` for disposable VMs) |
-| Nerd Font | brew cask (`JetBrainsMono Nerd Font`) | GitHub release → `~/.local/share/fonts` (`JetBrainsMono Nerd Font Mono` variant — single-width icons for TUI alignment) |
-| Maccy clipboard manager | brew cask | skipped (Linux has its own clipboard managers) |
-| LibreOffice | brew cask | Ubuntu: `ppa:libreoffice/ppa` (the packaging team's PPA — the distribution build lags upstream); Debian: distribution package. Skip either with `SKIP_LIBREOFFICE=1` |
-| Claude Desktop | skipped (install from claude.ai) | official Anthropic apt repo, key fingerprint verified (skip with `SKIP_CLAUDE_DESKTOP=1`); beta, amd64/arm64 only |
-| Codex app | skipped (`brew install --cask codex`) | OpenAI's own apt repo, registered by the package they publish at `persistent.oaistatic.com` — they document no standalone signing key, so that package is the bootstrap and every later version arrives through apt. Fetched only while the repo is absent; the repo URI and keyring fingerprint are checked afterwards (skip with `SKIP_CODEX_APP=1`); amd64/arm64 only. Distinct from the Codex **CLI**, which stays upstream-owned on both platforms |
-| CMake | Homebrew `cmake` | Ubuntu LTS: Kitware's own archive (`apt.kitware.com`), key fingerprint verified, then handed to `kitware-archive-keyring` so the annual key rotation arrives through apt. Ubuntu releases Kitware does not publish for, and Debian, keep the distribution package |
-| Ninja | Homebrew `ninja` | `ninja-build` from the distribution — Ubuntu ships the current upstream release, and Ninja publishes no apt repository |
-| Git | Homebrew `git` | Ubuntu: `ppa:git-core/ppa`, the PPA git-scm.com names for the current stable Git; Debian: distribution package |
-| GitHub CLI | Homebrew `gh` | GitHub's own archive (`cli.github.com`), every key in the downloaded keyring checked against the declared fingerprints. The distribution build trails upstream by tens of minor releases |
-| Tools not in default apt repo (helm, kubectl, himalaya, ruff, yazi, opencode) | Homebrew formula | official apt repo (helm, kubectl) / official installers (himalaya, opencode) / GitHub release → `~/.local/bin` (ruff, yazi). Each run compares what is installed against what the project publishes and upgrades when they differ — see below |
-| `yq` and `cosign` | Homebrew `yq` (mikefarah) and `cosign` | upstream release → `~/.local/bin`, checksum verified against the publisher's own list. **Not** the distribution packages: Ubuntu's `yq` is kislyuk's jq wrapper — a different program with a different command language — and its `cosign` is a whole major behind. A setup for parity between a Mac and a Linux box cannot give the same command name to two different programs. A distribution build left installed alongside is preserved; `~/.local/bin` wins on PATH and postflight names the ambiguity |
-| Node.js | Homebrew `node` (plus a pinned `node@24` keg) | **NodeSource** apt repo (`deb.nodesource.com`), major set by `NODE_MAJOR` in `lib/manifest.sh`; signing key fingerprint verified. Ubuntu's own `nodejs` trails upstream by several majors and its separately versioned `npm` package drags an older nodejs in with it, so neither name stays in `PACKAGES_APT`, and `/etc/apt/preferences.d/nodesource.pref` puts the distribution's `nodejs`, `npm`, `nodejs-doc` and `libnode-dev` below zero so apt cannot select them at all. The pin is written alongside the repository and never without it. The repo and keyring are written only when their content differs, so a re-run performs no apt work at all |
-| npm global prefix | `~/.npm/packages` via `~/.npmrc` (`prefix` + `cache`) — set on both platforms so `npm i -g` never needs sudo | same |
-| Kitty | upstream app installer → `/Applications/kitty.app` | upstream app installer → `~/.local/kitty.app`, plus desktop integration the installer omits: absolute-path `.desktop` entries, `StartupWMClass`, a "New Window" action, and the scalable icon in the hicolor theme; terminal preference remains owned by the desktop or user |
-| `xterm-kitty` terminfo | default database or Kitty's official definition compiled into `~/.terminfo` | `kitty-terminfo` apt package, with the same per-user fallback when unavailable; independent of Kitty, X11, Wayland, and `SKIP_FONT` |
-| Kitty config | `kitty.conf` + `platform-macos.conf` → `platform.conf`: Cmd-based keymap, `font_size 14`, powerline tabs, `macos_*` options | `kitty.conf` + `platform-linux.conf` → `platform.conf`: Ctrl+Shift keymap, `font_size 11` (matches GNOME's `monospace-font-name`), flat tabs. Cmd is **not** usable — kitty aliases it to Super, which GNOME Shell grabs first, so the bindings load silently and never fire |
-| Kitty window decorations | native macOS title bar | `linux_display_server auto` follows the active desktop session, using native Wayland on Wayland and X11 on X11; Wayland title bars use system colors, and `Ctrl+Shift+P` is left to terminal applications. |
-| Dotfiles Homebrew paths | `/opt/homebrew/...` (via `$BREW_PREFIX`) | guarded by `command -v brew` / `$BREW_PREFIX`; no-op when brew is absent |
-| Shell integrations | zsh: zoxide, fzf, direnv, `zsh-autosuggestions`, `zsh-syntax-highlighting`; Bash receives the matching cross-platform hooks | Bash: zoxide, fzf, direnv + `/usr/share/bash-completion/`; **no zsh on Linux** — the test suite runs the Linux path and fails if it produces any zsh file, if a zsh package reaches `PACKAGES_APT`, or if postflight looks for zsh configuration there |
-| Shell config files | regular `bashrc`, `bash_profile`, `profile`, `zshenv`, `zprofile`, `zshrc`, `inputrc`, `nanorc`, `tmux.conf` | regular `bashrc`, `bash_profile`, `profile`, `inputrc`, `nanorc`, `tmux.conf` (no zsh files) |
-| himalaya completion | brew's generated completion files are unusable (himalaya ≥ 2.0 writes its scripts to files and prints a status line; the formula captures stdout, so every upgrade ships a one-line syntax error). `~/.bashrc` keeps the broken compat file from being sourced (`BASH_COMPLETION_COMPAT_IGNORE`), and lazy loaders — `~/.local/share/bash-completion/completions/himalaya` for bash, a `_himalaya` stub on fpath for zsh — regenerate the real script from the installed binary on first Tab | the upstream artifact ships no completion at all; the same bash lazy loader provides it |
+The suite runs against temporary `HOME` directories and never touches the real one. It covers convergence decisions (install / no-op / legacy-link repair / known-version upgrade / merge / preserved conflict), the provider manifest, the order in which the Linux stage registers apt repositories and installs from them, whether publisher-installed tools are kept on their current release, Linux command aliases, clean-shell PATH resolution for bash and zsh, Nano tab safety, the Kitty/tmux clipboard chain, shell hook idempotence, SSH-agent identity matching, postflight on both platforms, and the streamed `curl | bash` payload bootstrap.
+

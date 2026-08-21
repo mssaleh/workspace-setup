@@ -173,11 +173,10 @@ merge_npmrc() {
     changed=1
   fi
 
-  # Earlier runs put the cache inside the prefix, which buries hundreds of
-  # megabytes of throwaway data in the tree `npm ls -g` walks and hides it from
-  # anything that clears caches by looking in ~/.cache. Correcting a value this
-  # project chose is not the same as overriding one the user chose, so only that
-  # exact string is rewritten; any other cache line is left alone.
+  # A cache inside the prefix buries hundreds of megabytes of throwaway data
+  # in the tree `npm ls -g` walks, and hides it from anything clearing caches
+  # under ~/.cache. Only that exact value is rewritten — it is this project's
+  # to set; any other cache line is the user's and is left alone.
   if npmrc_has_key cache "$tmp"; then
     # Compared as an exact string, never as a pattern: a prefix under $HOME can
     # contain regex metacharacters, and `.` in a path would otherwise match any

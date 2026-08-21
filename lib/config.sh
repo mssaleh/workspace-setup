@@ -105,8 +105,7 @@ install_regular_file() {
   if [[ -L "$dst" ]]; then
     if config_is_legacy_link "$dst" "$src"; then
       if [[ ! -e "$dst" ]]; then
-        # The failure mode seen on mini: the temporary checkout is gone, so
-        # there is no content left to preserve.
+        # A link whose target is gone has no content left to preserve.
         config_atomic_replace "$src" "$dst" "$mode"
         CONFIG_MIGRATED_COUNT=$((CONFIG_MIGRATED_COUNT + 1))
         CONFIG_LAST_ACTION=migrated

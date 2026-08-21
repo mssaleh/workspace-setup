@@ -1,14 +1,10 @@
 #!/usr/bin/env bash
-# Kitty's Linux desktop integration regenerates ~/.local/share/applications
-# entries from the installed app on every run, because they embed absolute
-# paths into ~/.local/kitty.app that must follow the app if it moves.
-# "Regenerates" has to mean the file is exactly one generation of output. Emit
-# the keys GNOME needs — StartupWMClass, Keywords, the New Window action — as a
-# separate appending statement and they become conditional on the destination
-# existing rather than on this run having rewritten it; when the installed app
-# does not ship the source entry, every run then appends another copy to the
-# previous run's file. desktop-file-validate rejects the result, because two
-# groups may not share a name.
+# Kitty's Linux desktop entries are regenerated on every run, because they
+# embed absolute paths into ~/.local/kitty.app that must follow the app if it
+# moves. "Regenerated" has to mean exactly one generation of output: appending
+# the keys GNOME needs as a separate statement duplicates a group whenever the
+# installed app stops shipping the source entry, and desktop-file-validate
+# rejects a file whose groups share a name.
 set -euo pipefail
 
 TEST_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)

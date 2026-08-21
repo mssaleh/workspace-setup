@@ -1,28 +1,19 @@
 #!/usr/bin/env bash
-# lib/upstream.sh — keeping upstream-installed artifacts on their current release.
+# lib/upstream.sh — keeping publisher-installed tools on their current release.
 #
-# A tool that comes from a distribution archive is carried forward by apt: the
-# candidate moves and the package follows. A tool installed straight from its
-# publisher has nothing doing that job, so a guard that asks only "is the file
-# there?" pins it at whatever version first landed, forever. That is not
-# hypothetical — a host provisioned by this project was found running himalaya
-# 1.2.0 against an upstream 2.1.0, far enough behind that the completion
-# interface had changed underneath it and the shell integration had stopped
-# working.
+# apt carries a packaged tool forward when its candidate moves. A tool
+# installed straight from its publisher has nothing doing that, so each run
+# compares what is installed against what the project publishes.
 #
-# The rule these helpers implement: upgrade only what can be identified, and
-# never touch anything else. If the published version cannot be resolved, or
-# the installed artifact will not say what it is, the artifact is left exactly
-# as it stands and the uncertainty is reported. A failed probe must never cost
-# someone a working tool.
+# One rule governs the rest: upgrade only what identifies itself. An
+# unreachable publisher, an unparseable version, or a file this project did not
+# place all mean leave it alone and say so.
 
 # upstream_latest_version <owner/repo> — the current release, without a leading
 # "v". Empty when it cannot be determined.
 #
-# Read from the Location header of the releases/latest redirect rather than the
-# API: the API is rate limited to 60 requests an hour per address, which a
-# handful of hosts behind one NAT would exhaust, and being rate limited must
-# not look like "no upgrade available".
+# Read from the releases/latest redirect, not the API: the API is rate limited
+# per address, and being rate limited must not look like "nothing to upgrade".
 upstream_latest_version() {
   local repo="$1" location
   location=$(curl -fsSI "https://github.com/${repo}/releases/latest" 2>/dev/null \
@@ -37,20 +28,11 @@ upstream_latest_version() {
   printf '%s\n' "${location##*/releases/tag/}" | sed 's/^v//'
 }
 
-# upstream_installed_version <command...> — the first dotted version in what the
-# command prints. Empty when the command is absent or says nothing versionlike.
+# upstream_installed_version <command...> — the first dotted version on the
+# first line the command prints. Empty when it prints nothing versionlike.
 #
-# Every publisher formats this differently — "ruff 0.16.2", "Yazi 26.5.6 (…)",
-# "himalaya v2.1.0 +imap +smtp" — and some print no version at all until they
-# are built from a release tag, which is why an unparseable answer is a reason
-# to do nothing rather than a reason to reinstall.
-#
-# Only the first line is read. Tools that print a block put other version
-# numbers in it — `cosign version` reports its Go toolchain as "GoVersion:
-# go1.25.0" — and matching one of those would leave the tool looking
-# permanently behind, re-downloading on every run and never converging. A tool
-# whose own version is not on the first line reports nothing here, which means
-# it is left alone.
+# Only the first line, because version blocks carry unrelated numbers:
+# `cosign version` reports its Go toolchain as "GoVersion: go1.25.0".
 upstream_installed_version() {
   local output
   output=$("$@" 2>/dev/null) || return 1
@@ -61,15 +43,10 @@ upstream_installed_version() {
 #   current   the installed artifact is the published release
 #   stale     both are known and they differ
 #   unknown   one of them could not be determined
-#
-# The caller decides what to do; only "stale" justifies replacing a file that
-# is already in place and working.
 upstream_artifact_state() {
+  # A leading v is tag naming, not a version difference, and is normalised at
+  # the comparison so every caller gets the same answer for 1.2.3 and v1.2.3.
   local label="$1" installed="${2#v}" published="${3#v}"
-  # A leading v is a tag-naming habit, not a version difference. Normalising
-  # here rather than only where the tag is fetched keeps the invariant next to
-  # the comparison that depends on it: every caller gets the same answer for
-  # 1.2.3 and v1.2.3, whichever way it obtained them.
   if [[ -z "$installed" || -z "$published" ]]; then
     printf 'unknown\n'
   elif [[ "$installed" == "$published" ]]; then
@@ -92,14 +69,9 @@ upstream_report_state() {
 }
 
 # upstream_binary_is_current <path> <published sha256>
-# For a release whose artifact IS the executable, the published checksum
-# answers the question exactly, with nothing to parse.
-#
-# That matters more than convenience. `cosign version` prints its Go toolchain
-# as "GoVersion: go1.25.0" and, on a build made outside a release tag, prints
-# "GitVersion: devel" — so reading a version out of it yields the wrong number
-# or none, and a tool that looks perpetually stale would be re-downloaded on
-# every run. Comparing bytes cannot make that mistake.
+# Where the release artifact IS the executable, the checksum settles it with
+# nothing to parse — which is how yq and cosign are compared, since neither
+# reports a version this can read.
 upstream_binary_is_current() {
   local path="$1" want="$2" got
   [[ -x "$path" && -n "$want" ]] || return 1
@@ -107,10 +79,8 @@ upstream_binary_is_current() {
   [[ -n "$got" && "$got" == "$want" ]]
 }
 
-# upstream_sha256 <file> — the digest, from whichever tool the host has. macOS
-# ships `shasum` and no `sha256sum`; these helpers are sourced on both
-# platforms, so reaching for only the GNU name would fail there silently and
-# make every artifact look like it needed replacing.
+# upstream_sha256 <file> — the digest, from whichever tool the host has.
+# macOS ships `shasum` and no `sha256sum`.
 upstream_sha256() {
   if command -v sha256sum >/dev/null 2>&1; then
     sha256sum "$1" 2>/dev/null | cut -d' ' -f1
@@ -144,12 +114,8 @@ install_executable_if_path_free() {
 }
 
 # install_executable_replacing <source> <destination> <label>
-# Replaces an artifact this project already identified as the tool it manages.
-#
-# Distinct from install_executable_if_path_free, which refuses to touch an
-# occupied path: that guard is what protects a binary somebody else put there,
-# and it is only correct to bypass once the file has named itself as an older
-# release of this exact tool.
+# Replaces an artifact that has identified itself as an older release of the
+# tool being managed. Everything else goes through the path-free installer.
 install_executable_replacing() {
   local src="$1" dst="$2" label="$3" dir base tmp
   dir=$(dirname "$dst")
@@ -176,16 +142,14 @@ upstream_project_repo() {
 }
 
 # Which action upstream_artifact_needed decided on, read by
-# upstream_place_artifact. An out-parameter rather than stdout because these
-# functions also report to the user, and a caller capturing stdout to read the
-# decision would swallow every line of that reporting.
+# upstream_place_artifact. An out-parameter, because these functions also
+# report to the user and stdout carries that reporting.
 UPSTREAM_ARTIFACT_ACTION=install
 
 # upstream_artifact_needed <command> <path> <version probe...>
-# True when the artifact should be downloaded: it is missing, or the version it
-# reports is not the one its project publishes. False — leave it alone — when
-# it is current, when the published version cannot be resolved, or when
-# something this project does not own occupies the path.
+# True when the artifact is missing, or reports a version other than the one
+# its project publishes. False — leave it alone — when it is current, when the
+# published version cannot be resolved, or when the path holds something else.
 upstream_artifact_needed() {
   local label="$1" path="$2"
   shift 2
@@ -218,8 +182,7 @@ upstream_artifact_needed() {
 }
 
 # upstream_place_artifact <label> <source> <destination>
-# Puts the downloaded artifact in place, overwriting only when the decision
-# above was an upgrade of a tool that identified itself.
+# Overwrites only when the decision above was an upgrade.
 upstream_place_artifact() {
   local label="$1" src="$2" dst="$3"
   if [[ "${UPSTREAM_ARTIFACT_ACTION:-install}" == upgrade ]]; then

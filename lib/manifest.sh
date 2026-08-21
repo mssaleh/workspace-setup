@@ -59,12 +59,10 @@ PACKAGES_APT=(
   libxcb-xkb1
 )
 
-# Upstream projects whose releases this setup installs directly, as
-# "<command>:<owner/repo>". Nothing carries these forward the way apt carries a
-# packaged tool, so each run compares what is installed against what the
-# project publishes and upgrades when they differ. Colon-delimited rather than
-# an associative array because macOS still ships bash 3.2 as /bin/bash, which
-# is the interpreter a fresh Mac runs this with.
+# Upstream projects installed directly, as "<command>:<owner/repo>". Each run
+# compares what is installed against what the project publishes. Colon-
+# delimited rather than an associative array: macOS ships bash 3.2 as
+# /bin/bash, which is what a fresh Mac runs this with.
 UPSTREAM_RELEASE_PROJECTS=(
   ruff:astral-sh/ruff
   yazi:sxyazi/yazi
@@ -72,11 +70,10 @@ UPSTREAM_RELEASE_PROJECTS=(
   opencode:anomalyco/opencode
 )
 
-# Single-binary releases installed into ~/.local/bin on Linux, which the
-# shipped shell files put ahead of /usr/bin. Each publisher names the artifact
-# by dpkg architecture and posts a checksum file beside it; the checksum comes
-# over the same TLS session as the artifact, so it proves the download arrived
-# intact rather than proving who built it.
+# Single-binary releases installed into ~/.local/bin, which the shipped shell
+# files put ahead of /usr/bin. Each publisher names the artifact by dpkg
+# architecture and posts a checksum beside it. The checksum travels over the
+# same TLS session, so it proves the download arrived intact, not who built it.
 YQ_RELEASE_BASE=https://github.com/mikefarah/yq/releases/latest/download
 COSIGN_RELEASE_BASE=https://github.com/sigstore/cosign/releases/latest/download
 
@@ -98,20 +95,13 @@ KITTY_TERMINFO_SOURCE_URL=https://raw.githubusercontent.com/kovidgoyal/kitty/mas
 # are intentionally not fed to brew or apt.
 PROVIDERS_COMMON_UPSTREAM=(rustup uv-standalone claude codex kitty)
 PROVIDERS_MACOS_UPSTREAM=(apple-container-signed-pkg rosetta)
-# yq and cosign are here for a different reason than the rest: the
-# distribution does package them, but not as the same software macOS gets.
-# Ubuntu's `yq` is kislyuk's jq wrapper, a different program with a different
-# command language from the mikefarah yq that Homebrew installs, and its
-# `cosign` is a whole major behind Homebrew's. A setup whose purpose is parity
-# between a Mac and a Linux box cannot hand the same command name to two
-# different programs, so both come from the upstream release that macOS
-# tracks — see YQ_RELEASE_BASE and COSIGN_RELEASE_BASE above.
+# yq and cosign are packaged by the distribution, but not as the same software
+# macOS gets: Ubuntu's `yq` is kislyuk's jq wrapper rather than the mikefarah
+# program, and its `cosign` is a major behind. Both come from the upstream
+# release instead — see YQ_RELEASE_BASE and COSIGN_RELEASE_BASE above.
 PROVIDERS_LINUX_UPSTREAM=(ruff yazi himalaya opencode yq cosign)
 # Capabilities the distribution either does not package or packages too far
-# behind to use, taken from the vendor's own signed archive instead. nodejs is
-# the clearest case: Ubuntu ships a Node major that trails upstream by a long
-# way, and its separate `npm` package is versioned independently of it, while
-# the NodeSource package bundles the matching npm and tracks the current line.
+# behind to use, taken from the vendor's own signed archive instead.
 PROVIDERS_LINUX_OFFICIAL_REPO=(
   kubectl helm docker-engine docker-compose-v2 claude-desktop nodejs
   cmake gh chatgpt
@@ -122,12 +112,10 @@ PROVIDERS_LINUX_OFFICIAL_REPO=(
 # no longer matches.
 NODE_MAJOR=24
 
-# apt pin that makes NodeSource the only permitted source of the Node runtime.
-# The first stanza outranks a distribution archive's default 500; the second
-# denies every other origin, so `apt install nodejs` cannot fall back to the
-# distribution build and `apt install npm` — which depends on that build and
-# would displace NodeSource's, whose package already Provides: npm — is
-# refused outright.
+# apt pin making NodeSource the only permitted source of the Node runtime. The
+# first stanza outranks an archive's default 500; the second denies every other
+# origin, so neither `apt install nodejs` nor `apt install npm` can reach the
+# distribution build. NodeSource's package already Provides: npm.
 NODESOURCE_PREFERENCES_FILE=/etc/apt/preferences.d/nodesource.pref
 NODESOURCE_PINNED_PACKAGES=(nodejs npm nodejs-doc libnode-dev)
 
@@ -136,20 +124,16 @@ NODESOURCE_PINNED_PACKAGES=(nodejs npm nodejs-doc libnode-dev)
 # on Ubuntu; the distribution trails it by two minor releases.
 PROVIDERS_UBUNTU_PPA=(libreoffice git)
 
-# Third-party repositories whose packages also appear in PACKAGES_APT. They are
-# registered before the batch install so a fresh host resolves straight to the
-# newer candidate, and each name is re-checked afterwards so a host that already
-# carries the distribution build is moved across rather than left behind.
+# Vendor-archive packages that also appear in PACKAGES_APT. Registered before
+# the batch install so a fresh host resolves to the newer candidate, then
+# re-checked so a host already carrying the distribution build moves across.
 APT_REPO_UPGRADED_PACKAGES=(git gh cmake)
 
 # ── vendor apt archives ────────────────────────────────────────────────────
-# One declaration per archive: where the key comes from, which fingerprint it
-# must carry, where the keyring lands, and what the source line points at. The
-# stage registers every one of these before it installs anything, so a package
-# is never fetched from the distribution first and replaced afterwards.
-#
-# A keyring path ending in .asc keeps the key armoured, which is the form that
-# publisher documents and apt accepts either way.
+# One declaration per archive: key source, required fingerprint, keyring path,
+# and what the source line points at. All are registered before anything is
+# installed. A .asc keyring path keeps the key armoured, matching what that
+# publisher documents; apt accepts either form.
 
 # kubectl. Not in the distribution at all. The path pins a minor series; bump
 # KUBERNETES_MINOR to track a new one.

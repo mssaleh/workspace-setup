@@ -441,10 +441,8 @@ postflight_completions() {
         >/dev/null 2>&1; then
       postflight_pass "himalaya bash completion regenerates from the installed binary"
     else
-      # Naming the version is the whole diagnosis. The loader asks for
-      # `himalaya completion bash --dir <dir>`, which 2.x supports and 1.x does
-      # not — a host left on 1.x fails here and the bare message gives no clue
-      # why, which is exactly how one sat unnoticed on 1.2.0.
+      # The loader calls `himalaya completion bash --dir <dir>`, which 2.x
+      # supports and 1.x does not, so the installed version is the diagnosis.
       postflight_fail "himalaya completion loader produced no completion (installed: $(himalaya --version 2>/dev/null | head -1 || echo unknown))"
       postflight_note "  the loader needs \`himalaya completion bash --dir\`, added in himalaya 2.0"
       postflight_note "  re-run setup to upgrade, or: curl -fsSL https://raw.githubusercontent.com/pimalaya/himalaya/master/install.sh | PREFIX=\"\$HOME/.local\" sh"

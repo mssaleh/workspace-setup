@@ -51,17 +51,10 @@ repo_dir() {
 
 # _setup_fetch <url> <destination> — retrieve the payload archive.
 #
-# The one-liner is usually written with curl, but curl is not a given. On
-# Debian and Ubuntu it is Priority: optional while wget is Priority: standard,
-# so a minimal install is more likely to have wget than curl — and a script
-# that fetches its own payload with curl fails on exactly those hosts, before
-# it has reached the stage that would install curl for it. Either tool is
-# accepted here; every later stage runs after the bootstrap stage has installed
-# curl, so this is the only place the choice matters.
-#
-# macOS is curl-only on purpose: it ships /usr/bin/curl and does not ship wget,
-# which arrives with Homebrew — and installing Homebrew is one of the things
-# this script is here to do.
+# curl is not a given: on Debian and Ubuntu it is Priority: optional while wget
+# is Priority: standard, and this runs before the stage that installs curl.
+# Either tool works. macOS uses curl, which it ships; wget arrives only with
+# Homebrew, which this script is here to install.
 _setup_fetch() {
   local url="$1" dest="$2" path
   # A file:// URL is a local path. Copying it directly keeps a documented

@@ -34,7 +34,7 @@ assert_regular_equal "$src" "$dst"
 install_regular_file "$src" "$dst" fixture
 [[ "$CONFIG_LAST_ACTION" == unchanged ]]
 
-# A dangling link created by the old temporary-checkout model is repaired.
+# A dangling link into a workspace-setup checkout is repaired.
 rm -f "$dst"
 ln -s /tmp/workspace-setup/dotfiles/example "$dst"
 install_regular_file "$src" "$dst" fixture
@@ -154,8 +154,8 @@ install_regular_file "$npmrc_src" "$npmrc_dst" generated/npmrc 0644 merge_npmrc
 grep -Fxq 'prefix=/opt/npm-global' "$npmrc_dst"
 [[ "$(grep -c '^prefix=' "$npmrc_dst")" == 1 ]]
 
-# The cache this setup used to write — inside the prefix — is corrected, because
-# it is this project's own earlier choice rather than the user's.
+# A cache inside the npm prefix is corrected: that exact value is this
+# project's to set, unlike any other cache line, which is the user's.
 printf 'prefix=%s\ncache=%s/cache\n' "$NPM_PACKAGES" "$NPM_PACKAGES" > "$npmrc_dst"
 install_regular_file "$npmrc_src" "$npmrc_dst" generated/npmrc 0644 merge_npmrc
 [[ "$CONFIG_LAST_ACTION" == merged ]]

@@ -1,15 +1,8 @@
 #!/usr/bin/env bash
-# A tool installed from its publisher has nothing carrying it forward. apt moves
-# a packaged tool when the candidate moves; a binary dropped into ~/.local/bin
-# stays at whatever version first landed unless something checks. A guard that
-# asks only "is the file there?" pins it forever, and a host provisioned by this
-# project was found running himalaya 1.2.0 against an upstream 2.1.0 — far
-# enough behind that the completion interface had changed underneath it.
-#
-# These assertions cover the decision, not the download: which artifacts get
-# replaced, and — more important — which are left alone. Replacing a file
-# somebody else put there, or re-downloading on every run because a version
-# could not be read, are both worse than being out of date.
+# Which publisher-installed artifacts get replaced, and — more important —
+# which are left alone. Replacing a file somebody else put there, or
+# re-downloading on every run because a version could not be read, are both
+# worse than being out of date.
 set -euo pipefail
 
 TEST_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)

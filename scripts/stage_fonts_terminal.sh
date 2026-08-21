@@ -138,13 +138,10 @@ install_kitty_desktop_integration() {
       continue
     fi
     # One redirection writes the whole entry, so the file is always exactly one
-    # generation of this function's output. Emitting the additions as a second,
-    # appending statement would make them conditional on the destination
-    # existing rather than on this run having just regenerated it — and when the
-    # installed app does not ship the source entry, that appends to the previous
-    # run's file, growing another "[Desktop Action new-window]" group every run.
-    # desktop-file-validate rejects such a file: two groups may not share a
-    # name.
+    # generation of output. Appending the additions separately would make them
+    # conditional on the destination existing rather than on this run having
+    # regenerated it, and duplicate a "[Desktop Action]" group every run — which
+    # desktop-file-validate rejects, since two groups may not share a name.
     {
       # Rewrite the relative Exec/Icon/TryExec keys to absolute paths. The
       # shipped entries say `Exec=kitty`, which only resolves for a desktop

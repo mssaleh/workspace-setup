@@ -176,19 +176,15 @@ ensure_xterm_kitty_terminfo() {
   ok "xterm-kitty terminfo installed for graphical and headless sessions"
 }
 
-# Register every third-party archive this host will install from, before a
-# single package is fetched.
+# Register every third-party archive, before a single package is fetched.
 #
-# Ordering is the whole point. apt resolves a name against the archives that
-# exist at that moment, so a repository added after the install has already
-# run cannot influence it — the distribution build lands first and has to be
-# replaced afterwards, and until it is replaced the host is running software
-# this setup did not choose. Registering everything up front also means one apt
-# index refresh covers every archive, rather than one refresh per archive.
+# apt resolves a name against the archives configured at that moment, so a
+# repository added afterwards cannot influence an install that already ran.
+# One index refresh then covers them all.
 #
-# Nothing here installs a toolbox package: this function only writes keyrings
-# and source lists, refreshes the index once if any of them changed, and hands
-# Kitware's keyring over to the package that will carry its next rotation.
+# Nothing here installs a toolbox package: this writes keyrings and source
+# lists, refreshes the index once if any changed, and hands Kitware's keyring
+# to the package that carries its next rotation.
 register_third_party_apt_repos() {
   local codename changed='' arch
   codename=$(distro_codename)
@@ -379,11 +375,10 @@ install_nodesource_pin() {
 
 # report_apt_removals <package> — say what installing this would take with it.
 #
-# The NodeSource package conflicts with the distribution's separate npm, and on
-# a host where someone has run `apt install npm` that one conflict cascades:
-# a real machine here had 129 packages scheduled for removal, none of which the
-# run would have mentioned. Naming them first turns a surprise into a decision
-# somebody can interrupt.
+# The NodeSource package conflicts with the distribution's separate npm, and
+# where that npm is installed the conflict cascades through everything built on
+# it — often a hundred packages or more. Naming them turns a surprise into a
+# decision somebody can interrupt.
 report_apt_removals() {
   local pkg="$1" removals count
   removals=$(sudo "${APT_ENV[@]}" "$PKGMGR" install -s -y "$pkg" 2>/dev/null \
@@ -543,11 +538,8 @@ stage_packages() {
       ok "en_US.UTF-8 locale already generated"
     fi
 
-    # 1. Register every vendor archive, before a single package is fetched.
-    #    apt resolves a name against the archives that exist at that moment, so
-    #    a repository added later cannot influence an install that already ran.
-    #    A single index refresh covers whatever it adds, and it skips even that
-    #    when every archive is already in place.
+    # 1. Register every vendor archive, before a single package is fetched,
+    #    with a single index refresh covering whatever it adds.
     register_third_party_apt_repos
 
     # 2. apt-installable packages (only those actually in the default repos).
@@ -580,10 +572,9 @@ stage_packages() {
       apt_install_candidate "$repo_pkg" || true
     done
 
-    # 4. Packages that exist only in a vendor archive. Step 1 registered every
-    #    repository they need, and each install below re-checks that its own
-    #    archive is present: a registration that failed must leave the package
-    #    uninstalled rather than let some other source answer to the name.
+    # 4. Packages that exist only in a vendor archive. Each re-checks that its
+    #    own archive is present, so a failed registration leaves the package
+    #    uninstalled rather than letting another source answer to the name.
     install_vendor_package kubectl kubectl "$KUBERNETES_APT_URI" \
       https://kubernetes.io/docs/tasks/tools/install-kubectl-linux/
     install_vendor_package helm helm "$HELM_APT_URI" \

@@ -1,15 +1,11 @@
 #!/usr/bin/env bash
 # lib/apt.sh — apt repository and package primitives.
 #
-# These are mechanisms, not policy: which archives a host trusts and which
-# packages it installs are decided by the stages and by lib/manifest.sh. They
-# live here because more than one stage needs them — the package stage
-# registers every vendor archive with them and the Docker stage one more — and
-# a helper that only exists inside whichever stage happens to be sourced first
-# is a dependency waiting to break.
+# Mechanisms, not policy: which archives a host trusts and which packages it
+# installs are decided by the stages and by lib/manifest.sh.
 #
-# Every one of them is guarded by the state it produces, so a host that is
-# already configured performs no download, no write, and no apt update.
+# Every one is guarded by the state it produces, so a host that is already
+# configured performs no download, no write, and no apt update.
 
 # apt_keyring_fingerprints <keyring> — print each primary key's fingerprint.
 apt_keyring_fingerprints() {
@@ -18,9 +14,8 @@ apt_keyring_fingerprints() {
 }
 
 # apt_keyring_is_trusted <keyring> <fingerprint...> — true when the keyring
-# exists and every key it carries is one of the declared fingerprints. Checking
-# every key, rather than just looking for one, is what stops an extra key
-# smuggled into the download from being handed to apt as trusted.
+# exists and *every* key it carries is a declared fingerprint, so an extra key
+# in the download is never handed to apt as trusted.
 apt_keyring_is_trusted() {
   local keyring="$1" fp expected found seen=0
   shift
@@ -43,9 +38,8 @@ apt_keyring_is_trusted() {
 # system when it cannot, which leaves the host on the distribution package
 # rather than trusting an unverified archive.
 #
-# A keyring path ending in .asc is written armoured; every other path is
-# dearmoured to the binary form. apt reads both, and matching the form the
-# publisher documents is what keeps a re-run comparing equal.
+# A .asc destination is written armoured, anything else dearmoured. apt reads
+# both; matching the publisher's form keeps a re-run comparing equal.
 apt_trust_repo_key() {
   local label="$1" url="$2" keyring="$3"
   shift 3
@@ -91,11 +85,9 @@ apt_trust_repo_key() {
 # content differs. Prints "changed" when it wrote, so the caller can decide
 # whether an apt update is owed.
 #
-# Both the comparison and the write terminate the content with exactly one
-# newline. Callers build it with $(printf ...), which strips trailing newlines,
-# while every file apt and these publishers write ends in one — without
-# normalising, the comparison would never match and this would rewrite the
-# file and re-refresh the index on every single run.
+# Both the comparison and the write end the content with exactly one newline:
+# callers build it with $(printf ...), which strips them, while apt's own files
+# have one. Without normalising, no comparison would ever match.
 apt_write_sources() {
   local path="$1" content="$2"
   if [[ -r "$path" ]] && printf '%s\n' "$content" | cmp -s - "$path"; then
@@ -111,13 +103,10 @@ apt_write_sources() {
 
 # apt_repo_is_configured <uri> — true when some apt source names this archive.
 #
-# A vendor package must never be installed unless its own archive is what is
-# offering it. Registering the archive and installing from it are separate
-# phases, so the install has to re-establish that: without this check a failed
-# registration falls through to whatever else answers to the same name. A name
-# no distribution carries today is not reserved — Debian already owns `helm` as
-# a source package, for the unrelated Emacs framework — and a release is free to
-# start publishing a binary under any of these names.
+# Registration and installation are separate phases, so the install re-checks
+# that the vendor's own archive is what offers the package. Package names are
+# not reserved: Debian owns `helm` as a source package for the unrelated Emacs
+# framework, and any release may start publishing a binary under these names.
 apt_repo_is_configured() {
   grep -rqsF "$1" /etc/apt/sources.list.d /etc/apt/sources.list 2>/dev/null
 }
@@ -158,11 +147,10 @@ distro_codename() {
 
 # vendor_command_state <package> <command> — who owns this capability now.
 #   managed  the vendor package is installed and its command resolves
-#   foreign  something else already provides the command; leave it alone
-#   wanted   neither, so the archive should be registered and the package
-#            installed
-# Registration and installation both consult this, so a command another
-# provider owns never gets an apt source added behind its back.
+#   foreign  something else provides the command; leave it alone
+#   wanted   neither, so register the archive and install the package
+# Both phases consult this, so a command another provider owns never gets an
+# apt source added behind its back.
 vendor_command_state() {
   local pkg="$1" cmd="$2"
   if dpkg -s "$pkg" >/dev/null 2>&1 && command -v "$cmd" >/dev/null 2>&1; then
@@ -175,9 +163,8 @@ vendor_command_state() {
 }
 
 # apt_gui_app_wanted <package> <skip-value> — true when a desktop application
-# should be installed here: not opted out, not already installed, and on an
-# architecture its publisher builds for. The GUI applications in this setup all
-# publish for amd64 and arm64 only.
+# should be installed: not opted out, not already installed, and on an
+# architecture its publisher builds for (amd64 and arm64, for all of these).
 apt_gui_app_wanted() {
   local pkg="$1" skip="$2" arch
   [[ -z "$skip" ]] || return 1
