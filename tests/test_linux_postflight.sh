@@ -2,6 +2,17 @@
 set -euo pipefail
 
 TEST_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+# shellcheck disable=SC1091
+. "$TEST_ROOT/tests/helpers.sh"
+
+# The Linux checks are verified by running them, which means running the tools
+# they call. postflight_mode reaches for `stat -c` under OS_KIND=linux and BSD
+# stat has no such option, so a Mac cannot stand in for a Linux host here any
+# more than a Linux host can stand in for a Mac. The mirror of this guard is in
+# test_postflight.sh.
+[[ "$(host_os_kind)" == linux ]] \
+  || test_skip 'needs a Linux host; GNU coreutils and dpkg behaviour cannot be simulated on macOS — see test_postflight.sh for the macOS checks'
+
 TEST_TMP=$(mktemp -d "${TMPDIR:-/tmp}/linux-postflight-test.XXXXXX")
 trap 'rm -rf "$TEST_TMP"' EXIT
 

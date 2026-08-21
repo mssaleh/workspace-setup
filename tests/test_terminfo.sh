@@ -24,6 +24,13 @@ mkdir -p "$HOME"
 
 fail_test() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 
+# A Mac that has Kitty installed carries a real terminfo source at an absolute
+# path inside the application bundle. Left pointing there, the download branch
+# below is unreachable on exactly the hosts this setup provisions, and the
+# assertion that it downloads once can never hold. The candidates are redirected
+# into the fixture so every host exercises the same code.
+KITTY_TERMINFO_APP_SOURCES=("$TEST_TMP/no-such-kitty-app/kitty.terminfo")
+
 # The fixture models ncurses' default search path. It deliberately rejects a
 # probe that inherits Kitty's private TERMINFO variables.
 infocmp() {
@@ -76,6 +83,7 @@ ensure_xterm_kitty_terminfo >/dev/null
   || fail_test 'setup-owned broken terminfo link was not repaired'
 [[ "$CURL_CALLS" == 1 && "$TIC_CALLS" == 1 ]] \
   || fail_test 'portable terminfo fallback did not download and compile once'
+
 [[ "$TERMINFO" == "$TEST_TMP/kitty-private" \
     && "$TERMINFO_DIRS" == "$TEST_TMP/kitty-private-dirs" ]] \
   || fail_test 'terminfo installation changed the caller environment'
@@ -106,5 +114,23 @@ fi
 [[ "$(readlink "$HOME/.terminfo/x/xterm-kitty")" == \
     "$TEST_TMP/user-owned-xterm-kitty" ]] \
   || fail_test 'installer changed a user-owned terminfo link'
+
+# ── An installed Kitty supplies the source locally ─────────────────────────
+# Nothing is downloaded then. This is the branch a provisioned Mac actually
+# takes, and it runs last because the assertions above count calls cumulatively.
+rm -rf "${HOME:?}/.terminfo"
+bundle="$TEST_TMP/kitty-app/Contents/Resources/kitty/terminfo/kitty.terminfo"
+mkdir -p "$(dirname "$bundle")"
+printf '%s\n' 'xterm-kitty|test fixture,' > "$bundle"
+KITTY_TERMINFO_APP_SOURCES=("$bundle")
+CURL_CALLS=0
+TIC_CALLS=0
+ensure_xterm_kitty_terminfo >/dev/null
+[[ -f "$HOME/.terminfo/x/xterm-kitty" ]] \
+  || fail_test 'an installed Kitty terminfo source was not compiled'
+[[ "$CURL_CALLS" == 0 ]] \
+  || fail_test 'the terminfo source was downloaded although Kitty already supplies it'
+[[ "$TIC_CALLS" == 1 ]] \
+  || fail_test 'the local terminfo source was not compiled exactly once'
 
 printf 'terminfo tests: ok\n'

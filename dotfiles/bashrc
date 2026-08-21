@@ -7,10 +7,18 @@
 # the same process would duplicate those hooks; start a fresh login shell when
 # deploying changes instead. The marker is intentionally not exported, so a
 # child Bash process still performs its own initialization.
-if [[ "${__WORKSPACE_BASHRC_PID:-}" == "$BASHPID" ]]; then
+#
+# BASHPID arrived in bash 4.0 and macOS still ships 3.2 as /bin/bash, where it
+# expands to nothing. Comparing an unset marker against an unset BASHPID makes
+# the guard fire on the very first source, and the whole file — every PATH
+# entry included — is skipped in silence. $$ is the fallback because it is the
+# same in the one case this guard exists for, a second source in the same
+# process; it differs from BASHPID only inside a subshell, which does not read
+# this file on its own.
+if [[ "${__WORKSPACE_BASHRC_PID:-}" == "${BASHPID:-$$}" ]]; then
   return
 fi
-__WORKSPACE_BASHRC_PID=$BASHPID
+__WORKSPACE_BASHRC_PID=${BASHPID:-$$}
 
 # Helper: source the first readable file from the list. Used for OS-aware
 # sourcing (try Homebrew path first, fall back to Linux path).

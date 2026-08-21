@@ -67,6 +67,15 @@ PACKAGES_APT=(
 YQ_RELEASE_BASE=https://github.com/mikefarah/yq/releases/latest/download
 COSIGN_RELEASE_BASE=https://github.com/sigstore/cosign/releases/latest/download
 
+# Where an installed Kitty keeps the terminfo source this setup compiles when
+# the host database has no xterm-kitty entry. The per-user tree is probed first
+# and is derived from $HOME at the point of use; these are the macOS
+# application-bundle layouts, which are absolute.
+KITTY_TERMINFO_APP_SOURCES=(
+  /Applications/kitty.app/Contents/Resources/kitty/terminfo/kitty.terminfo
+  /Applications/kitty.app/Contents/Resources/terminfo/kitty.terminfo
+)
+
 # Official source used only when the host's package database has no
 # xterm-kitty entry. This covers headless macOS and older Debian-family
 # releases without making Kitty itself or a graphical session a prerequisite.

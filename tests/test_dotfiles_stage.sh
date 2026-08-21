@@ -174,10 +174,15 @@ stage_dotfiles
   export HOME OS_KIND BREW_BIN
   stage_dotfiles >/dev/null 2>&1
 
-  produced=$(find "$linux_home" -name '.zsh*' -o -name 'zsh*' | wc -l)
-  if [[ "$produced" != 0 ]]; then
+  # The names are collected rather than counted. BSD wc pads its number to a
+  # fixed width, so a count compared as a string is never equal to 0 on macOS
+  # and this assertion fails on every Mac regardless of what the stage did.
+  # Holding the list also means the failure can name the files without running
+  # find a second time.
+  produced=$(find "$linux_home" \( -name '.zsh*' -o -name 'zsh*' \) -print)
+  if [[ -n "$produced" ]]; then
     printf 'FAIL: the Linux path produced zsh files:\n' >&2
-    find "$linux_home" -name '.zsh*' -o -name 'zsh*' >&2
+    printf '%s\n' "$produced" >&2
     exit 1
   fi
   # It must still have done its real work, or the check above passes vacuously.

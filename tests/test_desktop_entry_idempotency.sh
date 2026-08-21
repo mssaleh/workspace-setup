@@ -70,7 +70,9 @@ rm "$src_dir/kitty.desktop"
 size_before=$(wc -c < "$entry")
 for _ in 1 2 3 4; do install_kitty_desktop_integration >/dev/null 2>&1; done
 assert_single_generation 'with the source entry missing'
-[[ "$(wc -c < "$entry")" == "$size_before" ]] \
+# Compared numerically: BSD wc pads its number, so a string comparison here
+# would depend on both sides happening to pad identically.
+(( $(wc -c < "$entry") == size_before )) \
   || fail 'the entry changed size while its source was missing; it is being appended to'
 
 # ── The additions belong to the terminal entry alone ──────────────────────

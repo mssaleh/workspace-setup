@@ -133,8 +133,7 @@ ensure_xterm_kitty_terminfo() {
   local candidate
   for candidate in \
     "$HOME/.local/kitty.app/lib/kitty/terminfo/kitty.terminfo" \
-    /Applications/kitty.app/Contents/Resources/kitty/terminfo/kitty.terminfo \
-    /Applications/kitty.app/Contents/Resources/terminfo/kitty.terminfo; do
+    "${KITTY_TERMINFO_APP_SOURCES[@]}"; do
     if [[ -f "$candidate" ]]; then
       source_path="$candidate"
       break
