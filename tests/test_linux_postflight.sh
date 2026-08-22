@@ -239,4 +239,55 @@ postflight_vendor_toolchain_paths
 [[ "$POSTFLIGHT_FAILURES" == 0 ]]
 [[ "$POSTFLIGHT_PASSES" == 0 ]]
 
+# ── Two AppArmor profiles must not claim one executable ────────────────────
+# A fixture directory rather than /etc/apparmor.d, so both states are exercised
+# on any host, including one with no AppArmor.
+apparmor_fixture="$TEST_TMP/apparmor.d"
+mkdir -p "$apparmor_fixture/disable"
+
+write_profile() {
+  printf 'abi <abi/%s>,\ninclude <tunables/global>\n\nprofile %s %s flags=(unconfined) {\n  userns,\n}\n' \
+    "$2" "$1" "$3" > "$apparmor_fixture/$1"
+}
+
+write_profile msedge 5.0 /opt/microsoft/msedge/msedge
+write_profile chatgpt 4.0 /usr/lib/chatgpt/chatgpt
+write_profile claude-desktop 4.0 /usr/lib/claude-desktop/claude-desktop
+
+# Distinct executables: nothing to report.
+POSTFLIGHT_PASSES=0
+POSTFLIGHT_FAILURES=0
+postflight_apparmor_attachments "$apparmor_fixture" >/dev/null
+[[ "$POSTFLIGHT_FAILURES" == 0 ]]
+[[ "$POSTFLIGHT_PASSES" == 1 ]]
+
+# The Edge case: a second profile under a different name for the same binary.
+write_profile microsoft-edge-stable 4.0 /opt/microsoft/msedge/msedge
+POSTFLIGHT_PASSES=0
+POSTFLIGHT_FAILURES=0
+# To a file, not $(…): a subshell would discard the counters it increments.
+postflight_apparmor_attachments "$apparmor_fixture" > "$TEST_TMP/collision.log" 2>&1
+collision_report=$(cat "$TEST_TMP/collision.log")
+[[ "$POSTFLIGHT_FAILURES" == 1 ]]
+[[ "$POSTFLIGHT_PASSES" == 0 ]]
+# Naming both claimants is the actionable half.
+[[ "$collision_report" == *"/opt/microsoft/msedge/msedge"* ]]
+[[ "$collision_report" == *msedge* && "$collision_report" == *microsoft-edge-stable* ]]
+rm "$apparmor_fixture/microsoft-edge-stable"
+
+# A disable/ symlink is not a second claim on the executable.
+ln -s "../chatgpt" "$apparmor_fixture/disable/chatgpt"
+POSTFLIGHT_PASSES=0
+POSTFLIGHT_FAILURES=0
+postflight_apparmor_attachments "$apparmor_fixture" >/dev/null
+[[ "$POSTFLIGHT_FAILURES" == 0 ]]
+[[ "$POSTFLIGHT_PASSES" == 1 ]]
+
+# A host with no AppArmor is not a host with a problem, and must not be scored.
+POSTFLIGHT_PASSES=0
+POSTFLIGHT_FAILURES=0
+postflight_apparmor_attachments "$TEST_TMP/nonexistent-apparmor.d" >/dev/null
+[[ "$POSTFLIGHT_FAILURES" == 0 ]]
+[[ "$POSTFLIGHT_PASSES" == 0 ]]
+
 printf 'Linux postflight tests: ok\n'

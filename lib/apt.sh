@@ -133,6 +133,27 @@ apt_install_candidate() {
     || { warn "$label install failed (skipped)"; return 1; }
 }
 
+# apt_report_removals <verb> <note> <package...> — name what this transaction
+# would take with it, before it runs. <note> prints only when there is something
+# to report; pass '' for none.
+#
+# A transaction removes far more than the packages it is handed: NodeSource's
+# nodejs retires the distribution npm and everything built on it. The simulation
+# uses the caller's verb, since install and remove cascade differently.
+apt_report_removals() {
+  local verb="$1" note="$2" removals count
+  shift 2
+  removals=$(sudo "${APT_ENV[@]}" "$PKGMGR" "$verb" -s -y "$@" 2>/dev/null \
+    | awk '/^(Remv|Purg) / { print $2 }' | sort -u)
+  count=$(printf '%s' "$removals" | grep -c . || true)
+  ((count)) || return 0
+  warn "$verb $* removes $count package(s):"
+  printf '%s\n' "$removals" | head -12 | sed 's/^/    /' >&2
+  ((count > 12)) && printf '    … and %s more\n' "$((count - 12))" >&2
+  [[ -n "$note" ]] && warn "  $note"
+  return 0
+}
+
 # distro_codename — the release codename apt suites are named after.
 distro_codename() {
   local codename=''

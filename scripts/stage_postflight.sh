@@ -91,6 +91,51 @@ postflight_xterm_kitty_terminfo() {
   fi
 }
 
+# postflight_apparmor_attachments [profile-dir] — no two profiles may claim the
+# same executable.
+#
+# Vendor postinsts write profiles into /etc/apparmor.d themselves, and one that
+# guesses the wrong name lands a second profile on an executable the
+# distribution already confines; load order then decides which applies. Both
+# parse and apparmor.service starts clean, so only the attachments show it.
+#
+# Compares the `profile <name> <attachment>` form literally: brace alternations
+# can overlap without matching textually, and a false pass beats a false alarm.
+postflight_apparmor_attachments() {
+  local dir="${1:-/etc/apparmor.d}"
+  [[ "$OS_KIND" == linux ]] || return 0
+  [[ -d "$dir" ]] || return 0
+
+  # Top-level regular files only: disable/ holds symlinks to switched-off
+  # profiles, which are not a second claim on the executable.
+  local profile pairs collisions
+  pairs=$(
+    for profile in "$dir"/*; do
+      [[ -f "$profile" ]] || continue
+      awk -v name="${profile##*/}" \
+        '/^profile[ \t]/ && $3 ~ /^\// { print $3 "\t" name }' "$profile" 2>/dev/null
+    done
+  )
+
+  collisions=$(printf '%s\n' "$pairs" | awk -F '\t' '
+    NF == 2 && !seen[$1 FS $2]++ { claimants[$1] = claimants[$1] " " $2; count[$1]++ }
+    END { for (a in count) if (count[a] > 1) print a "\t" substr(claimants[a], 2) }
+  ' | sort)
+
+  if [[ -z "$collisions" ]]; then
+    postflight_pass "no two AppArmor profiles claim the same executable"
+    return 0
+  fi
+
+  local attachment claimants
+  while IFS=$'\t' read -r attachment claimants; do
+    [[ -n "$attachment" ]] || continue
+    postflight_fail "AppArmor profiles collide on $attachment: $claimants"
+    postflight_note "  keep the one dpkg owns (dpkg -S names it) and remove the other:"
+    postflight_note "  sudo apparmor_parser -R <unowned profile> && sudo rm <unowned profile>"
+  done <<< "$collisions"
+}
+
 postflight_desktop_ssh_agent() {
   local expected_socket="$1" advertised_socket="$2"
   if [[ -z "$advertised_socket" ]]; then
@@ -816,6 +861,7 @@ stage_postflight() {
   postflight_ssh_agent
   postflight_agent_skills
   postflight_packages
+  postflight_apparmor_attachments
   postflight_xterm_kitty_terminfo
   postflight_shell_paths
   postflight_completions

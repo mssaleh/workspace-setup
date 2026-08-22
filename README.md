@@ -33,14 +33,14 @@ Apple Container requires Apple silicon and macOS 26 or later. On an older/Intel 
 |---|---|
 | **bootstrap** | Discovers Homebrew at its actual prefix or installs it (macOS); ensures curl + git (Linux). |
 | **packages** | Installs the cross-platform CLI toolbox: `eza`, `fd`, `bat`, `ripgrep` (`rg`), `fzf`, `zoxide`, `yazi`, `git`, `git-delta` (`delta`), `lazygit`, `gh`, `tmux`, `mosh`, `rsync`, `rclone`, `nmap`, `jq`, `yq`, `pandoc`, `7zz` (`7z`), `cmake`, `ninja`, `node`, `uv`, `ruff`, `helm`, `kubectl`, `cosign`, `ffmpeg`, `poppler` (`poppler-utils`), `nano`, `himalaya`, `ncdu`, `shellcheck`, `pre-commit`, … It installs `xterm-kitty` terminfo as a non-GUI SSH capability on every host. On Linux it registers **every** vendor archive before installing anything (see below), then installs the toolbox, the **Claude Desktop** app (skip with `SKIP_CLAUDE_DESKTOP=1`) and the **Codex app** (skip with `SKIP_CODEX_APP=1`). |
-| **docker** | Linux only: installs the official **Docker Engine** + **Docker Compose v2** from download.docker.com. A complete, responsive official installation is a no-op on rerun. |
+| **docker** | Linux only: installs the official **Docker Engine** + **Docker Compose v2** from download.docker.com. Docker's documented pre-clean of the distribution's `docker.io`, `containerd` and `runc` names every package apt would take with them before it runs, since those runtimes carry reverse dependencies of their own. A complete, responsive official installation is a no-op on rerun. |
 | **toolchains** | Installs upstream **rustup**, Astral's standalone **uv/uvx** (plus its receipt), native Claude Code and Codex CLIs, and upstream opencode on Linux. The separate Homebrew `uv` formula remains an intentional backup. |
 | **configuration** | Converges ordinary files under `$HOME`; repairs old links into temporary checkouts, atomically upgrades exact known historical versions, semantically merges supported JSON/TOML/Git formats, preserves ambiguous user-owned content, and installs the coding-agent skills into each agent home. |
 | **containers** | macOS only: installs Apple Container from the signed package on Apple's GitHub release, ensures Rosetta, and starts it with kernel installation enabled. `container-compose` is supplied separately by Homebrew. |
 | **ssh** | Generates an ed25519 keypair if none exists, locks down `~/.ssh` permissions (700 dir, 600 files), and wires up the host-local SSH agent (macOS: Keychain; Linux: systemd user unit) without replacing an agent-forwarding socket supplied by `sshd`. Does **not** push to GitHub — run `gh auth login` manually. |
 | **fonts + terminal** | Installs JetBrainsMono Nerd Font and Kitty via Kitty's upstream installer on both platforms, then creates the standard `~/.local/bin/{kitty,kitten}` links. On macOS it also installs Maccy/LibreOffice and imports Apple Terminal defaults once. On Linux it installs application entries, window class, and icons without selecting a default terminal; the active desktop or user owns that choice. |
 | **terminal profile** | Gives GNOME's Ptyxis the same *behaviour* as Kitty — 100000 lines of scrollback, a login shell so `/etc/profile.d` is read, no audible bell — and deliberately leaves its *appearance* alone. Ptyxis keeps Ubuntu's palette and `Monospace 10` because looking different from Kitty is how you tell at a glance which terminal a window belongs to. A setting the user has changed themselves is preserved and reported, never overwritten. |
-| **postflight** | Verifies provider packages, regular-file configuration, clean-shell PATH resolution, upstream artifacts, and the active container runtime as one coherent result. |
+| **postflight** | Verifies provider packages, regular-file configuration, clean-shell PATH resolution, upstream artifacts, the active container runtime, and that no two AppArmor profiles claim the same executable, as one coherent result. |
 
 Desktop features and headless access are independent. Linux desktop integration
 does not select a default terminal. Interactive and non-interactive SSH shells
@@ -78,6 +78,34 @@ the required keys merged in and keep everything else.
 | Parseable supported format with unrelated user values | Merge only the required keys |
 | Semantically compliant custom shell file | Preserve it |
 | Ambiguous user-owned file or unrelated symlink | Preserve it, report a conflict, and fail postflight rather than overwrite |
+
+### What the vendor archives write that dpkg does not own
+
+Registering a vendor archive means running that vendor's maintainer scripts,
+and several write into `/etc` instead of packaging it. Claude Desktop's
+`postinst` writes an AppArmor profile `dpkg -S` reports no owner for; the Codex
+app ships one as a conffile and manages its own `disable/` symlink. Both need
+one: Ubuntu 24.04+ sets `kernel.apparmor_restrict_unprivileged_userns=1`, and an
+Electron app cannot open its namespace sandbox without `userns` permitted.
+
+The failure is a second profile on an executable the distribution already
+confines. Microsoft Edge does this — its `postinst` writes
+`/etc/apparmor.d/microsoft-edge-stable` attaching `/opt/microsoft/msedge/msedge`,
+which Ubuntu's package-owned `msedge` profile already attaches, because the
+guard meant to prevent it compares the package name against
+`google-chrome-stable` and never matches. Both parse, `apparmor.service` starts
+clean, and load order decides which applies.
+
+Postflight compares attachments and names both claimants. Keep the one `dpkg -S`
+can name an owner for:
+
+```bash
+sudo apparmor_parser -R /etc/apparmor.d/<unowned> && sudo rm /etc/apparmor.d/<unowned>
+sudo apparmor_parser -r /etc/apparmor.d/<the one dpkg owns>
+```
+
+A vendor update reinstalls its profile, so this recurs on that vendor's
+schedule rather than once.
 
 ## Environment variables
 
@@ -163,16 +191,37 @@ run-parts --list --regex '^[a-zA-Z0-9_][a-zA-Z0-9._-]*\.sh$' /etc/profile.d \
   | xargs -n1 basename | grep -nE 'cubeclt|stm32'
 ```
 
-### Watch and memory limits — `system/sysctl.d/`
+### Watch limits — `system/sysctl.d/`
 
 Ubuntu's 65536 inotify watches and 128 instances are reached by an editor
 indexing a large tree plus a few agent sessions, and the failure is silent: a
 watcher stops noticing changes rather than reporting an error.
 
+The watch ceiling cannot be a constant: each watch pins about 1 KB of
+unswappable kernel memory, so a fixed 1M watches is 1.5% of a 64 GB workstation
+and 12% of an 8 GB laptop. It is templated on RAM — one watch per 64 KB:
+
 ```bash
-sudo install -m 0644 system/sysctl.d/60-dev-limits.conf /etc/sysctl.d/
+watches=$(( $(awk '/^MemTotal:/ {print $2}' /proc/meminfo) / 64 ))
+sed "s/\${INOTIFY_WATCHES}/$watches/" system/sysctl.d/60-dev-limits.conf \
+  | sudo tee /etc/sysctl.d/60-dev-limits.conf >/dev/null
 sudo sysctl --system
 ```
+
+Verify the running values, not the file. `sysctl --system` merges all its
+directories into one list sorted by filename and the **last** assignment wins,
+so a package dropping a `70-` file silently outranks this one:
+
+```bash
+sysctl fs.inotify.max_user_watches fs.inotify.max_user_instances
+grep -rl 'inotify' /etc/sysctl.d /run/sysctl.d /usr/lib/sysctl.d 2>/dev/null \
+  | xargs -n1 basename | sort      # 60-dev-limits.conf must sort last
+```
+
+`vm.swappiness` is deliberately absent: lowering it suits a machine with far
+more RAM than swap and brings the OOM killer forward on one without, which is a
+judgement about a host rather than a development default. Add
+`vm.swappiness = 10` to the installed file if yours is the former.
 
 ### Unbounded container logs — `system/docker/`
 
@@ -201,7 +250,14 @@ docker inspect logcheck --format '{{.HostConfig.LogConfig.Config}}'   # max-file
 docker network create pool-check >/dev/null
 docker network inspect pool-check --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}'  # 10.201.x
 docker network rm pool-check >/dev/null
+docker buildx inspect --bootstrap default | grep -A4 'GC Policy'   # Reserved Space: 10GiB / 30GiB
 ```
+
+The readback matters because `dockerd --validate` accepts unknown keys —
+`{"totallyNotAKey": "10GB"}` also reports `configuration OK`. Build-cache keys
+are `reservedSpace`, `maxUsedSpace` and `minFreeSpace`; `keepStorage` is the
+pre-Docker-28 name for `reservedSpace`, still accepted but gone from
+`buildx prune`.
 
 ### Desktop and remote SSH agents
 
@@ -244,7 +300,7 @@ systemctl --user set-environment "PATH=$FIXED"
 
 ### SSH server hardening — `system/sshd/`
 
-`system/sshd/90-workspace-setup.conf` is a reviewed Ubuntu baseline for
+`system/sshd/10-workspace-setup.conf` is a reviewed Ubuntu baseline for
 terminal-only hosts. It disables password authentication, so install it **only
 after** confirming that key-based login works **from the machine you connect
 from** — not from this one. A host does not list its own key in its own
@@ -257,12 +313,71 @@ ssh -o PreferredAuthentications=publickey -o BatchMode=yes <host> true
 
 # Then on the host:
 grep -c '^ssh-' ~/.ssh/authorized_keys      # must be at least 1
-sudo install -m 0644 system/sshd/90-workspace-setup.conf /etc/ssh/sshd_config.d/
-sudo sshd -t && sudo systemctl reload ssh
+sudo install -m 0644 system/sshd/10-workspace-setup.conf /etc/ssh/sshd_config.d/
+sudo sshd -t                                # must pass; see below
+systemctl is-active --quiet ssh.service && sudo systemctl reload ssh
 ```
 
-Check whether it is already in place before reinstalling it:
-`sudo sshd -T | grep -E '^(passwordauthentication|pubkeyauthentication)'`.
+The reload is conditional because Ubuntu 22.10 and later enable `ssh.socket`
+instead of `ssh.service`: systemd holds port 22 and starts `sshd` on the first
+connection, so between connections there is nothing to reload and
+`systemctl reload ssh` answers `ssh.service is not active, cannot reload`.
+`sudo ss -tlnp 'sport = :22'` naming `systemd,pid=1` means socket-activated.
+
+That inverts where the risk sits. The old model keeps serving the previous
+configuration until you reload, quietly giving you a second chance; socket
+activation starts a fresh `sshd` that reads whatever is on disk now. `sshd -t`
+is then the only thing between a typo and a host you cannot log into.
+
+The number decides whether the file does anything. `sshd_config` is
+**first**-wins — "for each keyword, the first obtained value will be used" — and
+the `Include` sits near the top, so the lexicographically *first* drop-in
+decides each keyword. Ubuntu cloud images carry
+`/etc/ssh/sshd_config.d/50-cloud-init.conf` with `PasswordAuthentication yes`; a
+hardening file numbered above it parses, passes `sshd -t`, and is ignored.
+
+That is the opposite of `sysctl.d` above, where the last file wins — same
+idiom, inverted precedence, which is why both sections check the running
+value:
+
+```bash
+sudo sshd -T | grep -E '^(passwordauthentication|pubkeyauthentication|permitrootlogin)'
+```
+
+Anything other than `passwordauthentication no` means another drop-in got there
+first; `sudo sshd -T -f /dev/null` is not a substitute, since it skips the
+`Include` entirely. List what else is in play with
+`ls /etc/ssh/sshd_config.d/`.
+
+### Turning on the firewall breaks desktop discovery
+
+No ruleset ships here — which ports a machine should expose, and to which
+subnets, is site policy rather than a development default. The trap is worth
+knowing before you run `ufw enable`, because it is silent and it is delayed.
+
+`ufw`'s stock `before.rules` already accepts the well-known multicast
+destinations — mDNS to `224.0.0.251:5353` and `ff02::fb`, SSDP to
+`239.255.255.250:1900` and `ff02::f`. What it cannot accept is the **unicast
+replies**: a device answers an SSDP `M-SEARCH` from its own address on port
+1900, and because the query went to the multicast group rather than to that
+device, conntrack has no matching entry and `RELATED,ESTABLISHED` never fires.
+WS-Discovery on 3702 is not in `before.rules` at all, nor is the `ff02::c` group
+IPv6 announcements use.
+
+Nothing logs an error. GNOME Files stops listing SMB shares, cast and DLNA
+targets vanish, printers stop being found, and a UPnP mapping fails minutes
+later somewhere unrelated.
+
+Prefer the profiles a package registers (`ufw app list` — `wsdd`, `cups`) over
+raw ports, and scope the rest to the subnets you are on:
+
+```bash
+ip -brief -4 addr | awk '$1 != "lo" {print $1, $3}'   # the CIDRs to scope to
+```
+
+Verify by using the desktop, not by reading `ufw status`: open Files → Other
+Locations and confirm the shares appear. A rule that parses is not a rule that
+lets the protocol work.
 
 ## Terminals and clipboard
 
@@ -459,7 +574,7 @@ workspace-setup/
 ├── lib/
 │   ├── log.sh                     # logging + stage runner
 │   ├── os.sh                      # OS detection + package manager abstraction
-│   ├── apt.sh                     # apt repository/package primitives (keys, sources, candidates)
+│   ├── apt.sh                     # apt repository/package primitives (keys, sources, candidates, removals)
 │   ├── upstream.sh                # keeping publisher-installed artifacts on their current release
 │   ├── manifest.sh                # source-only platform/provider ownership manifest
 │   ├── config.sh                  # atomic, state-aware regular-file convergence
@@ -495,9 +610,9 @@ workspace-setup/
 ├── tests/                          # convergence + clean-shell PATH regression tests
 ├── system/                         # reviewed /etc files, installed by hand
 │   ├── profile.d/                  # undo STM32CubeCLT's PATH prepend
-│   ├── sysctl.d/                   # inotify watch/instance limits, swappiness
+│   ├── sysctl.d/                   # inotify watch/instance limits, templated on RAM
 │   ├── docker/daemon.json          # log rotation + builder GC (merge target)
-│   └── sshd/                       # opt-in terminal-only Ubuntu SSH hardening
+│   └── sshd/                       # opt-in terminal-only Ubuntu SSH hardening (10- so it wins)
 └── README.md
 ```
 
@@ -507,5 +622,5 @@ workspace-setup/
 bash tests/run.sh
 ```
 
-The suite runs against temporary `HOME` directories and never touches the real one. It covers convergence decisions (install / no-op / legacy-link repair / known-version upgrade / merge / preserved conflict), the provider manifest, the order in which the Linux stage registers apt repositories and installs from them, whether publisher-installed tools are kept on their current release, Linux command aliases, clean-shell PATH resolution for bash and zsh, Nano tab safety, the Kitty/tmux clipboard chain, shell hook idempotence, SSH-agent identity matching, postflight on both platforms, and the streamed `curl | bash` payload bootstrap.
+The suite runs against temporary `HOME` directories and never touches the real one. It covers convergence decisions (install / no-op / legacy-link repair / known-version upgrade / merge / preserved conflict), the provider manifest, the order in which the Linux stage registers apt repositories and installs from them, the argument vector each apt removal actually runs and what it reports taking with it, whether publisher-installed tools are kept on their current release, Linux command aliases, clean-shell PATH resolution for bash and zsh, Nano tab safety, the Kitty/tmux clipboard chain, shell hook idempotence, SSH-agent identity matching, AppArmor profile attachment collisions, postflight on both platforms, and the streamed `curl | bash` payload bootstrap.
 

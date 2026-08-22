@@ -14,8 +14,8 @@
     "gc": {
       "enabled": true,
       "policy": [
-        { "keepStorage": "10GB", "filter": ["unused-for=168h"] },
-        { "keepStorage": "30GB", "all": true }
+        { "reservedSpace": "10GB", "filter": ["unused-for=168h"] },
+        { "reservedSpace": "30GB", "all": true }
       ]
     }
   },

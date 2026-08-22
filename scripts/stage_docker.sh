@@ -10,6 +10,31 @@
 # Sources: https://docs.docker.com/engine/install/ubuntu/ and
 # https://docs.docker.com/engine/install/debian/.
 
+# docker_remove_conflicting_packages — retire the distribution runtimes the
+# official Engine replaces, which Docker's install docs make the first step.
+#
+# Only packages dpkg reports as `install` are passed on; `deinstall` means
+# removed with config kept, and would start a pointless transaction every rerun.
+# `-y` is required: apt-get prompts on any removal and a setup run has no one to
+# answer, so without it the step aborts and removes nothing. containerd and runc
+# carry reverse dependencies, so the cascade is named before it runs.
+docker_remove_conflicting_packages() {
+  local conflicts=()
+  mapfile -t conflicts < <(dpkg --get-selections "${DOCKER_CONFLICTING_PACKAGES[@]}" 2>/dev/null \
+    | awk '$2 == "install" { print $1 }')
+  ((${#conflicts[@]})) || return 0
+
+  info "removing conflicting packages: ${conflicts[*]}"
+  apt_report_removals remove \
+    'they depend on the runtimes containerd.io replaces' \
+    "${conflicts[@]}"
+  if ! sudo "${APT_ENV[@]}" "$PKGMGR" remove -y "${conflicts[@]}"; then
+    warn "could not remove the conflicting packages: ${conflicts[*]}"
+    warn "  Docker Engine may fail to install while they are present"
+    return 1
+  fi
+}
+
 stage_docker() {
   # macOS uses Apple's native `container` CLI — skip Docker Engine entirely.
   if [[ "$OS_KIND" == macos ]]; then
@@ -58,23 +83,9 @@ stage_docker() {
   esac
 
   # --- 1. Pre-clean conflicting packages (Docker docs canonical command) ---
-  # Removes the distro's docker.io, the EOL docker-compose v1, docker-doc,
-  # podman-docker, and the standalone containerd/runc (replaced by
-  # containerd.io).
-  #
-  # Only packages dpkg reports as `install` are passed on. --get-selections
-  # also lists a package in `deinstall` state — removed, config files kept —
-  # and a host that once had docker.io installed keeps that entry forever, so
-  # taking the name regardless of status would run a pointless apt transaction
-  # on every rerun.
-  local conflicts
-  conflicts=$(dpkg --get-selections "${DOCKER_CONFLICTING_PACKAGES[@]}" 2>/dev/null \
-    | awk '$2 == "install" { print $1 }')
-  if [[ -n "$conflicts" ]]; then
-    info "removing conflicting packages: $(tr '\n' ' ' <<< "$conflicts")"
-    # shellcheck disable=SC2086 # intentional word splitting: each package is a separate arg
-    sudo "${APT_ENV[@]}" "$PKGMGR" remove $conflicts >/dev/null 2>&1 || true
-  fi
+  # Reported, not fatal: the Engine install may succeed anyway, and if it does
+  # not, its own error is the more useful one.
+  docker_remove_conflicting_packages || true
 
   # --- 2. Add Docker's official GPG key (new keyrings pattern, NOT apt-key) ---
   # apt-key is deprecated (Debian apt-key(8) manpage: "Use of apt-key is

@@ -373,24 +373,6 @@ install_nodesource_pin() {
   fi
 }
 
-# report_apt_removals <package> — say what installing this would take with it.
-#
-# The NodeSource package conflicts with the distribution's separate npm, and
-# where that npm is installed the conflict cascades through everything built on
-# it — often a hundred packages or more. Naming them turns a surprise into a
-# decision somebody can interrupt.
-report_apt_removals() {
-  local pkg="$1" removals count
-  removals=$(sudo "${APT_ENV[@]}" "$PKGMGR" install -s -y "$pkg" 2>/dev/null \
-    | awk '/^(Remv|Purg) / { print $2 }' | sort -u)
-  count=$(printf '%s' "$removals" | grep -c . || true)
-  ((count)) || return 0
-  warn "installing $pkg removes $count other package(s):"
-  printf '%s\n' "$removals" | head -12 | sed 's/^/    /' >&2
-  ((count > 12)) && printf '    … and %s more\n' "$((count - 12))" >&2
-  warn "  they are distribution packages that depend on the build being replaced"
-}
-
 # The NodeSource package declares Conflicts/Replaces against the distribution's
 # separate `npm` package, so apt retires that one on its own rather than
 # refusing the install; the NodeSource build carries its own matching npm.
@@ -595,7 +577,9 @@ stage_packages() {
     else
       if [[ -n "$node_installed" && "$node_installed" != *nodesource* ]]; then
         info "replacing the distribution Node.js ($node_installed) with NodeSource ${NODE_MAJOR}.x…"
-        report_apt_removals nodejs
+        apt_report_removals install \
+          'they are distribution packages that depend on the build being replaced' \
+          nodejs
       else
         info "installing Node.js ${NODE_MAJOR}.x (NodeSource apt repo)…"
       fi
