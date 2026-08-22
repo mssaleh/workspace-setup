@@ -22,6 +22,7 @@
 #                             correction lives. Without it a Ptyxis window gets
 #                             the vendor toolchain that system/profile.d removes.
 #   audible-bell      false   kitty enable_audio_bell no
+#   visual-bell       false   kitty visual_bell_duration 0
 #
 # GSettings has no equivalent of lib/config.sh's known-hash inventory, but dconf
 # draws the same line: a key the user has never set reads empty and still
@@ -84,8 +85,11 @@ stage_terminal_profile() {
     return 0
   fi
 
+  # Both bells: Ptyxis defaults visual-bell true, which flashes on every beep.
   gsettings_converge "$PTYXIS_ROOT_SCHEMA" "$PTYXIS_ROOT_PATH" \
     audible-bell false false
+  gsettings_converge "$PTYXIS_ROOT_SCHEMA" "$PTYXIS_ROOT_PATH" \
+    visual-bell false false
 
   local uuid profile_path profile_schema
   uuid=$(gsettings get "$PTYXIS_ROOT_SCHEMA" default-profile-uuid 2>/dev/null | tr -d "'")

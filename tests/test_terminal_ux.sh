@@ -145,6 +145,16 @@ grep -Fq "scrollback-lines $kitty_scrollback" "$stage_profile" \
 grep -Fq 'login-shell true' "$stage_profile" \
   || fail_test 'GNOME terminal does not start a login shell; /etc/profile.d would be skipped'
 
+# Both bells: silencing only the audible one leaves every beep a window flash.
+grep -qE '^enable_audio_bell[[:space:]]+no$' "$kitty_conf" \
+  || fail_test 'kitty no longer disables the audio bell; the Ptyxis comparison is stale'
+grep -qE '^visual_bell_duration[[:space:]]+0$' "$kitty_conf" \
+  || fail_test 'kitty no longer disables the visual bell; the Ptyxis comparison is stale'
+for bell_key in audible-bell visual-bell; do
+  grep -Fq "$bell_key false" "$stage_profile" \
+    || fail_test "GNOME terminal does not set $bell_key false; kitty silences both"
+done
+
 # ── The convergence rule: never overwrite a setting the user chose ─────────
 # dconf reads empty for a key that has never been set, which is the GSettings
 # equivalent of the pristine-default case in lib/config.sh.
