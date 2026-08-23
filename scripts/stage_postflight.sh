@@ -343,7 +343,16 @@ postflight_packages() {
       missing=()
       for pkg in "${PACKAGES_BREW_CASK[@]}"; do
         [[ "$pkg" == libreoffice && -n "${SKIP_LIBREOFFICE:-}" ]] && continue
-        "$BREW_BIN" list --cask "$pkg" >/dev/null 2>&1 || missing+=("$pkg")
+        [[ "$pkg" == visual-studio-code && -n "${SKIP_VSCODE:-}" ]] && continue
+        "$BREW_BIN" list --cask "$pkg" >/dev/null 2>&1 && continue
+        # An application installed directly satisfies the same need. The
+        # install stage preserves it rather than adding a second copy, so
+        # counting it missing here would be an unresolvable failure.
+        if brew_cask_existing_artifact "$pkg" >/dev/null; then
+          postflight_pass "$pkg provided by an existing application outside Homebrew"
+          continue
+        fi
+        missing+=("$pkg")
       done
       if ((${#missing[@]} == 0)); then
         postflight_pass "requested Homebrew casks are installed"

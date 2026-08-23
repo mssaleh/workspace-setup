@@ -122,7 +122,11 @@ stage_ssh() {
     # Address the launchd-managed agent explicitly so an `ssh -A` socket in the
     # current remote session remains untouched.
     local agent_socket
-    agent_socket=$(macos_ssh_agent_socket)
+    # The helper returns non-zero when there is no agent to address — notably
+    # inside an ssh session, where it declines so an -A forwarded socket is left
+    # alone. The branches below handle an empty value; without this guard
+    # `set -e` ends the run at the assignment instead of reaching them.
+    agent_socket=$(macos_ssh_agent_socket) || agent_socket=""
     if [[ -n "$agent_socket" ]] \
         && ssh_agent_has_default_identity_at "$agent_socket"; then
       ok "key already loaded in agent"

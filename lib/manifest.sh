@@ -26,10 +26,36 @@ PACKAGES_BREW=(
   helm kubernetes-cli cosign container-compose
   ffmpeg poppler nano
   himalaya ncdu smartmontools xsel pkgconf
+  azure-cli
   anomalyco/tap/opencode ttscoff/thelab/apex
 )
 
+# Casks whose application a direct .dmg install can also provide. Where the
+# app is already present from outside Homebrew it is left alone and the cask
+# counts as satisfied: two copies of one application is worse than a single
+# unmanaged one, and reporting it missing forever helps nobody.
+# Colon-delimited so macOS's bash 3.2 can read it.
+BREW_CASK_EXISTING_ARTIFACTS=(
+  "maccy:/Applications/Maccy.app"
+  "libreoffice:/Applications/LibreOffice.app"
+  "visual-studio-code:/Applications/Visual Studio Code.app"
+)
+
+# brew_cask_existing_artifact <cask> — the .app a direct install would leave,
+# printed only when it is actually present.
+brew_cask_existing_artifact() {
+  local cask="$1" entry path
+  for entry in "${BREW_CASK_EXISTING_ARTIFACTS[@]}"; do
+    [[ "${entry%%:*}" == "$cask" ]] || continue
+    path="${entry#*:}"
+    [[ -e "$path" ]] && printf '%s\n' "$path" && return 0
+    return 1
+  done
+  return 1
+}
+
 PACKAGES_BREW_CASK=(
+  visual-studio-code
   font-jetbrains-mono-nerd-font
   maccy
   libreoffice
@@ -51,6 +77,7 @@ PACKAGES_APT=(
   ncdu smartmontools xsel pkg-config
   ca-certificates gnupg lsb-release unzip xz-utils fontconfig ncurses-bin
   eza chafa mosh
+  flatpak
   # Remote shells inherit TERM=xterm-kitty even when this host has no GUI.
   # This package is only terminal capability metadata; it does not install
   # Kitty, X11, Wayland, or any graphical runtime.
@@ -68,7 +95,47 @@ UPSTREAM_RELEASE_PROJECTS=(
   yazi:sxyazi/yazi
   himalaya:pimalaya/himalaya
   opencode:anomalyco/opencode
+  mgc:microsoftgraph/msgraph-cli
+  git-credential-manager:git-ecosystem/git-credential-manager
 )
+
+# Python applications installed with `uv tool install`, which gives each its own
+# environment and a launcher in ~/.local/bin. Preferred over pipx or a shared
+# virtualenv because uv is already a dependency of this setup.
+#
+# markitdown is PyPI-only and has no packaged form on either platform.
+UV_TOOLS_COMMON=(markitdown)
+# azure-cli publishes an apt repository only for Ubuntu LTS codenames, so a
+# non-LTS or newer release resolves nothing and uv owns it. macOS has a
+# Homebrew formula, which owns it there — see PACKAGES_BREW. Installing both
+# would put uv's launcher ahead of Homebrew's on PATH.
+UV_TOOLS_LINUX=(azure-cli)
+
+# Git Credential Manager ships no default store on Linux, so an unconfigured
+# install silently persists nothing. secretservice keeps the secret encrypted in
+# the login keyring; it needs a graphical session, which is acceptable here
+# because GitHub already authenticates over SSH and never reaches this helper.
+# The alternatives are gpg (needs a key, pass and pinentry-tty), cache (memory
+# only) and plaintext.
+GCM_CREDENTIAL_STORE=secretservice
+
+# Flatpak runtime and the Flathub remote, per https://flathub.org/setup/Ubuntu.
+# The GNOME Software plugin is a graphical component and is installed only when
+# the flatpak stage runs; flatpak itself is in PACKAGES_APT and is harmless on a
+# headless host.
+FLATHUB_REMOTE_URL=https://dl.flathub.org/repo/flathub.flatpakrepo
+PACKAGES_APT_FLATPAK_DESKTOP=(gnome-software-plugin-flatpak)
+
+# Supplementary groups a workstation user needs for direct device access. The
+# docker group is deliberately absent: stage_docker owns it, and it only exists
+# once Docker Engine is installed.
+#   dialout  serial adapters (/dev/ttyUSB*, /dev/ttyACM*)
+#   kvm      /dev/kvm, required by the VM-backed sandboxes the coding agents run
+#   render   GPU compute — /dev/dri/renderD*, and /dev/kfd on AMD
+#   video    /dev/dri/card*, webcams
+# logind grants an ACL over some of these to whoever holds the graphical seat,
+# which does not cover SSH sessions, cron or systemd units.
+WORKSTATION_GROUPS=(dialout kvm render video audio)
 
 # Single-binary releases installed into ~/.local/bin, which the shipped shell
 # files put ahead of /usr/bin. Each publisher names the artifact by dpkg
@@ -99,13 +166,18 @@ PROVIDERS_MACOS_UPSTREAM=(apple-container-signed-pkg rosetta)
 # macOS gets: Ubuntu's `yq` is kislyuk's jq wrapper rather than the mikefarah
 # program, and its `cosign` is a major behind. Both come from the upstream
 # release instead — see YQ_RELEASE_BASE and COSIGN_RELEASE_BASE above.
-PROVIDERS_LINUX_UPSTREAM=(ruff yazi himalaya opencode yq cosign)
+PROVIDERS_LINUX_UPSTREAM=(ruff yazi himalaya opencode yq cosign mgc git-credential-manager)
 # Capabilities the distribution either does not package or packages too far
 # behind to use, taken from the vendor's own signed archive instead.
 PROVIDERS_LINUX_OFFICIAL_REPO=(
   kubectl helm docker-engine docker-compose-v2 claude-desktop nodejs
-  cmake gh chatgpt
+  cmake gh chatgpt code
 )
+
+# Desktop applications that only make sense where GNOME Shell is installed.
+# Presence of the shell is what decides, not the session type: a host can be
+# provisioned over ssh and used at its own display later.
+PACKAGES_APT_GNOME=(gnome-shell-extension-manager)
 
 # The Node.js major series installed from NodeSource on Linux. Bump to move the
 # host onto a new release line; the stage reinstalls when the installed major
@@ -157,6 +229,15 @@ CLAUDE_DESKTOP_APT_URI=https://downloads.claude.ai/claude-desktop/apt/stable
 CLAUDE_DESKTOP_KEY_URL=https://downloads.claude.ai/claude-desktop/key.asc
 CLAUDE_DESKTOP_KEYRING=/usr/share/keyrings/claude-desktop-archive-keyring.asc
 CLAUDE_DESKTOP_KEY_FINGERPRINT=31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE
+
+# Visual Studio Code — Microsoft's own archive. The suite is `stable` rather
+# than a release codename: one repository serves every distribution version.
+# Signed with Microsoft's long-standing key, not the 2025 key the Ubuntu prod
+# repository moved to, so the two cannot share a keyring.
+VSCODE_APT_URI=https://packages.microsoft.com/repos/code
+VSCODE_KEY_URL=https://packages.microsoft.com/keys/microsoft.asc
+VSCODE_KEYRING=/usr/share/keyrings/microsoft-archive-keyring.asc
+VSCODE_KEY_FINGERPRINT=BC528686B50D79E339D3721CEB3E94ADBE1229CF
 
 # Node.js. NodeSource publish a setup_<major>.x script meant to be piped into
 # `sudo bash`; it is not used here because it rewrites the keyring and the

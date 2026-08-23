@@ -6,11 +6,8 @@ install_brew_cask_if_missing() {
   if "$BREW_BIN" list --cask "$cask" >/dev/null 2>&1; then
     ok "$cask already installed"
   else
-    case "$cask" in
-      maccy)       existing_artifact=/Applications/Maccy.app ;;
-      libreoffice) existing_artifact=/Applications/LibreOffice.app ;;
-    esac
-    if [[ -n "$existing_artifact" && -e "$existing_artifact" ]]; then
+    existing_artifact=$(brew_cask_existing_artifact "$cask") || existing_artifact=""
+    if [[ -n "$existing_artifact" ]]; then
       warn "preserving an existing non-Homebrew application at $existing_artifact"
       return 0
     fi
@@ -206,6 +203,7 @@ stage_fonts_terminal() {
     local cask
     for cask in "${PACKAGES_BREW_CASK[@]}"; do
       [[ "$cask" == libreoffice && -n "${SKIP_LIBREOFFICE:-}" ]] && continue
+      [[ "$cask" == visual-studio-code && -n "${SKIP_VSCODE:-}" ]] && continue
       install_brew_cask_if_missing "$cask"
     done
 

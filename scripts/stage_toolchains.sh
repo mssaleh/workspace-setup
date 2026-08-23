@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# scripts/stage_toolchains.sh — install rustup + uv + coding-agent CLIs.
+# scripts/stage_toolchains.sh — install rustup + uv + coding-agent CLIs,
+# the uv-managed Python applications, and the Microsoft Graph CLI.
 # These are deliberately owned by their upstream installers, not inferred from
 # whichever same-named executable happens to be on PATH.
 
@@ -44,6 +45,101 @@ stage_toolchains() {
     [[ -x "$HOME/.local/bin/uv" && -x "$HOME/.local/bin/uvx" \
         && -f "$HOME/.config/uv/uv-receipt.json" ]] || \
       fail "uv installer completed without its standalone binaries and receipt"
+  fi
+
+  # --- Python applications owned by uv ---
+  # `uv tool install` is idempotent but still resolves the index on every call,
+  # so ask uv what it already has first. --upgrade is deliberately not passed:
+  # publisher-installed tools stay on their current release until asked to move.
+  local uv_installed=""
+  if [[ -x "$HOME/.local/bin/uv" ]]; then
+    uv_installed=$("$HOME/.local/bin/uv" tool list 2>/dev/null | awk '/^[a-z]/ { print $1 }')
+  fi
+  # azure-cli is Homebrew-owned on macOS; adding uv's copy there would put a
+  # second launcher ahead of Homebrew's on PATH.
+  local uv_tools=("${UV_TOOLS_COMMON[@]}")
+  [[ "$OS_KIND" == linux ]] && uv_tools+=("${UV_TOOLS_LINUX[@]}")
+
+  local tool
+  for tool in "${uv_tools[@]}"; do
+    if grep -x "$tool" >/dev/null <<<"$uv_installed"; then
+      ok "$tool already installed by uv"
+    else
+      info "installing $tool (uv tool)…"
+      "$HOME/.local/bin/uv" tool install "$tool" \
+        || warn "uv tool install $tool failed"
+    fi
+  done
+
+  # --- Microsoft Graph CLI (mgc) — GitHub release tarball ---
+  # Linux only: the publisher ships osx-x64 too, but a Mac gets this from
+  # Homebrew. The release tag carries a leading v that the asset name does not,
+  # so the version is taken from the tag and the v stripped for the filename.
+  # The archive holds the binary and its .pdb debug symbols; only the binary is
+  # extracted, so nothing but an executable lands on PATH.
+  if [[ "$OS_KIND" == linux ]] && [[ "$(uname -m)" == x86_64 ]]; then
+    local mgc_bin="$HOME/.local/bin/mgc"
+    if upstream_artifact_needed mgc "$mgc_bin" "$mgc_bin" --version; then
+      local mgc_tag mgc_ver mgc_tmp
+      # upstream_latest_version strips the leading v, so it yields the version
+      # the asset filename uses; the release path needs the tag it came from.
+      mgc_ver=$(upstream_latest_version microsoftgraph/msgraph-cli 2>/dev/null || true)
+      mgc_tag="v${mgc_ver}"
+      if [[ -z "$mgc_ver" ]]; then
+        warn "could not determine the published msgraph-cli version"
+      else
+        mgc_tmp=$(mktemp -d)
+        if curl -fsSL -o "$mgc_tmp/mgc.tar.gz" \
+             "https://github.com/microsoftgraph/msgraph-cli/releases/download/${mgc_tag}/msgraph-cli-linux-x64-${mgc_ver}.tar.gz" \
+           && tar -xzf "$mgc_tmp/mgc.tar.gz" -C "$mgc_tmp" mgc; then
+          install -m 0755 "$mgc_tmp/mgc" "$mgc_bin"
+          ok "mgc installed → $mgc_bin ($("$mgc_bin" --version 2>/dev/null || echo "$mgc_ver"))"
+        else
+          warn "msgraph-cli ${mgc_ver} download or extraction failed"
+        fi
+        rm -rf "$mgc_tmp"
+      fi
+    fi
+  fi
+
+  # --- Git Credential Manager — GitHub release tarball ---
+  # Linux only; a Mac gets its keychain helper from git itself. The archive is a
+  # self-contained .NET application: the executable needs its two .so files
+  # beside it, so it is unpacked into its own directory and exposed by symlink,
+  # which is what the publisher's own .deb does under /usr/local/share/gcm-core.
+  if [[ "$OS_KIND" == linux ]] && [[ "$(uname -m)" == x86_64 ]]; then
+    local gcm_dir="$HOME/.local/share/gcm-core"
+    local gcm_bin="$gcm_dir/git-credential-manager"
+    local gcm_link="$HOME/.local/bin/git-credential-manager"
+    if upstream_artifact_needed git-credential-manager "$gcm_bin" "$gcm_bin" --version; then
+      local gcm_ver gcm_tmp
+      gcm_ver=$(upstream_latest_version git-ecosystem/git-credential-manager 2>/dev/null || true)
+      if [[ -z "$gcm_ver" ]]; then
+        warn "could not determine the published git-credential-manager version"
+      else
+        gcm_tmp=$(mktemp -d)
+        if curl -fsSL -o "$gcm_tmp/gcm.tar.gz" \
+             "https://github.com/git-ecosystem/git-credential-manager/releases/download/v${gcm_ver}/gcm-linux-x64-${gcm_ver}.tar.gz" \
+           && mkdir -p "$gcm_dir" \
+           && tar -xzf "$gcm_tmp/gcm.tar.gz" -C "$gcm_dir"; then
+          chmod 0755 "$gcm_bin"
+          ok "git-credential-manager installed → $gcm_dir ($gcm_ver)"
+        else
+          warn "git-credential-manager ${gcm_ver} download or extraction failed"
+        fi
+        rm -rf "$gcm_tmp"
+      fi
+    fi
+    if [[ -x "$gcm_bin" ]]; then
+      if [[ -L "$gcm_link" && "$gcm_link" -ef "$gcm_bin" ]]; then
+        :
+      elif [[ -e "$gcm_link" && ! -L "$gcm_link" ]]; then
+        warn "preserving user-owned $gcm_link; cannot expose the upstream artifact"
+      else
+        ln -sfn "$gcm_bin" "$gcm_link"
+        info "linked $gcm_link → $gcm_bin"
+      fi
+    fi
   fi
 
   # --- Claude Code (Anthropic) — official native installer ---

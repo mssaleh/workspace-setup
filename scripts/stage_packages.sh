@@ -268,6 +268,19 @@ register_third_party_apt_repos() {
     warn "Claude Desktop: no packages published for architecture '$arch' — skipping"
   fi
 
+  # --- Visual Studio Code — packages.microsoft.com/repos/code. ---
+  if apt_gui_app_wanted code "${SKIP_VSCODE:-}"; then
+    if apt_trust_repo_key 'Visual Studio Code' "$VSCODE_KEY_URL" \
+        "$VSCODE_KEYRING" "$VSCODE_KEY_FINGERPRINT"; then
+      if [[ -n $(apt_write_sources /etc/apt/sources.list.d/vscode.list \
+          "$(printf 'deb [arch=amd64,arm64 signed-by=%s] %s stable main\n' \
+            "$VSCODE_KEYRING" "$VSCODE_APT_URI")") ]]; then
+        info "added the Visual Studio Code apt repo (packages.microsoft.com)"
+        changed=1
+      fi
+    fi
+  fi
+
   # --- Node.js — NodeSource (deb.nodesource.com), plus the pin that makes it
   #     the only source apt will accept for the runtime. Both are written here,
   #     before the batch install, because the distribution's nodejs is reachable
@@ -557,6 +570,29 @@ stage_packages() {
     # 4. Packages that exist only in a vendor archive. Each re-checks that its
     #    own archive is present, so a failed registration leaves the package
     #    uninstalled rather than letting another source answer to the name.
+    if [[ -z "${SKIP_VSCODE:-}" ]]; then
+      install_vendor_package code code "$VSCODE_APT_URI" \
+        "https://code.visualstudio.com/docs/setup/linux"
+    fi
+
+    # GNOME Shell extensions are only manageable where the shell itself is
+    # installed; on a host without it the app opens to nothing.
+    if [[ -z "${SKIP_GNOME_EXTENSIONS:-}" ]] && pkg_installed gnome-shell; then
+      local gnome_pkg gnome_missing=()
+      for gnome_pkg in "${PACKAGES_APT_GNOME[@]}"; do
+        pkg_installed "$gnome_pkg" || gnome_missing+=("$gnome_pkg")
+      done
+      if ((${#gnome_missing[@]})); then
+        info "installing GNOME desktop tools: ${gnome_missing[*]}"
+        sudo "${APT_ENV[@]}" "$PKGMGR" install -y "${gnome_missing[@]}" \
+          || warn "could not install ${gnome_missing[*]}"
+      else
+        ok "GNOME desktop tools already installed"
+      fi
+    elif [[ -z "${SKIP_GNOME_EXTENSIONS:-}" ]]; then
+      ok "GNOME Shell is not installed; skipped ${PACKAGES_APT_GNOME[*]}"
+    fi
+
     install_vendor_package kubectl kubectl "$KUBERNETES_APT_URI" \
       https://kubernetes.io/docs/tasks/tools/install-kubectl-linux/
     install_vendor_package helm helm "$HELM_APT_URI" \

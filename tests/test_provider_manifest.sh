@@ -5,6 +5,14 @@ TEST_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # shellcheck disable=SC1091
 . "$TEST_ROOT/lib/manifest.sh"
 
+upstream_has_project() {
+  local wanted="$1" entry
+  for entry in "${UPSTREAM_RELEASE_PROJECTS[@]}"; do
+    [[ "${entry%%:*}" == "$wanted" ]] && return 0
+  done
+  return 1
+}
+
 array_has() {
   local wanted="$1" item
   shift
@@ -163,5 +171,101 @@ for _zsh_pkg in "${PACKAGES_APT[@]}"; do
 done
 array_has zsh-autosuggestions "${PACKAGES_BREW[@]}"
 array_has zsh-syntax-highlighting "${PACKAGES_BREW[@]}"
+
+# Microsoft's CLIs each come from the one channel that actually publishes for
+# this host. azure-cli has an apt repository only for Ubuntu LTS codenames, so
+# a non-LTS or newer release resolves nothing; markitdown is PyPI-only. Both
+# are therefore uv-owned, and must not drift into an apt or brew list.
+array_has markitdown "${UV_TOOLS_COMMON[@]}"
+array_has azure-cli "${UV_TOOLS_LINUX[@]}"
+
+# Cross-platform uv tools must not also be packaged, or two launchers compete.
+for _uv_tool in "${UV_TOOLS_COMMON[@]}"; do
+  if array_has "$_uv_tool" "${PACKAGES_APT[@]}" \
+      || array_has "$_uv_tool" "${PACKAGES_BREW[@]}"; then
+    printf '%s is uv-owned; remove it from the apt/brew lists\n' "$_uv_tool" >&2
+    exit 1
+  fi
+done
+
+# Deliberate split ownership: uv on Linux where no repository packages it,
+# Homebrew on macOS where one does. It must not appear in the apt list, which
+# would mean two owners on the same host.
+for _uv_tool in "${UV_TOOLS_LINUX[@]}"; do
+  if array_has "$_uv_tool" "${PACKAGES_APT[@]}"; then
+    printf '%s is uv-owned on Linux; remove it from PACKAGES_APT\n' "$_uv_tool" >&2
+    exit 1
+  fi
+done
+array_has azure-cli "${PACKAGES_BREW[@]}"
+
+# The Graph CLI ships as a GitHub release tarball, so it is upstream-owned and
+# must carry a project entry for the currency check to have anything to compare.
+array_has mgc "${PROVIDERS_LINUX_UPSTREAM[@]}"
+if ! upstream_has_project mgc; then
+  printf 'mgc must declare a project in UPSTREAM_RELEASE_PROJECTS\n' >&2
+  exit 1
+fi
+
+# The docker group is created by the Docker postinst and joined by stage_docker.
+# Listing it here too would make a host without Docker report a missing group
+# on every run.
+if array_has docker "${WORKSTATION_GROUPS[@]}"; then
+  printf 'the docker group belongs to stage_docker, not WORKSTATION_GROUPS\n' >&2
+  exit 1
+fi
+array_has kvm "${WORKSTATION_GROUPS[@]}"
+array_has dialout "${WORKSTATION_GROUPS[@]}"
+
+# Git ships no credential manager of its own on Linux: the upstream build
+# provides only cache (memory) and store (plaintext). GCM comes from its GitHub
+# release, so it needs a project entry for the currency check to compare against.
+array_has git-credential-manager "${PROVIDERS_LINUX_UPSTREAM[@]}"
+if ! upstream_has_project git-credential-manager; then
+  printf 'git-credential-manager must declare a project in UPSTREAM_RELEASE_PROJECTS\n' >&2
+  exit 1
+fi
+
+# GCM persists nothing on Linux until a store is named, so an empty value here
+# would install a helper that silently forgets every credential.
+case "${GCM_CREDENTIAL_STORE:-}" in
+  secretservice|gpg|cache|plaintext) ;;
+  *) printf 'GCM_CREDENTIAL_STORE must name a store GCM supports on Linux\n' >&2; exit 1 ;;
+esac
+
+# Flatpak comes from the distribution; adding a PPA would contradict the
+# Flathub setup guide this follows.
+array_has flatpak "${PACKAGES_APT[@]}"
+array_has gnome-software-plugin-flatpak "${PACKAGES_APT_FLATPAK_DESKTOP[@]}"
+if array_has gnome-software-plugin-flatpak "${PACKAGES_APT[@]}"; then
+  printf 'the GNOME Software plugin is a GUI app; keep it out of the base apt list\n' >&2
+  exit 1
+fi
+case "$FLATHUB_REMOTE_URL" in
+  https://dl.flathub.org/repo/flathub.flatpakrepo) ;;
+  *) printf 'FLATHUB_REMOTE_URL must be the official Flathub repo file\n' >&2; exit 1 ;;
+esac
+
+# Visual Studio Code comes from Microsoft's own archive on Linux and Homebrew on
+# macOS. It must not appear in PACKAGES_APT, which would let the distribution
+# answer to the name if the vendor archive failed to register.
+array_has code "${PROVIDERS_LINUX_OFFICIAL_REPO[@]}"
+array_has visual-studio-code "${PACKAGES_BREW_CASK[@]}"
+if array_has code "${PACKAGES_APT[@]}"; then
+  printf 'code is vendor-archive-owned; remove it from PACKAGES_APT\n' >&2
+  exit 1
+fi
+case "$VSCODE_APT_URI" in
+  https://packages.microsoft.com/repos/code) ;;
+  *) printf 'VSCODE_APT_URI must be the Microsoft code repository\n' >&2; exit 1 ;;
+esac
+
+# The GNOME tools are conditional on GNOME Shell, so they are listed apart from
+# the unconditional apt set rather than mixed into it.
+array_has gnome-shell-extension-manager "${PACKAGES_APT_GNOME[@]}"
+if array_has gnome-shell-extension-manager "${PACKAGES_APT[@]}"; then
+  printf 'the GNOME extension manager is conditional; keep it out of PACKAGES_APT\n' >&2
+  exit 1
+fi
 
 printf 'provider manifest tests: ok\n'

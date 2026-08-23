@@ -394,11 +394,33 @@ stage_git_config() {
   git_config_set_default "$dst" url."git@github.com:".pushInsteadOf https://github.com/
   git_config_set_default "$dst" url."git@gist.github.com:".pushInsteadOf https://gist.github.com/
 
+  # Git Credential Manager handles the HTTPS remotes gh does not: Azure DevOps,
+  # GitLab, Bitbucket. It is set globally, then cleared again for GitHub below.
+  if [[ "$OS_KIND" == linux ]] && command -v git-credential-manager >/dev/null 2>&1; then
+    local existing_helper
+    existing_helper=$(git config -f "$dst" --get credential.helper 2>/dev/null || true)
+    if [[ -n "$existing_helper" && "$existing_helper" != git-credential-manager ]]; then
+      # Somebody chose this. Leave it and say so, rather than redirecting their
+      # credentials to a different store behind their back.
+      warn "keeping the configured credential.helper '$existing_helper'; git-credential-manager is installed but not wired up"
+    else
+      git_config_set_default "$dst" credential.helper git-credential-manager
+      git_config_set_default "$dst" credential.credentialStore "${GCM_CREDENTIAL_STORE:-secretservice}"
+    fi
+  fi
+
   local credential_key helper
   for credential_key in \
     credential.https://github.com.helper \
     credential.https://gist.github.com.helper; do
     helper="!$gh_bin auth git-credential"
+    # git accumulates helpers rather than replacing them, so a global helper
+    # would also be consulted for GitHub. An empty value resets the list, which
+    # keeps gh the only helper asked about these hosts.
+    if ! git config -f "$dst" --get-all "$credential_key" 2>/dev/null | grep -Fxq ""; then
+      git config -f "$dst" --add "$credential_key" ""
+      GIT_CONFIG_CHANGED=1
+    fi
     if ! git config -f "$dst" --get-all "$credential_key" 2>/dev/null | grep -Fxq "$helper"; then
       git config -f "$dst" --add "$credential_key" "$helper"
       GIT_CONFIG_CHANGED=1

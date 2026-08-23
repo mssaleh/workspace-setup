@@ -64,8 +64,42 @@ config_is_legacy_link() {
   [[ -e "$dst" && "$dst" -ef "$src" ]]
 }
 
+# config_adopt_requested <destination> — true when the operator has asked for
+# the shipped version of this file to replace what is on the host.
+#
+# Without this a conflict is permanent: the file is preserved on every run and
+# postflight reports the same failure forever, with no supported way to say "I
+# have read the difference, take yours". CONFIG_ADOPT holds either `all` or a
+# colon-separated list of destination paths.
+config_adopt_requested() {
+  local dst="$1" entry
+  [[ -n "${CONFIG_ADOPT:-}" ]] || return 1
+  [[ "$CONFIG_ADOPT" == all ]] && return 0
+  local IFS=:
+  for entry in $CONFIG_ADOPT; do
+    [[ "$entry" == "$dst" || "$entry" == "$(basename "$dst")" ]] && return 0
+  done
+  return 1
+}
+
 config_record_conflict() {
-  local dst="$1"
+  local dst="$1" src="${2:-}"
+
+  # Adopting keeps a timestamped copy first. The user's content is never
+  # discarded, only moved aside, so a wrong call is recoverable.
+  if [[ -n "$src" ]] && config_adopt_requested "$dst"; then
+    local backup
+    backup="${dst}.superseded.$(date +%Y%m%d%H%M%S)"
+    if cp -p "$dst" "$backup" 2>/dev/null \
+       && config_atomic_replace "$src" "$dst"; then
+      CONFIG_UPGRADED_COUNT=$((CONFIG_UPGRADED_COUNT + 1))
+      CONFIG_LAST_ACTION=upgraded
+      info "adopted the shipped version of $dst (previous content kept at $backup)"
+      return 0
+    fi
+    warn "could not adopt $dst; preserving what is there"
+  fi
+
   CONFIG_CONFLICT_COUNT=$((CONFIG_CONFLICT_COUNT + 1))
   CONFIG_CONFLICT_PATHS="${CONFIG_CONFLICT_PATHS}${CONFIG_CONFLICT_PATHS:+
 }${dst}"
@@ -225,6 +259,11 @@ install_regular_file() {
     fi
   fi
 
-  config_record_conflict "$dst"
+  # The only conflict where installing the shipped file is meaningful: a regular
+  # file whose content simply is not recognised. CONFIG_ADOPT resolves it;
+  # without that it stays preserved exactly as before.
+  config_record_conflict "$dst" "$src"
+  [[ "$CONFIG_LAST_ACTION" == conflict ]] || return 0
   warn "  content is neither current nor a known historical setup version"
+  warn "  adopt the shipped version with: CONFIG_ADOPT=$(basename "$dst") bash setup.sh"
 }

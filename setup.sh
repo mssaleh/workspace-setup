@@ -21,6 +21,22 @@
 #   SKIP_DOCKER — set to 1 to skip Docker Engine (Linux only)
 #   SKIP_CONTAINER — set to 1 to skip Apple Container (macOS only)
 #   SKIP_LIBREOFFICE — set to 1 to skip LibreOffice (both platforms)
+#   CONFIG_ADOPT — resolve preserved configuration conflicts by installing the
+#                shipped version. Either `all` or a colon-separated list of
+#                paths or basenames. The existing content is copied to
+#                <path>.superseded.<timestamp> first, never discarded.
+#   UPDATE_SYSTEM — set to 1 to also apply system updates (Linux only): apt
+#                full-upgrade, autoremove, snap, flatpak, uv. Off by default
+#                because full-upgrade may remove packages.
+#   UPDATE_FIRMWARE — set to 1 to also apply firmware updates. Off by default:
+#                on a host with a TPM-sealed LUKS key this changes PCR 7 and the
+#                next boot asks for the recovery key.
+#   SKIP_VSCODE — set to 1 to skip Visual Studio Code (both platforms)
+#   SKIP_GNOME_EXTENSIONS — set to 1 to skip the GNOME Shell extension manager.
+#                It is installed only where GNOME Shell itself is present.
+#   SKIP_FLATPAK — set to 1 to skip Flatpak and the Flathub remote (Linux only)
+#   SKIP_FLATPAK_DESKTOP — set to 1 to add Flathub without the GNOME Software
+#                plugin, for a host with no desktop store
 #   SKIP_CLAUDE_DESKTOP — set to 1 to skip the Claude Desktop app (Linux only)
 #   SKIP_CODEX_APP — set to 1 to skip the Codex app (Linux only)
 #   SKIP_HEADLESS_CREDENTIALS — set to 1 to skip the check that credentials are
@@ -157,6 +173,12 @@ fi
 # shellcheck disable=SC1091
 . "$(repo_dir)/scripts/stage_docker.sh"
 # shellcheck disable=SC1091
+. "$(repo_dir)/scripts/stage_groups.sh"
+# shellcheck disable=SC1091
+. "$(repo_dir)/scripts/stage_flatpak.sh"
+# shellcheck disable=SC1091
+. "$(repo_dir)/scripts/stage_update.sh"
+# shellcheck disable=SC1091
 . "$(repo_dir)/scripts/stage_dotfiles.sh"
 # shellcheck disable=SC1091
 . "$(repo_dir)/scripts/stage_toolchains.sh"
@@ -189,8 +211,14 @@ main() {
   if [[ "$OS_KIND" == linux && -z "${SKIP_DOCKER:-}" ]]; then
     stage "docker: official Docker Engine (Linux)"    stage_docker
   fi
+  if [[ "$OS_KIND" == linux ]]; then
+    stage "groups: device access for the console user" stage_groups
+  fi
   stage "toolchains: rustup + uv + agent CLIs"      stage_toolchains
   stage "configuration: converge regular files"    stage_dotfiles
+  if [[ "$OS_KIND" == linux && -z "${SKIP_FLATPAK:-}" ]]; then
+    stage "flatpak: runtime + Flathub remote"        stage_flatpak
+  fi
   if [[ "$OS_KIND" == macos && -z "${SKIP_CONTAINER:-}" ]]; then
     stage "containers: Apple Container (macOS)"      stage_container
   fi
@@ -202,6 +230,10 @@ main() {
     # After the font stage, so the family it installs already exists when the
     # GNOME terminal is pointed at it.
     stage "terminal profile: GNOME parity with kitty" stage_terminal_profile
+  fi
+
+  if [[ "$OS_KIND" == linux && "${UPDATE_SYSTEM:-}" == 1 ]]; then
+    stage "update: bring the host current"          stage_update
   fi
 
   if ! stage "postflight: verify the converged host" stage_postflight; then
