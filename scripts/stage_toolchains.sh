@@ -177,7 +177,10 @@ stage_toolchains() {
     warn "preserving an existing path that blocks the native Codex artifact: ~/.local/bin/codex"
   else
     info "installing OpenAI Codex CLI (official native installer)…"
-    if curl -fsSL https://chatgpt.com/codex/install.sh | sh 2>/dev/null; then
+    # CODEX_NON_INTERACTIVE is the installer's own documented switch for
+    # skipping prompts.
+    if curl -fsSL https://chatgpt.com/codex/install.sh \
+         | CODEX_NON_INTERACTIVE=1 sh 2>/dev/null; then
       ok "codex installed via native installer → ~/.local/bin/codex"
     else
       warn "Codex native installer failed — install manually: curl -fsSL https://chatgpt.com/codex/install.sh | sh"
