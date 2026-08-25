@@ -115,6 +115,65 @@ grep -Eq '^cpus = 3$' "$container_dst"
 grep -Eq '^\[registry\]$' "$container_dst"
 [[ "$CONFIG_LAST_ACTION" == merged ]]
 
+# ~/.ssh/config is a file the setup tells you to edit, so an edited one must
+# converge rather than conflict forever. Only the two security directives are
+# asserted; connection tuning and host blocks are the user's.
+ssh_src="$TEST_ROOT/dotfiles/ssh/config"
+ssh_dst="$TEST_TMP/ssh-config"
+# Host * is deliberately not the last block: a directive appended at end of
+# file would land in the trailing block and apply to that host alone.
+printf '%s\n' 'Host mini' '    User someone' '    IdentityFile ~/.ssh/id_ed25519' \
+  '' 'Host *' '    ServerAliveCountMax 360' '    TCPKeepAlive no' \
+  '' 'Host trailing' '    User other' > "$ssh_dst"
+install_regular_file "$ssh_src" "$ssh_dst" dotfiles/ssh/config 0600 merge_ssh_config
+[[ "$CONFIG_LAST_ACTION" == merged ]]
+ssh -G -F "$ssh_dst" localhost >/dev/null 2>&1
+# The user's own tuning and host block survive untouched.
+grep -Eq '^    ServerAliveCountMax 360$' "$ssh_dst"
+grep -Eq '^Host mini$' "$ssh_dst"
+grep -Eq '^Host trailing$' "$ssh_dst"
+# Neither directive may land in the specific block; both belong to Host *.
+awk '/^Host \*$/ { in_default = 1; next } /^Host /{ in_default = 0 }
+     /HashKnownHosts|UpdateHostKeys/ && !in_default { bad = 1 }
+     END { exit bad }' "$ssh_dst"
+# And they must be in force, not merely written.
+[[ "$(ssh -G -F "$ssh_dst" localhost 2>/dev/null | awk '$1 == "hashknownhosts" { print $2 }')" == yes ]]
+[[ "$(ssh -G -F "$ssh_dst" localhost 2>/dev/null | awk '$1 == "updatehostkeys" { print $2 }')" == true ]]
+
+# Re-running writes nothing.
+ssh_hash_before=$(config_sha256 "$ssh_dst")
+install_regular_file "$ssh_src" "$ssh_dst" dotfiles/ssh/config 0600 merge_ssh_config
+[[ "$CONFIG_LAST_ACTION" == unchanged ]]
+[[ "$(config_sha256 "$ssh_dst")" == "$ssh_hash_before" ]]
+
+# A directive the user has set is a decision, whatever its value.
+ssh_optout="$TEST_TMP/ssh-config-optout"
+printf '%s\n' 'Host *' '    HashKnownHosts no' > "$ssh_optout"
+install_regular_file "$ssh_src" "$ssh_optout" dotfiles/ssh/config 0600 merge_ssh_config
+grep -Eq '^[[:space:]]*HashKnownHosts no$' "$ssh_optout" || {
+  printf 'a deliberate HashKnownHosts opt-out was overwritten\n' >&2
+  exit 1
+}
+grep -Eq '^[[:space:]]*UpdateHostKeys yes$' "$ssh_optout"
+
+# Without a Host * block there is nowhere a default can safely go, and a file
+# ssh cannot parse is not one to merge into. Both are reported, not guessed at.
+for ssh_bad_content in 'Host example\n    User x\n' 'Host *\n    NotARealKeyword yes\n'; do
+  ssh_bad="$TEST_TMP/ssh-config-bad"
+  # shellcheck disable=SC2059 # the fixture bodies carry their own escapes
+  printf "$ssh_bad_content" > "$ssh_bad"
+  ssh_bad_hash=$(config_sha256 "$ssh_bad")
+  install_regular_file "$ssh_src" "$ssh_bad" dotfiles/ssh/config 0600 merge_ssh_config
+  [[ "$CONFIG_LAST_ACTION" == conflict ]] || {
+    printf 'an unmergeable ssh config was not reported: %s\n' "$ssh_bad_content" >&2
+    exit 1
+  }
+  [[ "$(config_sha256 "$ssh_bad")" == "$ssh_bad_hash" ]] || {
+    printf 'an unmergeable ssh config was modified anyway\n' >&2
+    exit 1
+  }
+done
+
 # ~/.npmrc is npm's own file. The setup fills in the two keys it needs and
 # leaves the rest alone, so re-running writes nothing and a user's registry,
 # proxy, or self-chosen prefix survives.

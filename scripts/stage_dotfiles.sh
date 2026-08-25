@@ -127,6 +127,99 @@ merge_opencode_settings() {
   rm -f "$tmp"
 }
 
+# ~/.ssh/config is a file this setup asks you to edit — the shipped version
+# carries an example Host block and says so — which makes its content yours,
+# not ours. Only two settings are asserted as a baseline: HashKnownHosts, so a
+# stolen known_hosts does not enumerate every host you reach, and
+# UpdateHostKeys, so a server's key rotation is picked up rather than looking
+# like an attack. Connection behaviour — timeouts, multiplexing, keepalives —
+# belongs to whoever tuned it for their own network.
+#
+# A directive already written, with any value, is a decision and is left alone.
+# Both baseline directives are booleans; a non-boolean addition would need
+# ssh_config_is_enabled extended to check it.
+ssh_config_declares() {
+  grep -Eiq "^[[:space:]]*$1([[:space:]]|=)" "$2"
+}
+
+ssh_config_parses() {
+  ssh -G -F "$1" localhost >/dev/null 2>&1
+}
+
+# ssh does not normalise its booleans consistently: HashKnownHosts resolves to
+# yes/no while UpdateHostKeys resolves to true/false, so read the effective
+# value rather than comparing against the literal that was written.
+ssh_config_is_enabled() {
+  local value
+  value=$(ssh -G -F "$1" localhost 2>/dev/null \
+    | awk -v key="$(printf '%s' "$2" | tr '[:upper:]' '[:lower:]')" \
+        '$1 == key { print $2; exit }')
+  [[ "$value" == yes || "$value" == true ]]
+}
+
+merge_ssh_config() {
+  local _src="$1" dst="$2" mode="$3" tmp keyword value
+  local -a added=()
+
+  # An unparseable file is not something to merge into; postflight reports it.
+  ssh_config_parses "$dst" || return 1
+  grep -Eq '^[[:space:]]*Host[[:space:]]+\*[[:space:]]*$' "$dst" || return 1
+
+  tmp=$(mktemp "${TMPDIR:-/tmp}/ssh-config.XXXXXX") || return 1
+  if ! cp "$dst" "$tmp"; then
+    rm -f "$tmp"
+    return 1
+  fi
+
+  while read -r keyword value; do
+    [[ -n "$keyword" ]] || continue
+    ssh_config_declares "$keyword" "$tmp" && continue
+    # Insert inside the `Host *` block instead of appending: a Host or Match
+    # line further down would otherwise capture the directive.
+    if ! awk -v line="    $keyword $value" '
+        { print }
+        !inserted && /^[[:space:]]*Host[[:space:]]+\*[[:space:]]*$/ {
+          print line
+          inserted = 1
+        }
+      ' "$tmp" > "$tmp.next"; then
+      rm -f "$tmp" "$tmp.next"
+      return 1
+    fi
+    mv -f "$tmp.next" "$tmp"
+    added+=("$keyword")
+  done <<'BASELINE'
+HashKnownHosts yes
+UpdateHostKeys yes
+BASELINE
+
+  if ((${#added[@]} == 0)); then
+    rm -f "$tmp"
+    CONFIG_MERGE_ACTION=unchanged
+    return 0
+  fi
+
+  # Prove the result before it replaces anything: it must still parse, and
+  # every directive added must actually be in force.
+  if ! ssh_config_parses "$tmp"; then
+    rm -f "$tmp"
+    return 1
+  fi
+  for keyword in "${added[@]}"; do
+    if ! ssh_config_is_enabled "$tmp" "$keyword"; then
+      rm -f "$tmp"
+      return 1
+    fi
+  done
+
+  if ! config_atomic_replace "$tmp" "$dst" "$mode"; then
+    rm -f "$tmp"
+    return 1
+  fi
+  rm -f "$tmp"
+  CONFIG_MERGE_ACTION=merged
+}
+
 # ~/.npmrc is npm's own config, not something this setup owns outright: a user
 # may legitimately have set a registry, a proxy, or their own prefix. Only the
 # keys that are absent are filled in, so a second run writes nothing and a
@@ -509,7 +602,7 @@ stage_dotfiles() {
   chmod 0700 "$HOME/.ssh"
   mkdir -p "$HOME/.ssh/controlmasters"
   chmod 0700 "$HOME/.ssh/controlmasters"
-  install_repo_config "$repo" dotfiles/ssh/config "$HOME/.ssh/config" 0600
+  install_repo_config "$repo" dotfiles/ssh/config "$HOME/.ssh/config" 0600 merge_ssh_config
 
   ok "configuration: installed=$CONFIG_INSTALLED_COUNT migrated=$CONFIG_MIGRATED_COUNT upgraded=$CONFIG_UPGRADED_COUNT merged=$CONFIG_MERGED_COUNT unchanged=$CONFIG_UNCHANGED_COUNT conflicts=$CONFIG_CONFLICT_COUNT"
 }
