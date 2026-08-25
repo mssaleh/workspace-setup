@@ -31,6 +31,10 @@ printf '%s\n' '{}' > "$HOME/.config/uv/uv-receipt.json"
 # shellcheck disable=SC1091
 . "$TEST_ROOT/scripts/stage_toolchains.sh"
 
+# The real setup sources lib/upstream.sh before this stage. This fixture keeps
+# publisher-installed artifacts fixed, so no network update is requested.
+upstream_artifact_needed() { return 1; }
+
 stage_toolchains
 [[ -L "$HOME/.local/bin/opencode" ]]
 [[ "$(readlink "$HOME/.local/bin/opencode")" == "$HOME/.opencode/bin/opencode" ]]
