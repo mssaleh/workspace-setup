@@ -326,69 +326,39 @@ postflight_agent_skills() {
   fi
 }
 
+# Homebrew formulae and casks are verified by postflight_macos_packages, which
+# also knows the host role and the narrow macOS skip controls.
 postflight_packages() {
+  [[ "$OS_KIND" == linux ]] || return 0
+
   local missing=() pkg
-  if [[ "$PKGMGR" == brew ]]; then
-    for pkg in "${PACKAGES_BREW[@]}"; do
-      [[ "$pkg" == container-compose && -n "${SKIP_CONTAINER:-}" ]] && continue
-      pkg_installed "$pkg" || missing+=("$pkg")
-    done
-    if ((${#missing[@]} == 0)); then
-      postflight_pass "all Homebrew formulae in the provider manifest are installed"
-    else
-      postflight_fail "missing Homebrew formulae: ${missing[*]}"
+  for pkg in "${PACKAGES_APT[@]}"; do
+    # Only require a manifest package when this distro release advertises it.
+    if apt-cache show "$pkg" >/dev/null 2>&1 && ! pkg_installed "$pkg"; then
+      missing+=("$pkg")
     fi
-
-    if [[ -z "${SKIP_FONT:-}" ]]; then
-      missing=()
-      for pkg in "${PACKAGES_BREW_CASK[@]}"; do
-        [[ "$pkg" == libreoffice && -n "${SKIP_LIBREOFFICE:-}" ]] && continue
-        [[ "$pkg" == visual-studio-code && -n "${SKIP_VSCODE:-}" ]] && continue
-        "$BREW_BIN" list --cask "$pkg" >/dev/null 2>&1 && continue
-        # An application installed directly satisfies the same need. The
-        # install stage preserves it rather than adding a second copy, so
-        # counting it missing here would be an unresolvable failure.
-        if brew_cask_existing_artifact "$pkg" >/dev/null; then
-          postflight_pass "$pkg provided by an existing application outside Homebrew"
-          continue
-        fi
-        missing+=("$pkg")
-      done
-      if ((${#missing[@]} == 0)); then
-        postflight_pass "requested Homebrew casks are installed"
-      else
-        postflight_fail "missing Homebrew casks: ${missing[*]}"
-      fi
-    fi
+  done
+  if ((${#missing[@]} == 0)); then
+    postflight_pass "all available apt packages in the provider manifest are installed"
   else
-    for pkg in "${PACKAGES_APT[@]}"; do
-      # Only require a manifest package when this distro release advertises it.
-      if apt-cache show "$pkg" >/dev/null 2>&1 && ! pkg_installed "$pkg"; then
-        missing+=("$pkg")
-      fi
-    done
-    if ((${#missing[@]} == 0)); then
-      postflight_pass "all available apt packages in the provider manifest are installed"
-    else
-      postflight_fail "missing apt packages: ${missing[*]}"
-    fi
+    postflight_fail "missing apt packages: ${missing[*]}"
+  fi
 
-    local alias_name provider_name alias_failures=()
-    while read -r alias_name provider_name; do
-      if command -v "$provider_name" >/dev/null 2>&1 \
-          && ! command -v "$alias_name" >/dev/null 2>&1; then
-        alias_failures+=("$alias_name→$provider_name")
-      fi
-    done <<'ALIASES'
+  local alias_name provider_name alias_failures=()
+  while read -r alias_name provider_name; do
+    if command -v "$provider_name" >/dev/null 2>&1 \
+        && ! command -v "$alias_name" >/dev/null 2>&1; then
+      alias_failures+=("$alias_name→$provider_name")
+    fi
+  done <<'ALIASES'
 fd fdfind
 bat batcat
 7zz 7z
 ALIASES
-    if ((${#alias_failures[@]} == 0)); then
-      postflight_pass "Linux package command names are usable"
-    else
-      postflight_fail "unusable Linux command aliases: ${alias_failures[*]}"
-    fi
+  if ((${#alias_failures[@]} == 0)); then
+    postflight_pass "Linux package command names are usable"
+  else
+    postflight_fail "unusable Linux command aliases: ${alias_failures[*]}"
   fi
 }
 
@@ -826,39 +796,21 @@ postflight_headless_credentials() {
   fi
 }
 
+# Apple Container is verified by postflight_macos_containers, which also knows
+# whether the system was asked to be resident or left stopped on demand.
 postflight_containers() {
-  if [[ "$OS_KIND" == macos ]]; then
-    [[ -n "${SKIP_CONTAINER:-}" ]] && return 0
-    if [[ -x /usr/local/bin/container ]] \
-        && pkgutil --pkg-info com.apple.container-installer >/dev/null 2>&1 \
-        && [[ "$(command -v container 2>/dev/null)" == /usr/local/bin/container ]]; then
-      postflight_pass "Apple Container signed-pkg artifact exists"
-    else
-      postflight_fail "Apple Container binary, installer receipt, or PATH ownership is incomplete"
-      return 0
-    fi
-    if /usr/local/bin/container system status >/dev/null 2>&1; then
-      postflight_pass "Apple Container system is ready"
-    else
-      postflight_fail "Apple Container system is not ready"
-    fi
-    if command -v container-compose >/dev/null 2>&1; then
-      postflight_pass "container-compose is available"
-    else
-      postflight_fail "container-compose is missing"
-    fi
+  [[ "$OS_KIND" == linux ]] || return 0
+  [[ -n "${SKIP_DOCKER:-}" ]] && return 0
+
+  if command -v docker >/dev/null 2>&1 && sudo docker info >/dev/null 2>&1; then
+    postflight_pass "Docker Engine responds"
   else
-    [[ -n "${SKIP_DOCKER:-}" ]] && return 0
-    if command -v docker >/dev/null 2>&1 && sudo docker info >/dev/null 2>&1; then
-      postflight_pass "Docker Engine responds"
-    else
-      postflight_fail "Docker Engine does not respond"
-    fi
-    if sudo docker compose version >/dev/null 2>&1; then
-      postflight_pass "Docker Compose v2 responds"
-    else
-      postflight_fail "Docker Compose v2 does not respond"
-    fi
+    postflight_fail "Docker Engine does not respond"
+  fi
+  if sudo docker compose version >/dev/null 2>&1; then
+    postflight_pass "Docker Compose v2 responds"
+  else
+    postflight_fail "Docker Compose v2 does not respond"
   fi
 }
 

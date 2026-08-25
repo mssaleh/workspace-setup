@@ -19,11 +19,21 @@ repo_dir() { printf '%s\n' "$REPO_DIR"; }
 # shellcheck disable=SC1091
 . "$TEST_ROOT/lib/log.sh"
 # shellcheck disable=SC1091
+. "$TEST_ROOT/lib/os.sh"
+# shellcheck disable=SC1091
+. "$TEST_ROOT/lib/macos.sh"
+# shellcheck disable=SC1091
 . "$TEST_ROOT/lib/config.sh"
 # shellcheck disable=SC1091
 . "$TEST_ROOT/scripts/stage_dotfiles.sh"
+# stage_dotfiles converges the Apple Container config on a Mac, and that
+# function lives in the Darwin module setup.sh sources there.
+# shellcheck disable=SC1091
+. "$TEST_ROOT/scripts/stage_macos_container_config.sh"
 # shellcheck disable=SC1091
 . "$TEST_ROOT/scripts/stage_postflight.sh"
+# shellcheck disable=SC1091
+. "$TEST_ROOT/scripts/stage_macos_postflight.sh"
 
 KITTY_SRC="$TEST_ROOT/dotfiles/config/kitty"
 
@@ -141,6 +151,25 @@ stage_and_check() {
 
 stage_and_check linux platform-linux.conf
 stage_and_check macos platform-macos.conf
+
+# macOS postflight checks the composition boundary as well as file presence.
+HOME="$TEST_TMP/home-macos"
+OS_KIND=macos
+HOST_PROFILE=workstation
+SKIP_FONT='' SKIP_KITTY=''
+export HOME OS_KIND HOST_PROFILE SKIP_FONT SKIP_KITTY
+POSTFLIGHT_PASSES=0 POSTFLIGHT_FAILURES=0
+postflight_macos_kitty_platform_layer >/dev/null
+[[ "$POSTFLIGHT_FAILURES" == 0 ]] \
+  || fail_test 'postflight rejects the correctly staged macOS Kitty composition'
+
+sed '/^include platform\.conf$/d' "$HOME/.config/kitty/kitty.conf" \
+  > "$HOME/.config/kitty/kitty.conf.without-platform"
+mv "$HOME/.config/kitty/kitty.conf.without-platform" "$HOME/.config/kitty/kitty.conf"
+POSTFLIGHT_PASSES=0 POSTFLIGHT_FAILURES=0
+postflight_macos_kitty_platform_layer >/dev/null 2>&1
+[[ "$POSTFLIGHT_FAILURES" == 1 ]] \
+  || fail_test 'postflight accepts a macOS kitty.conf that drops its platform layer'
 
 # ── 5. Postflight must reject a Linux host holding the macOS layer ──────────
 # This is the silent-convergence case the whole split exists to prevent.

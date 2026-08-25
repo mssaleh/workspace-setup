@@ -39,6 +39,12 @@ unset SSH_KEY_PASSPHRASE
   printf 'FAIL: Linux must default to a passphrase-protected key\n' >&2
   exit 1
 }
+SSH_KEY_PASSPHRASE=historical-non-none-value
+[[ "$(ssh_key_use_passphrase)" == yes ]] || {
+  printf 'FAIL: a macOS-only passphrase validation changed the Linux interface\n' >&2
+  exit 1
+}
+unset SSH_KEY_PASSPHRASE
 OS_KIND=macos
 [[ "$(ssh_key_use_passphrase)" == no ]] || {
   printf 'FAIL: macOS must default to a passphrase-less key\n' >&2

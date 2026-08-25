@@ -30,8 +30,9 @@ SKIP_FONT=1
 SKIP_CONTAINER=1
 SKIP_DOCKER=1
 SKIP_SSH=1
+SKIP_COMPLETIONS=1
 export REPO_DIR HOME USER OS_KIND DISTRO PKGMGR BREW_BIN BREW_PREFIX
-export SKIP_FONT SKIP_CONTAINER SKIP_DOCKER SKIP_SSH
+export SKIP_FONT SKIP_CONTAINER SKIP_DOCKER SKIP_SSH SKIP_COMPLETIONS
 mkdir -p "$HOME/.local/bin" "$HOME/.cargo/bin" "$HOME/.config/uv"
 
 repo_dir() { printf '%s\n' "$REPO_DIR"; }
@@ -40,13 +41,25 @@ repo_dir() { printf '%s\n' "$REPO_DIR"; }
 # shellcheck disable=SC1091
 . "$TEST_ROOT/lib/os.sh"
 # shellcheck disable=SC1091
+. "$TEST_ROOT/lib/macos.sh"
+# shellcheck disable=SC1091
 . "$TEST_ROOT/lib/manifest.sh"
 # shellcheck disable=SC1091
 . "$TEST_ROOT/lib/config.sh"
 # shellcheck disable=SC1091
 . "$TEST_ROOT/scripts/stage_dotfiles.sh"
 # shellcheck disable=SC1091
+. "$TEST_ROOT/scripts/stage_macos_container_config.sh"
+# stage_macos_cli links through the shared ensure_cli_symlink helper, so the
+# fixture loads the same files setup.sh does.
+# shellcheck disable=SC1091
+. "$TEST_ROOT/scripts/stage_fonts_terminal.sh"
+# shellcheck disable=SC1091
+. "$TEST_ROOT/scripts/stage_macos_cli.sh"
+# shellcheck disable=SC1091
 . "$TEST_ROOT/scripts/stage_postflight.sh"
+# shellcheck disable=SC1091
+. "$TEST_ROOT/scripts/stage_macos_postflight.sh"
 
 # Keep this focused on the unified checks rather than the host's package list.
 PACKAGES_BREW=()
@@ -68,8 +81,13 @@ mkdir -p "$HOME/.claude"
 printf '%s\n' '{"claudeAiOauth":{}}' > "$HOME/.claude/.credentials.json"
 chmod 600 "$HOME/.claude/.credentials.json"
 
+# Directory Services may be unavailable for a synthetic/remote identity. The
+# postflight must then inspect SHELL instead of allowing pipefail to abort it.
+dscl() { return 56; }
+
 stage_dotfiles
-stage_postflight
+stage_macos_cli
+stage_macos_postflight
 [[ "$POSTFLIGHT_FAILURES" == 0 ]]
 
 printf 'postflight tests: ok\n'

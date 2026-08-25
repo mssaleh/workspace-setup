@@ -127,31 +127,6 @@ merge_opencode_settings() {
   rm -f "$tmp"
 }
 
-# Preserve user-tuned CPU/memory values. The only automatic semantic migration
-# is adding the registry default introduced after the original setup.
-merge_container_config() {
-  local _src="$1" dst="$2" mode="$3" tmp
-  grep -Eq '^\[build\][[:space:]]*$' "$dst" || return 1
-  grep -Eq '^[[:space:]]*cpus[[:space:]]*=' "$dst" || return 1
-  grep -Eq '^[[:space:]]*memory[[:space:]]*=' "$dst" || return 1
-  grep -Eq '^[[:space:]]*rosetta[[:space:]]*=' "$dst" || return 1
-
-  if grep -Eq '^\[registry\][[:space:]]*$' "$dst"; then
-    # A custom registry is a legitimate user preference. If the section is
-    # complete, the existing file is already semantically compliant.
-    grep -Eq '^[[:space:]]*domain[[:space:]]*=' "$dst" || return 1
-    CONFIG_MERGE_ACTION=unchanged
-    return 0
-  fi
-
-  tmp=$(mktemp "${TMPDIR:-/tmp}/container-config.XXXXXX") || return 1
-  cp "$dst" "$tmp"
-  printf '\n[registry]\ndomain = "docker.io"\n' >> "$tmp"
-  config_atomic_replace "$tmp" "$dst" "$mode" || { rm -f "$tmp"; return 1; }
-  rm -f "$tmp"
-  CONFIG_MERGE_ACTION=merged
-}
-
 # ~/.npmrc is npm's own config, not something this setup owns outright: a user
 # may legitimately have set a registry, a proxy, or their own prefix. Only the
 # keys that are absent are filled in, so a second run writes nothing and a
@@ -432,24 +407,6 @@ stage_git_config() {
   fi
 }
 
-stage_container_config() {
-  local repo="$1" cpus mem_mb tmp dst="$HOME/.config/container/config.toml"
-  cpus=$(sysctl -n hw.ncpu 2>/dev/null || printf '%s' 8)
-  mem_mb=$(($(sysctl -n hw.memsize 2>/dev/null || printf '%s' 0) / 1024 / 1024))
-  mem_mb=$((mem_mb * 3 / 4))
-  ((mem_mb > 18432)) && mem_mb=18432
-  ((mem_mb < 4096)) && mem_mb=4096
-
-  tmp=$(mktemp "${TMPDIR:-/tmp}/container-config.XXXXXX") || return 1
-  sed -e "s|\${CPUS}|$cpus|g" -e "s|\${MEM_MB}|$mem_mb|g" \
-    "$repo/dotfiles/config/container/config.toml" > "$tmp"
-  install_regular_file "$tmp" "$dst" generated/container-config 0644 merge_container_config
-  case "$CONFIG_LAST_ACTION" in
-    installed|migrated|upgraded|merged) CONTAINER_CONFIG_CHANGED=1 ;;
-  esac
-  rm -f "$tmp"
-}
-
 stage_dotfiles() {
   local repo
   repo=$(repo_dir)
@@ -530,6 +487,8 @@ stage_dotfiles() {
       "$HOME/.config/environment.d/10-ssh-agent.conf"
   fi
 
+  # stage_container_config lives in scripts/stage_macos_container_config.sh,
+  # which setup.sh sources only after it has detected Darwin.
   if [[ "$OS_KIND" == macos && -z "${SKIP_CONTAINER:-}" ]]; then
     stage_container_config "$repo"
   fi

@@ -7,8 +7,15 @@
 # created under $HOME.
 # shellcheck disable=SC2034 # arrays are consumed by separately sourced stages
 
-# macOS system/toolbox formulae. uv is intentionally present as a Homebrew
-# backup while the Astral standalone install in ~/.local/bin is the PATH winner.
+# macOS system/toolbox formulae. This list is consumed only where PKGMGR is
+# brew, so it carries nothing a Mac does not want: xsel is an X11 clipboard
+# client and lives in PACKAGES_APT alone.
+#
+# uv is intentionally present as a Homebrew backup while the Astral standalone
+# install in ~/.local/bin is the PATH winner. Both node formulae are likewise
+# deliberate: node@24 is the declared major and stage_macos_cli makes it the
+# PATH winner, while the unversioned formula stays as the keg-linked fallback
+# in $BREW_PREFIX/bin for a host where that link cannot be made.
 BREW_TAPS=(
   anomalyco/tap
   ttscoff/thelab
@@ -25,7 +32,7 @@ PACKAGES_BREW=(
   node node@24 uv ruff
   helm kubernetes-cli cosign container-compose
   ffmpeg poppler nano
-  himalaya ncdu smartmontools xsel pkgconf
+  himalaya ncdu smartmontools pkgconf
   azure-cli
   anomalyco/tap/opencode ttscoff/thelab/apex
 )
@@ -35,10 +42,14 @@ PACKAGES_BREW=(
 # counts as satisfied: two copies of one application is worse than a single
 # unmanaged one, and reporting it missing forever helps nobody.
 # Colon-delimited so macOS's bash 3.2 can read it.
+# The last two are only ever consulted when INSTALL_CHATGPT_APP or
+# INSTALL_CLAUDE_DESKTOP asks for them; an unrequested entry is inert.
 BREW_CASK_EXISTING_ARTIFACTS=(
   "maccy:/Applications/Maccy.app"
   "libreoffice:/Applications/LibreOffice.app"
   "visual-studio-code:/Applications/Visual Studio Code.app"
+  "chatgpt:/Applications/ChatGPT.app"
+  "claude:/Applications/Claude.app"
 )
 
 # brew_cask_existing_artifact <cask> — the .app a direct install would leave,

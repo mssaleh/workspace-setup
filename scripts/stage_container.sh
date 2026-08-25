@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# scripts/stage_container.sh — Apple Container on macOS.
+# scripts/stage_container.sh — Apple Container on macOS. setup.sh sources this
+# file only after detecting Darwin; the guard below is for a direct call.
 #
 # Apple Container is owned by Apple's signed installer package, not Homebrew.
 # container-compose remains a Homebrew formula (declared in manifest.sh).
@@ -10,6 +11,10 @@ apple_container_bin() {
   else
     return 1
   fi
+}
+
+rosetta_installed() {
+  [[ -d /Library/Apple/usr/libexec/oah ]]
 }
 
 install_apple_container_pkg() {
@@ -70,7 +75,7 @@ install_apple_container_pkg() {
 }
 
 stage_container() {
-  [[ "$OS_KIND" == macos ]] || { info "Linux uses Docker Engine; skipping Apple Container"; return 0; }
+  [[ "${OS_KIND:-}" == macos ]] || return 0
 
   case "$(uname -m)" in
     arm64|aarch64) ;;
@@ -91,6 +96,14 @@ stage_container() {
   if [[ -n "$container_bin" ]] \
       && pkgutil --pkg-info com.apple.container-installer >/dev/null 2>&1; then
     ok "Apple Container already installed ($("$container_bin" --version 2>/dev/null || echo present))"
+    if [[ "${UPDATE_CONTAINER:-}" == 1 ]]; then
+      if "$container_bin" system status >/dev/null 2>&1; then
+        fail "UPDATE_CONTAINER=1 requires a stopped Container system; stop workloads and run 'container system stop' first"
+      fi
+      info "updating Apple Container from the latest signed package by explicit request…"
+      install_apple_container_pkg
+      container_bin=$(apple_container_bin)
+    fi
   elif [[ -n "$container_bin" ]]; then
     warn "preserving an existing container executable without Apple's installer receipt: $container_bin"
     return 1
@@ -105,7 +118,7 @@ stage_container() {
     container_bin=$(apple_container_bin)
   fi
 
-  if [[ ! -d /Library/Apple/usr/libexec/oah ]]; then
+  if ! rosetta_installed; then
     info "installing Rosetta 2 for linux/amd64 containers…"
     sudo /usr/sbin/softwareupdate --install-rosetta --agree-to-license
   else
@@ -113,18 +126,24 @@ stage_container() {
   fi
 
   # The config is read when the API server starts. Never stop an already
-  # running system (which could interrupt user containers); report a deferred
-  # config reload instead. On a stopped/fresh system, start non-interactively
-  # and explicitly authorize the required kernel installation.
+  # running system, and do not make a laptop service resident merely because
+  # setup installed it. Starting is a separate, explicit lifecycle choice.
   if "$container_bin" system status >/dev/null 2>&1; then
     ok "Apple Container system already running"
     if [[ "${CONTAINER_CONFIG_CHANGED:-0}" == 1 ]]; then
       warn "container config changed while the system was running; it will apply after the next 'container system stop/start'"
     fi
-  else
-    info "starting Apple Container system…"
-    "$container_bin" system start --enable-kernel-install
+    return 0
   fi
+
+  if [[ "${CONTAINER_START:-}" != 1 ]]; then
+    ok "Apple Container is installed and stopped (on-demand mode)"
+    info "start it when needed with: container system start --enable-kernel-install"
+    return 0
+  fi
+
+  info "starting Apple Container system by explicit request…"
+  "$container_bin" system start --enable-kernel-install
 
   local ready=0 _attempt
   for _attempt in {1..30}; do

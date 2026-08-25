@@ -207,6 +207,20 @@ if ! upstream_has_project mgc; then
   exit 1
 fi
 
+# xsel is an X11 clipboard client. Linux keeps it; PACKAGES_BREW is read only
+# where PKGMGR is brew, so a Mac must never be asked to install it at all.
+array_has xsel "${PACKAGES_APT[@]}"
+if array_has xsel "${PACKAGES_BREW[@]}"; then
+  printf 'xsel must not be installed as a native macOS clipboard tool\n' >&2
+  exit 1
+fi
+
+# The opt-in desktop agents are recognised where a direct .dmg install already
+# provided them, so INSTALL_CHATGPT_APP/INSTALL_CLAUDE_DESKTOP never adds a
+# second copy of an application the user already has.
+array_has 'chatgpt:/Applications/ChatGPT.app' "${BREW_CASK_EXISTING_ARTIFACTS[@]}"
+array_has 'claude:/Applications/Claude.app' "${BREW_CASK_EXISTING_ARTIFACTS[@]}"
+
 # The docker group is created by the Docker postinst and joined by stage_docker.
 # Listing it here too would make a host without Docker report a missing group
 # on every run.

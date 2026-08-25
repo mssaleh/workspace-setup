@@ -12,7 +12,7 @@ mkdir -p "$fixture" "$TEST_TMP/runtime" "$TEST_TMP/home"
 # adding a library into a silent break of the streamed `curl | bash` path,
 # discovered only by whoever next installs a host that way.
 # shellcheck disable=SC2016 # the pattern matches setup.sh's literal $(repo_dir) text
-mapfile -t sourced < <(sed -n 's|^\. "\$(repo_dir)/\(.*\)"$|\1|p' "$TEST_ROOT/setup.sh")
+mapfile -t sourced < <(sed -n 's|^[[:space:]]*\. "\$(repo_dir)/\(.*\)"$|\1|p' "$TEST_ROOT/setup.sh")
 ((${#sourced[@]})) || {
   printf 'setup.sh sources nothing; the extraction pattern no longer matches\n' >&2
   exit 1
@@ -41,6 +41,21 @@ for relative in "${sourced[@]}"; do
       printf '%s\n' \
         'detect_os() { OS_KIND=test; DISTRO=test; export OS_KIND DISTRO; }' \
         'detect_pkgmgr() { PKGMGR=test; export PKGMGR; }' > "$fixture/$relative"
+      ;;
+    lib/macos.sh)
+      printf '%s\n' \
+        'detect_host_context() { HOST_PROFILE=workstation; SESSION_KIND=noninteractive; export HOST_PROFILE SESSION_KIND; }' \
+        'apply_host_profile_policy() { :; }' > "$fixture/$relative"
+      ;;
+    scripts/stage_fonts_terminal.sh)
+      printf '%s\n' 'stage_fonts_terminal() { :; }' > "$fixture/$relative"
+      ;;
+    scripts/stage_macos_graphical.sh)
+      printf '%s\n' \
+        'stage_macos_apps() { :; }' \
+        'stage_macos_fonts() { :; }' \
+        'stage_macos_kitty() { :; }' \
+        'stage_macos_terminal_profile() { :; }' > "$fixture/$relative"
       ;;
     scripts/stage_*.sh)
       # main() calls one function per stage script, named after the file.

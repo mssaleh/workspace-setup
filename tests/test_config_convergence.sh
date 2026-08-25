@@ -11,6 +11,8 @@ repo_dir() { printf '%s\n' "$REPO_DIR"; }
 . "$TEST_ROOT/lib/config.sh"
 # shellcheck disable=SC1091
 . "$TEST_ROOT/scripts/stage_dotfiles.sh"
+# shellcheck disable=SC1091
+. "$TEST_ROOT/scripts/stage_macos_container_config.sh"
 
 TEST_TMP=$(mktemp -d "${TMPDIR:-/tmp}/config-convergence-test.XXXXXX")
 trap 'rm -rf "$TEST_TMP"' EXIT
