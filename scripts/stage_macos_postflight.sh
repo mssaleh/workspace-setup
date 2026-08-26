@@ -404,6 +404,7 @@ stage_macos_postflight() {
   postflight_apparmor_attachments
   postflight_xterm_kitty_terminfo
   postflight_shell_paths
+  postflight_shell_env
   postflight_macos_cli_paths
   postflight_macos_login_shell
   postflight_macos_terminal_profile

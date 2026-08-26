@@ -153,6 +153,7 @@ for function_name in \
     postflight_apparmor_attachments \
     postflight_xterm_kitty_terminfo \
     postflight_shell_paths \
+    postflight_shell_env \
     postflight_completions \
     postflight_upstream_tools \
     postflight_headless_credentials \
@@ -177,6 +178,7 @@ postflight_packages
 postflight_apparmor_attachments
 postflight_xterm_kitty_terminfo
 postflight_shell_paths
+postflight_shell_env
 postflight_completions
 postflight_upstream_tools
 postflight_headless_credentials

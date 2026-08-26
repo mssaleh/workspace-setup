@@ -21,6 +21,7 @@ postflight_note() {
   warn "$*"
 }
 
+# Duplicates config_file_mode; this stage is sourced and tested without lib/.
 postflight_mode() {
   if [[ "${OS_KIND:-}" == macos ]]; then
     stat -f '%Lp' "$1" 2>/dev/null
@@ -170,6 +171,7 @@ postflight_configs() {
     "$HOME/.config/gh/config.yml"
     "$HOME/.config/opencode/opencode.jsonc"
     "$HOME/.config/direnv/direnvrc"
+    "$HOME/.config/shell/README"
     "$HOME/.config/uv/uv.toml"
     "$HOME/.claude/settings.json"
     "$HOME/.codex/rules/default.rules"
@@ -428,6 +430,181 @@ postflight_shell_paths() {
   fi
 
   postflight_vendor_toolchain_paths
+}
+
+# Source one installed dotfile from a throwaway HOME and print the probe
+# variable. The dotfile is an argument, so $HOME picks the fixture, not it.
+postflight_env_snippet_probe() {
+  local home="$1" shell_bin="$2" rc="$3"
+  shift 3
+  # shellcheck disable=SC2016 # the expansion belongs to the clean child shell
+  env -i HOME="$home" USER="${USER:-$(id -un)}" PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+    "$shell_bin" "$@" '. "$1"; printf "%s" "${WORKSPACE_SETUP_ENV_PROBE:-}"' \
+    "$shell_bin" "$rc"
+}
+
+# A candidate may deliver env.d indirectly, as ~/.bash_profile does.
+postflight_seed_probe_home() {
+  local home="$1" companion
+  for companion in "$HOME/.bashrc" "$HOME/.profile"; do
+    [[ -f "$companion" && ! -L "$companion" ]] || continue
+    cp "$companion" "$home/$(basename "$companion")" 2>/dev/null || true
+  done
+}
+
+# Returns 1 when the environment never arrives, 2 when an empty env.d makes the
+# file complain, 3 when both. The empty case compares the two runs rather than
+# demanding silence, so a file noisy for its own reasons is not blamed on env.d.
+postflight_env_loader_status() {
+  local probe_home="$1" empty_home="$2" rc="$3" shell_bin="$4"
+  shift 4
+  local status=0 loaded quiet_err noisy_err
+  # stderr kept beside stdout rather than costing a second identical run.
+  loaded=$(postflight_env_snippet_probe "$probe_home" "$shell_bin" "$rc" "$@" \
+    2>"$probe_home/.probe-stderr")
+  quiet_err=$(cat "$probe_home/.probe-stderr" 2>/dev/null || true)
+  [[ "$loaded" == loaded ]] || status=$((status + 1))
+  noisy_err=$(postflight_env_snippet_probe "$empty_home" "$shell_bin" "$rc" "$@" 2>&1 >/dev/null)
+  quiet_err=${quiet_err//"$probe_home"/HOME}
+  noisy_err=${noisy_err//"$empty_home"/HOME}
+  [[ -z "$noisy_err" || "$noisy_err" == "$quiet_err" ]] || status=$((status + 2))
+  return "$status"
+}
+
+# Three things can be wrong and only one is visible in a file: the modes, the
+# parents above them included; whether the snippets still parse, which the
+# probes cannot see because they never read a real one; and whether each
+# startup file delivers env.d to a non-interactive shell.
+postflight_shell_env() {
+  local dir="$HOME/.config/shell" env_dir="$HOME/.config/shell/env.d"
+  local file mode probe_home empty_home parent shell_bin status rc tmp_base
+  local exposed=() unsupported=() unreadable=() unparsable=()
+  local broken=() noisy=() writable=() probes=()
+  local shells=(/bin/bash /bin/sh)
+  [[ "$OS_KIND" == macos ]] && shells+=(/bin/zsh)
+
+  if [[ -d "$dir" && ! -L "$dir" && "$(postflight_mode "$dir")" == 700 \
+      && -d "$env_dir" && ! -L "$env_dir" \
+      && "$(postflight_mode "$env_dir")" == 700 ]]; then
+    postflight_pass "host-local environment directories are ordinary and private"
+  else
+    postflight_fail "$dir and $env_dir must be ordinary mode-700 directories"
+  fi
+
+  # A mode holds only while nothing above it can be renamed out from under it.
+  for parent in "$HOME" "$HOME/.config"; do
+    mode=$(postflight_mode "$parent")
+    if [[ "$mode" =~ ^[0-7]+$ ]] && (( 8#$mode & 8#22 )); then
+      writable+=("$parent (mode $mode)")
+    fi
+  done
+  if ((${#writable[@]} == 0)); then
+    postflight_pass "no directory above the environment directory is group- or world-writable"
+  else
+    postflight_fail "another account could replace the environment directory through: ${writable[*]}"
+    postflight_note "  chmod go-w <path>"
+  fi
+
+  # Every entry, not only *.sh: an unsupported object keeps the host red.
+  while IFS= read -r -d '' file; do
+    if [[ -L "$file" || ! -f "$file" ]]; then
+      unsupported+=("$file")
+      continue
+    fi
+    mode=$(postflight_mode "$file")
+    # Mask the bits: stat drops leading zeros, so 0000 reads back as "0".
+    if ! [[ "$mode" =~ ^[0-7]+$ ]] || (( 8#$mode & 8#77 )); then
+      exposed+=("$file (mode ${mode:-unknown})")
+    fi
+    # Private but dead: every loader's readability gate skips it.
+    if [[ "$mode" =~ ^[0-7]+$ ]] && ! (( 8#$mode & 8#400 )); then
+      unreadable+=("$file (mode ${mode:-unknown})")
+    fi
+  done < <(find "$env_dir" -mindepth 1 -maxdepth 1 -print0 2>/dev/null)
+
+  # A snippet that stops parsing breaks every shell at once. -n parses without
+  # executing; its message is dropped because bash quotes the bad line back.
+  while IFS= read -r -d '' file; do
+    [[ -f "$file" && ! -L "$file" && -r "$file" ]] || continue
+    for shell_bin in "${shells[@]}"; do
+      [[ -x "$shell_bin" ]] || continue
+      "$shell_bin" -n "$file" >/dev/null 2>&1 \
+        || unparsable+=("$file (rejected by $shell_bin)")
+    done
+  done < <(find "$env_dir" -mindepth 1 -maxdepth 1 -name '*.sh' -print0 2>/dev/null)
+  if ((${#unsupported[@]} == 0)); then
+    postflight_pass "all environment entries are ordinary files"
+  else
+    postflight_fail "environment entries contain unsupported filesystem objects: ${unsupported[*]}"
+  fi
+  if ((${#exposed[@]} == 0)); then
+    postflight_pass "no environment snippet is readable by group or other"
+  else
+    postflight_fail "environment snippets are not private: ${exposed[*]}"
+  fi
+  if ((${#unreadable[@]} == 0)); then
+    postflight_pass "every environment snippet is readable by its owner"
+  else
+    postflight_fail "environment snippets the owner cannot read never load: ${unreadable[*]}"
+  fi
+  if ((${#unparsable[@]} == 0)); then
+    postflight_pass "every environment snippet parses in the shells that source it"
+  else
+    postflight_fail "environment snippets break every shell that sources them: ${unparsable[*]}"
+  fi
+
+  # TMPDIR ends in a slash on macOS and these paths reach the report.
+  tmp_base="${TMPDIR:-/tmp}"
+  tmp_base=${tmp_base%/}
+  if ! probe_home=$(mktemp -d "$tmp_base/workspace-setup-envprobe.XXXXXX"); then
+    postflight_fail "could not create the shell-environment probe directory"
+    return 0
+  fi
+  if ! empty_home=$(mktemp -d "$tmp_base/workspace-setup-envempty.XXXXXX"); then
+    rm -rf "$probe_home"
+    postflight_fail "could not create the empty shell-environment probe directory"
+    return 0
+  fi
+  mkdir -p "$probe_home/.config/shell/env.d" "$empty_home/.config/shell/env.d"
+  printf 'export WORKSPACE_SETUP_ENV_PROBE=loaded\n' \
+    > "$probe_home/.config/shell/env.d/00-probe.sh"
+  postflight_seed_probe_home "$probe_home"
+  postflight_seed_probe_home "$empty_home"
+
+  # ~/.bash_profile too: it is the only file an interactive login bash reads.
+  probes=("$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.profile")
+  [[ "$OS_KIND" == macos ]] && probes+=("$HOME/.zshenv")
+  for rc in "${probes[@]}"; do
+    status=0
+    case "$rc" in
+      "$HOME/.profile")
+        postflight_env_loader_status "$probe_home" "$empty_home" "$rc" \
+          /bin/sh -c || status=$?
+        ;;
+      "$HOME/.zshenv")
+        postflight_env_loader_status "$probe_home" "$empty_home" "$rc" \
+          /bin/zsh -dfc || status=$?
+        ;;
+      *)
+        postflight_env_loader_status "$probe_home" "$empty_home" "$rc" \
+          /bin/bash --noprofile --norc -c || status=$?
+        ;;
+    esac
+    if (( status & 1 )); then broken+=("$rc"); fi
+    if (( status & 2 )); then noisy+=("$rc"); fi
+  done
+  rm -rf "$probe_home" "$empty_home"
+
+  if ((${#broken[@]} == 0)); then
+    postflight_pass "environment snippets reach every login path, ssh commands included"
+  else
+    postflight_fail "environment snippets never reach a shell through: ${broken[*]}"
+  fi
+  if ((${#noisy[@]} == 0)); then
+    postflight_pass "an empty ~/.config/shell/env.d starts a shell silently"
+  else
+    postflight_fail "an empty ~/.config/shell/env.d complains at every startup of: ${noisy[*]}"
+  fi
 }
 
 # The bash-completion compat directory is sourced eagerly by every interactive
@@ -825,6 +1002,7 @@ stage_postflight() {
   postflight_apparmor_attachments
   postflight_xterm_kitty_terminfo
   postflight_shell_paths
+  postflight_shell_env
   postflight_completions
   postflight_upstream_tools
   postflight_headless_credentials

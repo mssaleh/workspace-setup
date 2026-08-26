@@ -32,3 +32,11 @@ case "${LANG:-}" in
   *.UTF-8|*.utf8) : ;;
   *) export LANG=en_US.UTF-8 ;;
 esac
+
+# Host-local environment; see ~/.config/shell/README. ~/.zshenv, not
+# ~/.zprofile, because every zsh reads it. (N): an empty match is not an error.
+for _env_file in "$HOME/.config/shell/env.d"/*.sh(N); do
+  [[ -f "$_env_file" && ! -L "$_env_file" && -r "$_env_file" ]] \
+    && source "$_env_file"
+done
+unset _env_file

@@ -24,7 +24,19 @@ file wins: `sysctl.d` takes the **last** assignment, `sshd_config.d` the **first
 recipes under **System-level files you install yourself** in the README are part of those files — a
 new one ships with the command that proves it took effect.
 
-## Comments
+## Comments and documentation
 
-Match the density of the code you are editing. State the non-obvious fact and stop; do not restate
-what the code says, and do not narrate the bug that motivated a fix.
+Explanation is a cost. Pay it only where a reader would otherwise get it wrong.
+
+- **Commentary never outgrows the code.** Match the density of the file you are editing and do not
+  exceed it. A one-line change does not get a three-line preamble; no function gets a docstring
+  longer than itself. If every small change arrives with its own essay, the file becomes unreadable.
+- **One line is the default.** State the non-obvious fact and stop. Delete anything that restates
+  what the code already says. If the explanation needs a paragraph, the code is wrong — fix the code.
+- **No history, anywhere.** A comment says what is true now. Never what used to be true, what was
+  tried, what the bug was, when something changed, or why something was removed. Git holds that.
+  Nothing that no longer exists gets a tombstone: no "previously", no "formerly", no "note that we
+  used to", no struck-through line, no dated remark. Rewrite the passage as though it had always
+  read that way.
+- **No new documents.** Do not add a README, guide, summary, design note or changelog unless asked.
+  Where the README already covers the subject, extend that paragraph rather than appending a section.

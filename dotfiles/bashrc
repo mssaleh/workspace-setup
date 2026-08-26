@@ -165,6 +165,16 @@ case "${LANG:-}" in
   *) export LANG=en_US.UTF-8 ;;                          # unset/empty/C/POSIX → upgrade
 esac
 
+# Host-local environment; see ~/.config/shell/README. Before the interactivity
+# gate because a non-interactive `ssh host cmd` reads only this file.
+for _env_file in "$HOME/.config/shell/env.d"/*.sh; do
+  if [[ -f "$_env_file" && ! -L "$_env_file" && -r "$_env_file" ]]; then
+    # shellcheck disable=SC1090 # host-local paths
+    . "$_env_file"
+  fi
+done
+unset _env_file
+
 # Non-interactive shells stop here (scp, `ssh host cmd`, scripts, …).
 case $- in *i*) ;; *) return ;; esac
 

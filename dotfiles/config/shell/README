@@ -1,0 +1,76 @@
+~/.config/shell/env.d/ — host-local environment
+===============================================
+
+Every ordinary, non-symlink file matching *.sh in this directory is sourced by
+the configured shells: ~/.bashrc reads them before its interactivity gate,
+~/.zshenv on every zsh, ~/.profile on a POSIX login shell. That deliberately
+includes `ssh <host> <command>`, which reads neither ~/.bash_profile nor
+~/.zprofile — a credential that exists in interactive shells alone is missing
+exactly where automation runs.
+
+This is where a secret belongs when the tool that needs it reads an environment
+variable and offers no credential store of its own. A tool that has a file
+store should keep using it.
+
+The directory is provisioned; its contents never are. Nothing here is shared
+between machines, backed up by this setup, or replaced by a later run.
+
+
+Format
+------
+
+The files are sourced, not parsed, so a bare NAME=value assignment produces a
+shell variable and not an environment variable. Export it:
+
+    # ~/.config/shell/env.d/40-huggingface.sh
+    export HF_TOKEN=hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+One ordinary file per service, numbered to fix the order in which they load.
+Symlinks and other filesystem objects are preserved but never sourced; setup
+reports them as configuration conflicts. Revoking a credential locally is `rm`
+on its file.
+
+Keep a snippet to assignments. It runs in every non-interactive shell and every
+script on this machine, so a command that prints, prompts, or takes time here is
+paid by all of them — and a syntax error breaks all of them.
+
+Because that last one breaks everything at once, postflight parses each snippet
+with every shell that sources it on this machine and fails on one that no
+longer parses. It parses without running, and never prints what it read: a
+shell quotes the line it choked on, and here that line is a credential.
+
+
+Permissions
+-----------
+
+~/.config/shell and this directory are ordinary directories at 0700. No file in
+this directory may carry group or other bits. setup.sh tightens anything looser
+on its next run, and postflight fails on a path it cannot make private without
+following or replacing a user-owned filesystem object. A snippet the owner
+cannot read is private but never loads — the shells skip it — so postflight
+names that too.
+
+A mode here only holds while nothing above it can be renamed out from under it.
+An account that can write to ~ or to ~/.config can move this directory aside and
+leave its own in place, which is arbitrary code in every shell you start. That
+is the same rule sshd enforces on ~ before it will use your keys. Postflight
+reports either directory being group- or world-writable; it does not change
+them, because the mode of a home directory is a decision somebody made.
+
+
+Why a file and not the macOS Keychain
+-------------------------------------
+
+A process without a GUI session cannot read a Keychain secret: the Security
+Server refuses with -25308 errSecInteractionNotAllowed rather than prompting
+where no prompt can be shown. A token kept only in the Keychain is therefore
+absent from every shell reached over ssh. A file is protected at rest by
+FileVault and by its mode, matching the file-based posture on Linux.
+
+
+Checking that a snippet arrives
+-------------------------------
+
+Ask a non-interactive shell, which is the case that fails first:
+
+    ssh <this host> 'printenv HF_TOKEN'

@@ -19,6 +19,9 @@ CONFIG_UNCHANGED_COUNT=${CONFIG_UNCHANGED_COUNT:-0}
 CONFIG_CONFLICT_COUNT=${CONFIG_CONFLICT_COUNT:-0}
 CONFIG_CONFLICT_PATHS=${CONFIG_CONFLICT_PATHS:-}
 CONFIG_LAST_ACTION=none
+# Why a merge callback refused. It runs before anything has named the file, so
+# printing from inside it would land the detail above its own heading.
+CONFIG_MERGE_REASON=${CONFIG_MERGE_REASON:-}
 
 config_sha256() {
   if command -v shasum >/dev/null 2>&1; then
@@ -27,6 +30,15 @@ config_sha256() {
     sha256sum "$1" | awk '{print $1}'
   else
     return 1
+  fi
+}
+
+# The octal permission bits of a path, as stat spells them on this platform.
+config_file_mode() {
+  if [[ "${OS_KIND:-}" == macos ]]; then
+    stat -f '%Lp' "$1" 2>/dev/null
+  else
+    stat -c '%a' "$1" 2>/dev/null
   fi
 }
 
@@ -82,6 +94,12 @@ config_adopt_requested() {
   return 1
 }
 
+config_emit_merge_reason() {
+  [[ -n "${CONFIG_MERGE_REASON:-}" ]] || return 0
+  warn "  $CONFIG_MERGE_REASON"
+  CONFIG_MERGE_REASON=
+}
+
 config_record_conflict() {
   local dst="$1" src="${2:-}"
 
@@ -95,6 +113,7 @@ config_record_conflict() {
       CONFIG_UPGRADED_COUNT=$((CONFIG_UPGRADED_COUNT + 1))
       CONFIG_LAST_ACTION=upgraded
       info "adopted the shipped version of $dst (previous content kept at $backup)"
+      config_emit_merge_reason
       return 0
     fi
     warn "could not adopt $dst; preserving what is there"
@@ -105,6 +124,7 @@ config_record_conflict() {
 }${dst}"
   CONFIG_LAST_ACTION=conflict
   warn "preserving user-owned config: $dst"
+  config_emit_merge_reason
 }
 
 # config_atomic_replace <source> <destination> [mode]
@@ -172,6 +192,7 @@ install_regular_file() {
       fi
       if [[ -n "$merge_fn" ]]; then
         CONFIG_MERGE_ACTION=
+        CONFIG_MERGE_REASON=
         if "$merge_fn" "$src" "$dst" "$mode"; then
           if [[ "${CONFIG_MERGE_ACTION:-unchanged}" == merged ]]; then
             CONFIG_MERGED_COUNT=$((CONFIG_MERGED_COUNT + 1))
@@ -243,6 +264,7 @@ install_regular_file() {
 
   if [[ -n "$merge_fn" ]]; then
     CONFIG_MERGE_ACTION=
+    CONFIG_MERGE_REASON=
     if "$merge_fn" "$src" "$dst" "$mode"; then
       case "${CONFIG_MERGE_ACTION:-unchanged}" in
         merged)

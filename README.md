@@ -43,7 +43,7 @@ existing `SKIP_FONT`-gated desktop journey unchanged.
 | **packages** | Installs the cross-platform CLI toolbox: `eza`, `fd`, `bat`, `ripgrep` (`rg`), `fzf`, `zoxide`, `yazi`, `git`, `git-delta` (`delta`), `lazygit`, `gh`, `tmux`, `mosh`, `rsync`, `rclone`, `nmap`, `jq`, `yq`, `pandoc`, `7zz` (`7z`), `cmake`, `ninja`, `node`, `uv`, `ruff`, `helm`, `kubectl`, `cosign`, `ffmpeg`, `poppler` (`poppler-utils`), `nano`, `himalaya`, `ncdu`, `shellcheck`, `pre-commit`, … It installs `xterm-kitty` terminfo as a non-GUI SSH capability on every host. On Linux it registers **every** vendor archive before installing anything (see below), then installs the toolbox, the **Claude Desktop** app (skip with `SKIP_CLAUDE_DESKTOP=1`) and the **Codex app** (skip with `SKIP_CODEX_APP=1`). |
 | **docker** | Linux only: installs the official **Docker Engine** + **Docker Compose v2** from download.docker.com. Docker's documented pre-clean of the distribution's `docker.io`, `containerd` and `runc` names every package apt would take with them before it runs, since those runtimes carry reverse dependencies of their own. A complete, responsive official installation is a no-op on rerun. |
 | **toolchains** | Installs upstream **rustup**, Astral's standalone **uv/uvx** (plus its receipt), native Claude Code and Codex CLIs, and upstream opencode on Linux. Linux also retains its existing upstream Microsoft Graph CLI (`mgc`) provider. The separate Homebrew `uv` formula remains an intentional backup. |
-| **configuration** | Converges ordinary files under `$HOME`; repairs old links into temporary checkouts, atomically upgrades exact known historical versions, semantically merges supported JSON/TOML/Git/ssh formats, preserves ambiguous user-owned content, and installs the coding-agent skills into each agent home. |
+| **configuration** | Converges ordinary files under `$HOME`; repairs old links into temporary checkouts, atomically upgrades exact known historical versions, semantically merges supported JSON/TOML/Git/ssh formats, preserves ambiguous user-owned content, installs the coding-agent skills into each agent home, and provisions the host-local environment directory `~/.config/shell/env.d/` that the supported shells source. |
 | **completions** | macOS only: runs `brew completions link` when Homebrew reports that external-command completions are not linked, then generates and syntax-checks Bash/Zsh completions from the installed Codex, rustup/cargo, opencode, Container, and Container Compose binaries. Existing files without this setup's ownership marker are preserved. Linux retains its existing himalaya loader only. |
 | **containers** | macOS only: installs Apple Container from Apple's signed package, ensures Rosetta, and writes only the stable build/registry defaults. The Container system remains stopped for on-demand laptop use unless `CONTAINER_START=1`; it is never stopped automatically. `container-compose` is supplied separately by Homebrew. |
 | **ssh** | Generates an ed25519 keypair if none exists, locks down `~/.ssh` permissions (700 dir, 600 files), and wires up the host-local SSH agent (macOS: Keychain; Linux: systemd user unit) without replacing an agent-forwarding socket supplied by `sshd`. Does **not** push to GitHub — run `gh auth login` manually. |
@@ -207,6 +207,7 @@ curl -fsSL https://raw.githubusercontent.com/mssaleh/workspace-setup/main/setup.
 - **Does not install databases at user level.** No Postgres, MySQL, Redis, etc. via `brew services`. Dev databases belong in containers with mounted volumes. The script installs `container`/`container-compose` (macOS) or Docker Engine + Compose v2 (Linux), but does not configure database instances.
 - **Does not authenticate with GitHub.** Run `gh auth login` manually after.
 - **Does not install Docker on macOS.** macOS uses Apple's native `container` CLI (Virtualization.framework micro-VMs + Rosetta, no daemon). On Linux, the official Docker Engine is installed natively — it's the standard runtime there.
+- **Does not put a secret on the machine.** `~/.config/shell/env.d/` is created empty and its permissions are enforced; what goes into it is yours to write. Setup does not ship, converge, back up or replace snippet contents; postflight parses them without running them and never prints them.
 - **Does not push SSH keys anywhere.** The public key stays at `~/.ssh/id_ed25519.pub`; add it to GitHub manually or via `gh auth login`.
 - **Does not apply the optional files under `system/`.** Package managers and their installers necessarily write to their native locations (`/opt/homebrew`, `/Applications`, `/usr/local`, package receipts, and Linux package/systemd paths); those exact owners are listed above. The reviewed SSH/sysctl/Docker examples under `system/` remain manual because their host-wide policy cannot be inferred safely.
 - **Does not enable Remote Login, change its allow-list, grant Full Disk Access, change FileVault/firewall/power policy, change the login shell, or select Kitty as the default terminal.** The macOS remote stage reports effective state only.
@@ -561,9 +562,10 @@ where a service offers nothing else:
 | `gh` | `~/.config/gh/hosts.yml` (0600) | no key-based mode exists; use `gh auth login --insecure-storage` |
 | Claude Code | `~/.claude/.credentials.json` (0600) | first-class file fallback, the same path used on Linux |
 | aws, npm, kube | already file-based | unaffected |
+| a library that only reads an environment variable | `~/.config/shell/env.d/*.sh` | nothing else exists to point at; see below |
 
-File stores are protected at rest by FileVault and by `0600` permissions — the
-same posture Linux has always had, where no Keychain exists. Postflight checks
+File stores are protected at rest by FileVault and by `0600` permissions,
+matching Linux, where no Keychain exists. Postflight checks
 where each credential actually lives and fails with the specific fix, so a
 machine cannot quietly return to the broken state. Set
 `SKIP_HEADLESS_CREDENTIALS=1` on a Mac only ever used at its own keyboard.
@@ -573,6 +575,53 @@ per session; `AddKeysToAgent yes` in the shipped `~/.ssh/config` keeps it to
 once, and forwarding an agent from the machine you are sitting at
 (`ForwardAgent yes`, scoped to that specific `Host`, never `Host *`) avoids
 needing a key on the remote Mac at all.
+
+## Tokens that are only ever an environment variable
+
+Plenty of services are reached by a library rather than a CLI. It reads a named
+variable — `HF_TOKEN`, `LLAMA_CLOUD_API_KEY`, whatever the SDK documents — out
+of the environment, and there is no `login` subcommand and no credential file to
+point it at. Those live in `~/.config/shell/env.d/`, one file per service:
+
+```bash
+# ~/.config/shell/env.d/40-huggingface.sh
+export HF_TOKEN=hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+`~/.bashrc`, `~/.zshenv` and `~/.profile` each source every ordinary,
+non-symlink `*.sh` file in that directory. In `~/.bashrc` the loader sits
+**before** the interactivity gate, and it is `~/.zshenv` rather than
+`~/.zprofile`, for the same reason PATH is set in exactly those two places:
+`ssh <host> <command>` reads neither `~/.bash_profile` nor `~/.zprofile`, so a
+token loaded from an interactive branch is missing precisely where automation
+runs.
+
+The directory is provisioned; snippet contents are not. Nothing under it is
+shipped, converged or replaced by a later run — a credential is host-local by
+definition, and a file this setup had written would turn into a permanent
+conflict the moment a token went into it. What setup.sh owns is the two ordinary
+directory paths, at `0700`, and the permissions of the ordinary files you put
+in `env.d`: a file carrying group or other bits is made private and the change
+is reported. Symlinks and other filesystem objects are never followed or
+replaced; they are preserved as configuration conflicts and keep postflight
+red until you remove them or replace them with ordinary files.
+
+Postflight checks the modes, `~` and `~/.config` included — a mode on `env.d`
+holds only while nothing above it can be renamed out from under it, the rule
+sshd enforces on `~` — that every entry is an ordinary file its owner can read,
+that every snippet still parses, and that each startup file really delivers the
+environment to a **non-interactive** shell. `~/.bash_profile` is asked as well
+as `~/.bashrc`, being the only file an interactive login bash reads;
+`~/.zprofile` and `~/.zshrc` are not, since zsh reads `~/.zshenv` before either.
+No check reads a snippet aloud. On the host itself, ask the case that
+fails first:
+
+```bash
+ssh <this host> 'printenv HF_TOKEN'
+```
+
+`~/.config/shell/README` is installed alongside the directory and says the same
+thing where it is needed.
 
 ## Coding-agent guardrails
 
@@ -649,6 +698,7 @@ The script detects the OS and adapts:
 | Dotfiles Homebrew paths | `/opt/homebrew/...` (via `$BREW_PREFIX`) | guarded by `command -v brew` / `$BREW_PREFIX`; no-op when brew is absent |
 | Shell integrations | zsh: zoxide, fzf, direnv, `zsh-autosuggestions`, `zsh-syntax-highlighting`; Bash receives the matching cross-platform hooks | Bash: zoxide, fzf, direnv + `/usr/share/bash-completion/`; **no zsh on Linux** — the test suite runs the Linux path and fails if it produces any zsh file, if a zsh package reaches `PACKAGES_APT`, or if postflight looks for zsh configuration there |
 | Shell config files | regular `bashrc`, `bash_profile`, `profile`, `zshenv`, `zprofile`, `zshrc`, `inputrc`, `nanorc`, `tmux.conf` | regular `bashrc`, `bash_profile`, `profile`, `inputrc`, `nanorc`, `tmux.conf` (no zsh files) |
+| Host-local environment | ordinary, non-symlink `~/.config/shell/env.d/*.sh` files sourced by `~/.bashrc` (before its interactivity gate), `~/.zshenv` and `~/.profile` | same directory, same permissions; `~/.bashrc` and `~/.profile` only, there being no zsh |
 | Generated completions | Bash + Zsh for Codex, rustup, cargo, opencode, Container, and Container Compose; Homebrew external-command completions linked and zsh paths checked with `compaudit` | unchanged: the existing himalaya Bash lazy loader remains the only generated completion path |
 | himalaya completion | brew's generated completion files are unusable (himalaya ≥ 2.0 writes its scripts to files and prints a status line; the formula captures stdout, so every upgrade ships a one-line syntax error). `~/.bashrc` keeps the broken compat file from being sourced (`BASH_COMPLETION_COMPAT_IGNORE`), and lazy loaders — `~/.local/share/bash-completion/completions/himalaya` for bash, a `_himalaya` stub on fpath for zsh — regenerate the real script from the installed binary on first Tab | the upstream artifact ships no completion at all; the same bash lazy loader provides it |
 | Update policy | no package upgrade by default; metadata/report and managed-formula mutation are separate opt-ins, and casks/cleanup remain manual | no system update by default; `UPDATE_SYSTEM=1` runs the existing named apt/snap/flatpak/uv path |
@@ -739,6 +789,7 @@ workspace-setup/
 │   │   └── apple-container-amd64/ # SKILL.md + scripts/optimize-builder.sh
 │   └── config/                    # kitty/, bat/, yazi/, gh/, opencode/, container/
 │       ├── environment.d/         # Linux OpenSSH-agent environment
+│       ├── shell/README           # what env.d is for; the directory itself is provisioned empty
 │       ├── kitty/kitty.conf       # platform-neutral base; ends in `include platform.conf`
 │       ├── kitty/platform-macos.conf  # → ~/.config/kitty/platform.conf on macOS
 │       ├── kitty/platform-linux.conf  # → ~/.config/kitty/platform.conf on Linux
@@ -759,4 +810,4 @@ bash tests/run.sh
 ```
 
 The suite runs against temporary `HOME` directories and never touches the real one. It covers convergence decisions (install / no-op / legacy-link repair / known-version upgrade / merge / preserved conflict), the `~/.ssh/config` baseline merge and the opt-out and unparseable cases it must refuse, the exact Linux and macOS setup-stage routing contracts, Darwin-module isolation from Linux, host-role/session separation, Command Line Tools gating before Homebrew, generated-completion ownership/syntax/registration, the directory modes
-`compaudit` requires under any umask, Apple Container's stopped/start/update lifecycle, bounded Homebrew update scope, macOS GUI journeys, the read-only remote audit, Kitty platform composition, Node-major and VS Code CLI resolution, SSH-agent identity matching, the provider manifest, Linux apt sequencing/removal reporting, AppArmor attachment collisions, native-platform postflight, and the streamed `curl | bash` payload bootstrap.
+Linux apt sequencing/removal reporting, AppArmor attachment collisions, native-platform postflight, the host-local environment directory and every way a loader can be present in a file and still reach no shell, and the streamed `curl | bash` payload bootstrap.

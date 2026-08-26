@@ -6,10 +6,51 @@
 # formats with a safely expressible policy use narrow semantic merges.
 # shellcheck disable=SC2034,SC2016 # cross-file globals; child-shell expressions
 
+# A startup file is compliant only when it carries the host-local environment
+# into a non-interactive shell. Trailing arguments are that shell's flags.
+shell_env_loader_semantically_compliant() {
+  local dst="$1" shell_bin="$2" probe_home output status tmp_base companion
+  shift 2
+  tmp_base="${TMPDIR:-/tmp}"
+  tmp_base=${tmp_base%/}
+  probe_home=$(mktemp -d "$tmp_base/workspace-setup-envcandidate.XXXXXX") || return 1
+  if ! mkdir -p "$probe_home/.config/shell/env.d" \
+      || ! printf 'export WORKSPACE_SETUP_ENV_PROBE=loaded\n' \
+        > "$probe_home/.config/shell/env.d/00-probe.sh"; then
+    rm -rf -- "$probe_home"
+    return 1
+  fi
+  # A candidate may deliver env.d indirectly, as ~/.bash_profile does.
+  for companion in "$HOME/.bashrc" "$HOME/.profile"; do
+    [[ -f "$companion" && ! -L "$companion" && "$companion" != "$dst" ]] || continue
+    cp "$companion" "$probe_home/$(basename "$companion")" 2>/dev/null || true
+  done
+
+  # shellcheck disable=SC2016 # the expansion belongs to the clean child shell
+  if output=$(env -i HOME="$probe_home" USER="${USER:-$(id -un)}" \
+      PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+      "$shell_bin" "$@" '. "$1"; printf "%s" "${WORKSPACE_SETUP_ENV_PROBE:-}"' \
+      "$shell_bin" "$dst" 2>/dev/null); then
+    status=0
+  else
+    status=$?
+  fi
+  rm -rf -- "$probe_home"
+  if [[ "$status" != 0 ]]; then
+    CONFIG_MERGE_REASON="$dst does not source cleanly from a bare non-interactive shell"
+    return 1
+  fi
+  if [[ "$output" != loaded ]]; then
+    CONFIG_MERGE_REASON="$dst does not load ~/.config/shell/env.d into a non-interactive shell"
+    return 1
+  fi
+  return 0
+}
+
 # Both ~/.bashrc and ~/.bash_profile are judged by the same observable result:
-# sourcing the candidate from a bare sshd-style PATH must resolve the declared
-# provider artifacts. ~/.bash_profile satisfies it by sourcing ~/.bashrc, but a
-# user file that asserts the same PATH itself is equally compliant.
+# from a bare sshd-style PATH the candidate must resolve the declared provider
+# artifacts and deliver env.d. Sourcing ~/.bashrc satisfies both; asserting
+# them directly is equally compliant.
 bash_path_semantically_compliant() {
   local _src="$1" dst="$2" _mode="$3" expected_brew=""
   [[ "$OS_KIND" == macos ]] && expected_brew="$BREW_BIN"
@@ -26,6 +67,9 @@ bash_path_semantically_compliant() {
         [[ "$(command -v rustup 2>/dev/null)" == "$HOME/.cargo/bin/rustup" ]] &&
         [[ -z "$EXPECTED_BREW" || "$(command -v brew 2>/dev/null)" == "$EXPECTED_BREW" ]]
       ' bash "$dst" >/dev/null 2>&1; then
+    # ~/.bash_profile too: it is the only file an interactive login bash reads.
+    shell_env_loader_semantically_compliant "$dst" /bin/bash \
+      --noprofile --norc -c || return 1
     CONFIG_MERGE_ACTION=unchanged
     return 0
   fi
@@ -37,6 +81,7 @@ profile_path_semantically_compliant() {
   if env -i HOME="$HOME" USER="${USER:-$(id -un)}" PATH=/usr/bin:/bin:/usr/sbin:/sbin \
       /bin/sh -c '. "$1"; [ "$(command -v uv 2>/dev/null)" = "$HOME/.local/bin/uv" ] && [ "$(command -v rustup 2>/dev/null)" = "$HOME/.cargo/bin/rustup" ]' \
       sh "$dst" >/dev/null 2>&1; then
+    shell_env_loader_semantically_compliant "$dst" /bin/sh -c || return 1
     CONFIG_MERGE_ACTION=unchanged
     return 0
   fi
@@ -55,6 +100,11 @@ zsh_path_semantically_compliant() {
         [[ "$(command -v rustup 2>/dev/null)" == "$HOME/.cargo/bin/rustup" ]] &&
         [[ "$(command -v brew 2>/dev/null)" == "$EXPECTED_BREW" ]]
       ' zsh "$dst" >/dev/null 2>&1; then
+    # ~/.zshenv only: zsh reads it before ~/.zprofile and ~/.zshrc always.
+    if [[ "$dst" == "$HOME/.zshenv" ]] \
+        && ! shell_env_loader_semantically_compliant "$dst" /bin/zsh -dfc; then
+      return 1
+    fi
     CONFIG_MERGE_ACTION=unchanged
     return 0
   fi
@@ -325,6 +375,50 @@ stage_npm_config() {
   rm -f "$tmp"
 }
 
+# The directory is provisioned; snippet contents never are. What is enforced is
+# the part that can be got wrong silently: the mode on a file full of tokens.
+stage_shell_env() {
+  local dir="$HOME/.config/shell" env_dir="$HOME/.config/shell/env.d"
+  local repo="$1" file mode
+
+  # Never follow a symlink here: it would apply modes outside the directory.
+  if [[ -L "$dir" || ( -e "$dir" && ! -d "$dir" ) ]]; then
+    config_record_conflict "$dir"
+    warn "  expected an ordinary directory; no environment path was changed"
+    return 0
+  fi
+  mkdir -p "$dir"
+  if [[ -L "$env_dir" || ( -e "$env_dir" && ! -d "$env_dir" ) ]]; then
+    config_record_conflict "$env_dir"
+    warn "  expected an ordinary directory; no environment path was changed"
+    return 0
+  fi
+  mkdir -p "$env_dir"
+  chmod 0700 "$dir" "$env_dir" 2>/dev/null \
+    || warn "could not set mode 0700 on $dir and $env_dir"
+
+  # Anything else becomes a conflict, so no credential path leaves this dir.
+  while IFS= read -r -d '' file; do
+    if [[ -L "$file" || ! -f "$file" ]]; then
+      config_record_conflict "$file"
+      warn "  environment entries must be ordinary files; preserving this object"
+      continue
+    fi
+    mode=$(config_file_mode "$file")
+    # Mask the bits: stat drops leading zeros, so 0000 reads back as "0".
+    if [[ "$mode" =~ ^[0-7]+$ ]] && ! (( 8#$mode & 8#77 )); then
+      continue
+    fi
+    if chmod go-rwx "$file" 2>/dev/null; then
+      info "made environment snippet private: $file (was mode ${mode:-unknown})"
+    else
+      warn "could not make environment snippet private: $file (mode ${mode:-unknown})"
+    fi
+  done < <(find "$env_dir" -mindepth 1 -maxdepth 1 -print0)
+
+  install_repo_config "$repo" dotfiles/config/shell/README "$dir/README"
+}
+
 install_repo_config() {
   local repo="$1" relative="$2" dst="$3" mode="${4:-0644}" merge_fn="${5:-}"
   install_regular_file "$repo/$relative" "$dst" "$relative" "$mode" "$merge_fn"
@@ -534,6 +628,7 @@ stage_dotfiles() {
 
   stage_git_config "$repo"
   stage_npm_config
+  stage_shell_env "$repo"
 
   install_repo_config "$repo" dotfiles/config/kitty/kitty.conf \
     "$HOME/.config/kitty/kitty.conf"
