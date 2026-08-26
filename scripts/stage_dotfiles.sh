@@ -6,10 +6,12 @@
 # formats with a safely expressible policy use narrow semantic merges.
 # shellcheck disable=SC2034,SC2016 # cross-file globals; child-shell expressions
 
-# A startup file is compliant only when it carries the host-local environment
-# into a non-interactive shell. Trailing arguments are that shell's flags.
-shell_env_loader_semantically_compliant() {
-  local dst="$1" shell_bin="$2" probe_home output status tmp_base companion
+# True when sourcing <file> in a bare non-interactive <shell> exports a snippet
+# from ~/.config/shell/env.d. The probe HOME is a throwaway, so no real snippet
+# is read, and it is seeded with the startup files a candidate may deliver
+# through indirectly, as ~/.bash_profile does via ~/.bashrc.
+shell_env_loader_delivers() {
+  local file="$1" shell_bin="$2" probe_home output tmp_base companion
   shift 2
   tmp_base="${TMPDIR:-/tmp}"
   tmp_base=${tmp_base%/}
@@ -20,95 +22,140 @@ shell_env_loader_semantically_compliant() {
     rm -rf -- "$probe_home"
     return 1
   fi
-  # A candidate may deliver env.d indirectly, as ~/.bash_profile does.
   for companion in "$HOME/.bashrc" "$HOME/.profile"; do
-    [[ -f "$companion" && ! -L "$companion" && "$companion" != "$dst" ]] || continue
+    [[ -f "$companion" && ! -L "$companion" ]] || continue
     cp "$companion" "$probe_home/$(basename "$companion")" 2>/dev/null || true
   done
-
   # shellcheck disable=SC2016 # the expansion belongs to the clean child shell
-  if output=$(env -i HOME="$probe_home" USER="${USER:-$(id -un)}" \
-      PATH=/usr/bin:/bin:/usr/sbin:/sbin \
-      "$shell_bin" "$@" '. "$1"; printf "%s" "${WORKSPACE_SETUP_ENV_PROBE:-}"' \
-      "$shell_bin" "$dst" 2>/dev/null); then
-    status=0
-  else
-    status=$?
-  fi
+  output=$(env -i HOME="$probe_home" USER="${USER:-$(id -un)}" \
+    PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+    "$shell_bin" "$@" '. "$1"; printf "%s" "${WORKSPACE_SETUP_ENV_PROBE:-}"' \
+    "$shell_bin" "$file" 2>/dev/null) || true
   rm -rf -- "$probe_home"
-  if [[ "$status" != 0 ]]; then
-    CONFIG_MERGE_REASON="$dst does not source cleanly from a bare non-interactive shell"
-    return 1
+  [[ "$output" == loaded ]]
+}
+
+# The loader as the shipped file spells it, from its header through the unset
+# that closes it. Read from a file rather than passed to awk, because the POSIX
+# loader carries a line continuation that -v would eat.
+shell_env_loader_block() {
+  awk '
+    /^# Host-local environment/ { collecting = 1 }
+    collecting { print }
+    collecting && /^unset _(profile_)?env_file$/ { exit }
+  ' "$1"
+}
+
+# A startup file that resolves PATH but never loads env.d is repaired, not
+# refused. Refusing leaves a host that cannot converge without someone hand-
+# running CONFIG_ADOPT, which replaces the whole file and keeps the user's own
+# lines only as a backup; inserting the block keeps them.
+#
+# Nothing is written until the candidate bytes satisfy both properties: the
+# caller's own PATH probe, so a bad insertion cannot smuggle in a broken file,
+# and the env.d probe it was made for.
+shell_env_loader_converge() {
+  local dst="$1" loader_src="$2" mode="$3" verify_fn="$4" shell_bin="$5"
+  shift 5
+  local block_file candidate tmp_base
+  shell_env_loader_delivers "$dst" "$shell_bin" "$@" && return 0
+
+  tmp_base="${TMPDIR:-/tmp}"
+  tmp_base=${tmp_base%/}
+  block_file=$(mktemp "$tmp_base/workspace-setup-loader.XXXXXX") || return 1
+  candidate=$(mktemp "$tmp_base/workspace-setup-candidate.XXXXXX") || {
+    rm -f "$block_file"; return 1; }
+  shell_env_loader_block "$loader_src" > "$block_file"
+  # Before the interactivity gate, or at the end when there is none: a loader
+  # after that gate never runs in the shell `ssh host cmd` gets.
+  if [[ -s "$block_file" ]] && awk -v blockfile="$block_file" '
+      BEGIN {
+        while ((getline line < blockfile) > 0) block = block line "\n"
+        sub(/\n$/, "", block)
+      }
+      !placed && /return/ && ($0 ~ /\$-/ || $0 ~ /PS1/) { print block; print ""; placed = 1 }
+      { print }
+      END { if (!placed) { print ""; print block } }
+    ' "$dst" > "$candidate" \
+      && "$verify_fn" "$candidate" \
+      && shell_env_loader_delivers "$candidate" "$shell_bin" "$@" \
+      && config_atomic_replace "$candidate" "$dst" "$mode"; then
+    rm -f "$block_file" "$candidate"
+    CONFIG_MERGE_ACTION=merged
+    info "added the host-local environment loader to: $dst"
+    return 0
   fi
-  if [[ "$output" != loaded ]]; then
-    CONFIG_MERGE_REASON="$dst does not load ~/.config/shell/env.d into a non-interactive shell"
-    return 1
-  fi
+  rm -f "$block_file" "$candidate"
+  CONFIG_MERGE_REASON="$dst does not load ~/.config/shell/env.d into a non-interactive shell"
+  return 1
+}
+
+# From a bare sshd-style PATH the file must resolve the declared provider
+# artifacts. Chained with && so the status reflects all of them: as separate
+# statements only the last would count, and on Linux (empty EXPECTED_BREW) that
+# last test is always true, which would pass a pristine distro skeleton.
+bash_path_probe() {
+  local expected_brew=""
+  [[ "$OS_KIND" == macos ]] && expected_brew="$BREW_BIN"
+  env -i HOME="$HOME" USER="${USER:-$(id -un)}" \
+    EXPECTED_BREW="$expected_brew" PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+    /bin/bash --noprofile --norc -c '
+      . "$1"
+      [[ "$(command -v uv 2>/dev/null)" == "$HOME/.local/bin/uv" ]] &&
+      [[ "$(command -v rustup 2>/dev/null)" == "$HOME/.cargo/bin/rustup" ]] &&
+      [[ -z "$EXPECTED_BREW" || "$(command -v brew 2>/dev/null)" == "$EXPECTED_BREW" ]]
+    ' bash "$1" >/dev/null 2>&1
+}
+
+# Both ~/.bashrc and ~/.bash_profile are judged by the same observable result.
+# ~/.bash_profile is asked about env.d too: it is the only file an interactive
+# login bash reads, so one that sets PATH itself and never chains to ~/.bashrc
+# would leave those shells without the environment.
+bash_path_semantically_compliant() {
+  local src="$1" dst="$2" mode="$3"
+  bash_path_probe "$dst" || return 1
+  shell_env_loader_converge "$dst" "$(dirname "$src")/bashrc" "$mode" \
+    bash_path_probe /bin/bash --noprofile --norc -c || return 1
+  CONFIG_MERGE_ACTION=${CONFIG_MERGE_ACTION:-unchanged}
   return 0
 }
 
-# Both ~/.bashrc and ~/.bash_profile are judged by the same observable result:
-# from a bare sshd-style PATH the candidate must resolve the declared provider
-# artifacts and deliver env.d. Sourcing ~/.bashrc satisfies both; asserting
-# them directly is equally compliant.
-bash_path_semantically_compliant() {
-  local _src="$1" dst="$2" _mode="$3" expected_brew=""
-  [[ "$OS_KIND" == macos ]] && expected_brew="$BREW_BIN"
-  if env -i HOME="$HOME" USER="${USER:-$(id -un)}" \
-      EXPECTED_BREW="$expected_brew" PATH=/usr/bin:/bin:/usr/sbin:/sbin \
-      /bin/bash --noprofile --norc -c '
-        . "$1"
-        # Every probe must hold. Chained with && so the exit status reflects
-        # all of them: as separate statements only the last one would count,
-        # and on Linux (empty EXPECTED_BREW) that last test is always true,
-        # which would declare any file — including a pristine distro skeleton
-        # that sets no PATH at all — semantically compliant.
-        [[ "$(command -v uv 2>/dev/null)" == "$HOME/.local/bin/uv" ]] &&
-        [[ "$(command -v rustup 2>/dev/null)" == "$HOME/.cargo/bin/rustup" ]] &&
-        [[ -z "$EXPECTED_BREW" || "$(command -v brew 2>/dev/null)" == "$EXPECTED_BREW" ]]
-      ' bash "$dst" >/dev/null 2>&1; then
-    # ~/.bash_profile too: it is the only file an interactive login bash reads.
-    shell_env_loader_semantically_compliant "$dst" /bin/bash \
-      --noprofile --norc -c || return 1
-    CONFIG_MERGE_ACTION=unchanged
-    return 0
-  fi
-  return 1
+profile_path_probe() {
+  env -i HOME="$HOME" USER="${USER:-$(id -un)}" PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+    /bin/sh -c '. "$1"; [ "$(command -v uv 2>/dev/null)" = "$HOME/.local/bin/uv" ] && [ "$(command -v rustup 2>/dev/null)" = "$HOME/.cargo/bin/rustup" ]' \
+    sh "$1" >/dev/null 2>&1
 }
 
 profile_path_semantically_compliant() {
-  local _src="$1" dst="$2" _mode="$3"
-  if env -i HOME="$HOME" USER="${USER:-$(id -un)}" PATH=/usr/bin:/bin:/usr/sbin:/sbin \
-      /bin/sh -c '. "$1"; [ "$(command -v uv 2>/dev/null)" = "$HOME/.local/bin/uv" ] && [ "$(command -v rustup 2>/dev/null)" = "$HOME/.cargo/bin/rustup" ]' \
-      sh "$dst" >/dev/null 2>&1; then
-    shell_env_loader_semantically_compliant "$dst" /bin/sh -c || return 1
-    CONFIG_MERGE_ACTION=unchanged
-    return 0
-  fi
-  return 1
+  local src="$1" dst="$2" mode="$3"
+  profile_path_probe "$dst" || return 1
+  shell_env_loader_converge "$dst" "$src" "$mode" \
+    profile_path_probe /bin/sh -c || return 1
+  CONFIG_MERGE_ACTION=${CONFIG_MERGE_ACTION:-unchanged}
+  return 0
+}
+
+zsh_path_probe() {
+  env -i HOME="$HOME" USER="${USER:-$(id -un)}" EXPECTED_BREW="$BREW_BIN" \
+    PATH=/usr/bin:/bin:/usr/sbin:/sbin /bin/zsh -dfc '
+      [[ "$1" == "$HOME/.zshenv" ]] || source "$HOME/.zshenv"
+      source "$1"
+      [[ "$(command -v uv 2>/dev/null)" == "$HOME/.local/bin/uv" ]] &&
+      [[ "$(command -v rustup 2>/dev/null)" == "$HOME/.cargo/bin/rustup" ]] &&
+      [[ "$(command -v brew 2>/dev/null)" == "$EXPECTED_BREW" ]]
+    ' zsh "$1" >/dev/null 2>&1
 }
 
 zsh_path_semantically_compliant() {
-  local _src="$1" dst="$2" _mode="$3"
-  if env -i HOME="$HOME" USER="${USER:-$(id -un)}" EXPECTED_BREW="$BREW_BIN" \
-      PATH=/usr/bin:/bin:/usr/sbin:/sbin /bin/zsh -dfc '
-        [[ "$1" == "$HOME/.zshenv" ]] || source "$HOME/.zshenv"
-        source "$1"
-        # Chained with && for the same reason as the bash probe: as separate
-        # statements only the final test would decide compliance.
-        [[ "$(command -v uv 2>/dev/null)" == "$HOME/.local/bin/uv" ]] &&
-        [[ "$(command -v rustup 2>/dev/null)" == "$HOME/.cargo/bin/rustup" ]] &&
-        [[ "$(command -v brew 2>/dev/null)" == "$EXPECTED_BREW" ]]
-      ' zsh "$dst" >/dev/null 2>&1; then
-    # ~/.zshenv only: zsh reads it before ~/.zprofile and ~/.zshrc always.
-    if [[ "$dst" == "$HOME/.zshenv" ]] \
-        && ! shell_env_loader_semantically_compliant "$dst" /bin/zsh -dfc; then
-      return 1
-    fi
-    CONFIG_MERGE_ACTION=unchanged
-    return 0
+  local src="$1" dst="$2" mode="$3"
+  zsh_path_probe "$dst" || return 1
+  # ~/.zshenv only: zsh reads it before ~/.zprofile and ~/.zshrc always.
+  if [[ "$dst" == "$HOME/.zshenv" ]]; then
+    shell_env_loader_converge "$dst" "$src" "$mode" \
+      zsh_path_probe /bin/zsh -dfc || return 1
   fi
-  return 1
+  CONFIG_MERGE_ACTION=${CONFIG_MERGE_ACTION:-unchanged}
+  return 0
 }
 
 zshrc_semantically_compliant() {

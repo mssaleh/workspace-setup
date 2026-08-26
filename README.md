@@ -43,7 +43,7 @@ existing `SKIP_FONT`-gated desktop journey unchanged.
 | **packages** | Installs the cross-platform CLI toolbox: `eza`, `fd`, `bat`, `ripgrep` (`rg`), `fzf`, `zoxide`, `yazi`, `git`, `git-delta` (`delta`), `lazygit`, `gh`, `tmux`, `mosh`, `rsync`, `rclone`, `nmap`, `jq`, `yq`, `pandoc`, `7zz` (`7z`), `cmake`, `ninja`, `node`, `uv`, `ruff`, `helm`, `kubectl`, `cosign`, `ffmpeg`, `poppler` (`poppler-utils`), `nano`, `himalaya`, `ncdu`, `shellcheck`, `pre-commit`, … It installs `xterm-kitty` terminfo as a non-GUI SSH capability on every host. On Linux it registers **every** vendor archive before installing anything (see below), then installs the toolbox, the **Claude Desktop** app (skip with `SKIP_CLAUDE_DESKTOP=1`) and the **Codex app** (skip with `SKIP_CODEX_APP=1`). |
 | **docker** | Linux only: installs the official **Docker Engine** + **Docker Compose v2** from download.docker.com. Docker's documented pre-clean of the distribution's `docker.io`, `containerd` and `runc` names every package apt would take with them before it runs, since those runtimes carry reverse dependencies of their own. A complete, responsive official installation is a no-op on rerun. |
 | **toolchains** | Installs upstream **rustup**, Astral's standalone **uv/uvx** (plus its receipt), native Claude Code and Codex CLIs, and upstream opencode on Linux. Linux also retains its existing upstream Microsoft Graph CLI (`mgc`) provider. The separate Homebrew `uv` formula remains an intentional backup. |
-| **configuration** | Converges ordinary files under `$HOME`; repairs old links into temporary checkouts, atomically upgrades exact known historical versions, semantically merges supported JSON/TOML/Git/ssh formats, preserves ambiguous user-owned content, installs the coding-agent skills into each agent home, and provisions the host-local environment directory `~/.config/shell/env.d/` that the supported shells source. |
+| **configuration** | Converges ordinary files under `$HOME`; repairs old links into temporary checkouts, atomically upgrades exact known historical versions, semantically merges supported JSON/TOML/Git/ssh formats and repairs a shell startup file that has lost the host-local environment loader, preserves ambiguous user-owned content, installs the coding-agent skills into each agent home, and provisions the host-local environment directory `~/.config/shell/env.d/` that the supported shells source. |
 | **completions** | macOS only: runs `brew completions link` when Homebrew reports that external-command completions are not linked, then generates and syntax-checks Bash/Zsh completions from the installed Codex, rustup/cargo, opencode, Container, and Container Compose binaries. Existing files without this setup's ownership marker are preserved. Linux retains its existing himalaya loader only. |
 | **containers** | macOS only: installs Apple Container from Apple's signed package, ensures Rosetta, and writes only the stable build/registry defaults. The Container system remains stopped for on-demand laptop use unless `CONTAINER_START=1`; it is never stopped automatically. `container-compose` is supplied separately by Homebrew. |
 | **ssh** | Generates an ed25519 keypair if none exists, locks down `~/.ssh` permissions (700 dir, 600 files), and wires up the host-local SSH agent (macOS: Keychain; Linux: systemd user unit) without replacing an agent-forwarding socket supplied by `sshd`. Does **not** push to GitHub — run `gh auth login` manually. |
@@ -606,6 +606,15 @@ is reported. Symlinks and other filesystem objects are never followed or
 replaced; they are preserved as configuration conflicts and keep postflight
 red until you remove them or replace them with ordinary files.
 
+A startup file of your own that still resolves the provider artifacts but has
+lost the loader — an older release you have edited since, say — is repaired
+rather than refused: the loader block is inserted before the interactivity gate
+and the rest of your file is left alone. Nothing is written until the candidate
+bytes pass both the PATH probe and the `env.d` probe, so a bad insertion cannot
+reach the file. Refusing instead would leave a host that cannot converge without
+someone hand-running `CONFIG_ADOPT`, which replaces the whole file and keeps
+your own lines only as a backup.
+
 Postflight checks the modes, `~` and `~/.config` included — a mode on `env.d`
 holds only while nothing above it can be renamed out from under it, the rule
 sshd enforces on `~` — that every entry is an ordinary file its owner can read,
@@ -613,6 +622,8 @@ that every snippet still parses, and that each startup file really delivers the
 environment to a **non-interactive** shell. `~/.bash_profile` is asked as well
 as `~/.bashrc`, being the only file an interactive login bash reads;
 `~/.zprofile` and `~/.zshrc` are not, since zsh reads `~/.zshenv` before either.
+Only the file that has to change is named: `~/.bash_profile` reaches `env.d`
+through `~/.bashrc`, so reporting both would hide which one is at fault.
 No check reads a snippet aloud. On the host itself, ask the case that
 fails first:
 

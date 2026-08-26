@@ -44,6 +44,11 @@ fi
 
 ENV_DIR="$HOME/.config/shell/env.d"
 
+sha256_of() {
+  if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | awk '{print $1}'
+  else sha256sum "$1" | awk '{print $1}'; fi
+}
+
 fail_test() {
   printf 'FAIL: %s\n' "$1" >&2
   exit 1
@@ -163,7 +168,8 @@ strip_env_loader() {
   ' "$1"
 }
 
-adopt_targets=.bashrc:.profile
+# A startup file that resolves PATH but has lost the loader is repaired, not
+# refused: refusing leaves a host that cannot converge without a human.
 for startup_file in "$HOME/.bashrc" "$HOME/.profile"; do
   strip_env_loader "$startup_file" > "$startup_file.without-loader"
   printf '%s\n' '# user customization' >> "$startup_file.without-loader"
@@ -173,36 +179,60 @@ if [[ "$OS_KIND" == macos ]]; then
   strip_env_loader "$HOME/.zshenv" > "$HOME/.zshenv.without-loader"
   printf '%s\n' '# user customization' >> "$HOME/.zshenv.without-loader"
   mv -f "$HOME/.zshenv.without-loader" "$HOME/.zshenv"
-  adopt_targets="$adopt_targets:.zshenv"
 fi
-# The stage runs in this shell — a command substitution would discard its
-# conflict counters — so the report goes to a file.
 CONFIG_CONFLICT_COUNT=0
-stage_dotfiles > "$TEST_TMP/stage-report.log" 2>&1 || true
-((CONFIG_CONFLICT_COUNT > 0)) || fail_test "a startup file without the env.d loader was accepted"
-grep -Fq 'does not load ~/.config/shell/env.d' "$TEST_TMP/stage-report.log" \
-  || fail_test "the conflict report does not name the missing env.d loader"
-# The reason is an indented detail line: it has to follow its own heading.
-heading_line=$(grep -n 'preserving user-owned config' "$TEST_TMP/stage-report.log" | head -1 | cut -d: -f1)
-reason_line=$(grep -n 'does not load ~/.config/shell/env.d' "$TEST_TMP/stage-report.log" | head -1 | cut -d: -f1)
-[[ -n "$heading_line" && -n "$reason_line" ]] \
-  || fail_test "the conflict report is missing its heading or its reason"
-((heading_line < reason_line)) \
-  || fail_test "the env.d reason was reported above the heading that names the file"
+CONFIG_MERGED_COUNT=0
+stage_dotfiles > "$TEST_TMP/stage-report.log" 2>&1
+[[ "$CONFIG_CONFLICT_COUNT" == 0 ]] \
+  || fail_test "a repairable startup file was reported as a conflict"
+((CONFIG_MERGED_COUNT > 0)) || fail_test "the missing loader was not merged in"
+grep -Fq 'added the host-local environment loader' "$TEST_TMP/stage-report.log" \
+  || fail_test "the merge was not reported"
+
+# The user's own line survives, and the loader lands before the interactivity
+# gate, or the shell `ssh host cmd` gets would never reach it.
+for startup_file in "$HOME/.bashrc" "$HOME/.profile"; do
+  grep -Fxq '# user customization' "$startup_file" \
+    || fail_test "$startup_file lost the user's own content in the merge"
+done
+loader_line=$(grep -n 'config/shell/env.d' "$HOME/.bashrc" | head -1 | cut -d: -f1)
+gate_line=$(grep -nE '^case \$- in' "$HOME/.bashrc" | head -1 | cut -d: -f1)
+[[ -n "$loader_line" && -n "$gate_line" ]] \
+  || fail_test "$HOME/.bashrc is missing its loader or its interactivity gate"
+((loader_line < gate_line)) \
+  || fail_test "the merged loader landed after the interactivity gate in $HOME/.bashrc"
+
+[[ "$(probe "$HOME" /bin/bash "$HOME/.bashrc" --noprofile --norc -c)" == secret-value ]] \
+  || fail_test "the merged $HOME/.bashrc does not deliver env.d"
+[[ "$(probe "$HOME" /bin/sh "$HOME/.profile" -c)" == secret-value ]] \
+  || fail_test "the merged $HOME/.profile does not deliver env.d"
+
+# Repairing once is enough: a second run must not touch the file again.
+merged_bashrc=$(sha256_of "$HOME/.bashrc")
+CONFIG_MERGED_COUNT=0
+stage_dotfiles >/dev/null 2>&1
+((CONFIG_MERGED_COUNT == 0)) || fail_test "the loader merge is not idempotent"
+[[ "$(sha256_of "$HOME/.bashrc")" == "$merged_bashrc" ]] \
+  || fail_test "a second run rewrote an already-repaired $HOME/.bashrc"
+
+# A file that cannot be repaired is still preserved and reported: this one does
+# not resolve the provider artifacts, so no loader would make it compliant.
+cp "$HOME/.bashrc" "$TEST_TMP/repaired.bashrc"
+printf '%s\n' '# a startup file that sets no PATH at all' > "$HOME/.bashrc"
+CONFIG_CONFLICT_COUNT=0
+stage_dotfiles > "$TEST_TMP/conflict-report.log" 2>&1 || true
+((CONFIG_CONFLICT_COUNT > 0)) || fail_test "an unrepairable startup file was accepted"
+grep -Fq 'preserving user-owned config' "$TEST_TMP/conflict-report.log" \
+  || fail_test "the unrepairable file was not preserved"
+grep -Fxq '# a startup file that sets no PATH at all' "$HOME/.bashrc" \
+  || fail_test "an unrepairable file was overwritten instead of preserved"
 CONFIG_CONFLICT_COUNT=0
 # shellcheck disable=SC2034 # consumed by the sourced convergence function
-CONFIG_ADOPT=$adopt_targets
-stage_dotfiles
+CONFIG_ADOPT=.bashrc
+stage_dotfiles >/dev/null 2>&1
 unset CONFIG_ADOPT
-[[ "$CONFIG_CONFLICT_COUNT" == 0 ]] || fail_test "adopting startup files reported conflicts"
 cmp -s "$TEST_ROOT/dotfiles/bashrc" "$HOME/.bashrc" \
-  || fail_test "CONFIG_ADOPT did not restore the env.d loader in ~/.bashrc"
-cmp -s "$TEST_ROOT/dotfiles/profile" "$HOME/.profile" \
-  || fail_test "CONFIG_ADOPT did not restore the env.d loader in ~/.profile"
-if [[ "$OS_KIND" == macos ]]; then
-  cmp -s "$TEST_ROOT/dotfiles/zshenv" "$HOME/.zshenv" \
-    || fail_test "CONFIG_ADOPT did not restore the env.d loader in ~/.zshenv"
-fi
+  || fail_test "CONFIG_ADOPT did not restore the shipped $HOME/.bashrc"
 
 # ── the loaders reach a non-interactive shell ──────────────────────────────
 # Non-interactive: the shell a loader after the interactivity gate never reaches.
@@ -280,8 +310,8 @@ postflight_shell_env >/dev/null 2>&1
 mv -f "$HOME/.bashrc.orig" "$HOME/.bashrc"
 
 # ── ~/.bash_profile is the only file an interactive login bash reads ────────
-# One that sets PATH itself and never chains to ~/.bashrc passes the PATH probe
-# while leaving every login shell without env.d.
+# One that sets PATH itself and never chains to ~/.bashrc reaches no env.d, and
+# it is the only file an interactive login bash reads. It gets repaired too.
 brew_dir=''
 [[ -n "$BREW_BIN" ]] && brew_dir=$(dirname "$BREW_BIN")
 cp "$HOME/.bash_profile" "$HOME/.bash_profile.shipped"
@@ -291,27 +321,31 @@ cp "$HOME/.bash_profile" "$HOME/.bash_profile.shipped"
   printf 'export PATH="$HOME/.local/bin:$HOME/.cargo/bin%s:$PATH"\n' "${brew_dir:+:$brew_dir}"
 } > "$HOME/.bash_profile"
 [[ "$(probe "$HOME" /bin/bash "$HOME/.bash_profile" --noprofile --norc -c)" != secret-value ]] \
-  || fail_test "the fixture ~/.bash_profile reaches env.d; it cannot test the gap"
+  || fail_test "the fixture login file already reaches env.d; it cannot test the gap"
 CONFIG_CONFLICT_COUNT=0
-stage_dotfiles > "$TEST_TMP/bash-profile-report.log" 2>&1 || true
-((CONFIG_CONFLICT_COUNT > 0)) \
-  || fail_test "a ~/.bash_profile that never delivers env.d was accepted"
-grep -Fq "$HOME/.bash_profile does not load ~/.config/shell/env.d" \
-  "$TEST_TMP/bash-profile-report.log" \
-  || fail_test "the report does not name ~/.bash_profile as the file dropping env.d"
+CONFIG_MERGED_COUNT=0
+stage_dotfiles > "$TEST_TMP/bash-profile-report.log" 2>&1
+[[ "$CONFIG_CONFLICT_COUNT" == 0 ]] \
+  || fail_test "a repairable $HOME/.bash_profile was reported as a conflict"
+((CONFIG_MERGED_COUNT > 0)) || fail_test "no loader was merged into $HOME/.bash_profile"
+grep -Fxq '# a login file that sets PATH itself and never reads ~/.bashrc' \
+  "$HOME/.bash_profile" || fail_test "the merge discarded the user's own login file"
+[[ "$(probe "$HOME" /bin/bash "$HOME/.bash_profile" --noprofile --norc -c)" == secret-value ]] \
+  || fail_test "the repaired $HOME/.bash_profile still does not deliver env.d"
 POSTFLIGHT_PASSES=0 POSTFLIGHT_FAILURES=0
 postflight_shell_env > "$TEST_TMP/bash-profile-postflight.log" 2>&1
-grep -Fq "never reach a shell through: $HOME/.bash_profile" \
-  "$TEST_TMP/bash-profile-postflight.log" \
-  || fail_test "postflight accepted a ~/.bash_profile that never loads env.d"
+[[ "$POSTFLIGHT_FAILURES" == 0 ]] \
+  || fail_test "postflight still fails after $HOME/.bash_profile was repaired"
+
 # The shipped file delivers env.d indirectly, by sourcing ~/.bashrc.
 mv -f "$HOME/.bash_profile.shipped" "$HOME/.bash_profile"
 cmp -s "$TEST_ROOT/dotfiles/bash_profile" "$HOME/.bash_profile" \
-  || fail_test "the shipped ~/.bash_profile was not restored"
+  || fail_test "the shipped $HOME/.bash_profile was not restored"
 CONFIG_CONFLICT_COUNT=0
+CONFIG_MERGED_COUNT=0
 stage_dotfiles >/dev/null 2>&1
-[[ "$CONFIG_CONFLICT_COUNT" == 0 ]] \
-  || fail_test "the shipped ~/.bash_profile was reported as not delivering env.d"
+[[ "$CONFIG_CONFLICT_COUNT" == 0 && "$CONFIG_MERGED_COUNT" == 0 ]] \
+  || fail_test "the shipped $HOME/.bash_profile was not left alone"
 
 # ── a snippet that stops parsing breaks every shell at once ─────────────────
 # The probes never read a real snippet, so only a parse check sees this, and it

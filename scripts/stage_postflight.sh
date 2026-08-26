@@ -478,6 +478,7 @@ postflight_env_loader_status() {
 postflight_shell_env() {
   local dir="$HOME/.config/shell" env_dir="$HOME/.config/shell/env.d"
   local file mode probe_home empty_home parent shell_bin status rc tmp_base
+  local bashrc_status=0
   local exposed=() unsupported=() unreadable=() unparsable=()
   local broken=() noisy=() writable=() probes=()
   local shells=(/bin/bash /bin/sh)
@@ -590,6 +591,14 @@ postflight_shell_env() {
           /bin/bash --noprofile --norc -c || status=$?
         ;;
     esac
+    # ~/.bash_profile reaches env.d through ~/.bashrc, so when that is the file
+    # at fault, naming both hides which one has to change. It is probed after
+    # ~/.bashrc, so the verdict on the root file is already known.
+    if [[ "$rc" == "$HOME/.bash_profile" ]]; then
+      if (( bashrc_status & 1 )); then status=$(( status & ~1 )); fi
+      if (( bashrc_status & 2 )); then status=$(( status & ~2 )); fi
+    fi
+    if [[ "$rc" == "$HOME/.bashrc" ]]; then bashrc_status=$status; fi
     if (( status & 1 )); then broken+=("$rc"); fi
     if (( status & 2 )); then noisy+=("$rc"); fi
   done
