@@ -50,27 +50,63 @@ config_hash_is_known() {
     '$1 == key && $2 == hash { found = 1 } END { exit !found }' "$inventory"
 }
 
-# `opencode upgrade` reruns opencode's installer, which appends an empty line,
-# "# opencode" and "export PATH=$HOME/.opencode/bin:$PATH" to a shell startup
-# file. The shipped files already put that directory on PATH, so a shipped
-# version followed by exactly that appendix is still a shipped version.
+# A shipped version picks up two additions that do not make it user content:
+# the env.d loader shell_env_loader_converge inserts, and the lines opencode's
+# installer appends. Each is undone, alone and in either order, before the
+# shipped hashes are consulted.
 config_file_is_known() {
-  local key="$1" file="$2" hash stripped
+  local key="$1" file="$2" tmp hash variant
   hash=$(config_sha256 "$file" 2>/dev/null) || return 1
   [[ -n "$hash" ]] || return 1
   config_hash_is_known "$key" "$hash" && return 0
-  stripped=$(mktemp "${TMPDIR:-/tmp}/config-known.XXXXXX") || return 1
+  tmp=$(mktemp -d "${TMPDIR:-/tmp}/config-known.XXXXXX") || return 1
+  config_strip_opencode_path "$file" > "$tmp/a"
+  config_strip_env_loader "$file" > "$tmp/l"
+  config_strip_env_loader "$tmp/a" > "$tmp/al"
+  config_strip_opencode_path "$tmp/l" > "$tmp/la"
+  for variant in a l al la; do
+    cmp -s "$file" "$tmp/$variant" && continue
+    hash=$(config_sha256 "$tmp/$variant" 2>/dev/null) || continue
+    if [[ -n "$hash" ]] && config_hash_is_known "$key" "$hash"; then
+      rm -rf -- "$tmp"
+      return 0
+    fi
+  done
+  rm -rf -- "$tmp"
+  return 1
+}
+
+# `opencode upgrade` reruns opencode's installer, which appends an empty line,
+# "# opencode" and "export PATH=$HOME/.opencode/bin:$PATH" to a shell startup
+# file. The shipped files already put that directory on PATH.
+config_strip_opencode_path() {
   awk -v path_line="export PATH=$HOME/.opencode/bin:\$PATH" '
     { line[NR] = $0 }
     END {
       n = NR
       if (n >= 3 && line[n] == path_line && line[n - 1] == "# opencode" && line[n - 2] == "") n -= 3
       for (i = 1; i <= n; i++) print line[i]
-    }' "$file" > "$stripped"
-  hash=""
-  cmp -s "$file" "$stripped" || hash=$(config_sha256 "$stripped" 2>/dev/null)
-  rm -f "$stripped"
-  [[ -n "$hash" ]] && config_hash_is_known "$key" "$hash"
+    }' "$1"
+}
+
+# The inverse of shell_env_loader_converge: its loader block and the blank line
+# it adds, either directly before the interactivity gate or at the end of the
+# file after a blank line.
+config_strip_env_loader() {
+  awk '
+    { line[NR] = $0 }
+    END {
+      n = NR; from = 0; to = 0
+      for (i = 1; i <= n && !from; i++) {
+        if (line[i] !~ /^# Host-local environment/) continue
+        for (j = i; j <= n; j++) if (line[j] ~ /^unset _(profile_)?env_file$/) break
+        if (j > n) break
+        if (j + 2 <= n && line[j + 1] == "" && line[j + 2] ~ /return/ \
+            && (line[j + 2] ~ /\$-/ || line[j + 2] ~ /PS1/)) { from = i; to = j + 1 }
+        else if (j == n && i > 1 && line[i - 1] == "") { from = i - 1; to = j }
+      }
+      for (i = 1; i <= n; i++) if (!from || i < from || i > to) print line[i]
+    }' "$1"
 }
 
 # A dotfile byte-identical to the distribution's skeleton copy is not user

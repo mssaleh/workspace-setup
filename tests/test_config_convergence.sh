@@ -101,6 +101,25 @@ install_regular_file "$src" "$dst" fixture
 [[ "$CONFIG_LAST_ACTION" == conflict ]]
 ((CONFIG_CONFLICT_COUNT == before_conflicts + 1))
 
+# So does the env.d loader this setup inserts into an older shipped version,
+# together with opencode's appendix. An edit beside them is still the user's.
+# shellcheck disable=SC2016 # the gate and $PATH are literal file content
+printf 'alias ll=true\ncase $- in *i*) ;; *) return ;; esac\nalias la=true\n' > "$dst"
+printf 'fixture\t%s\n' "$(config_sha256 "$dst")" > "$inventory"
+shell_env_loader_converge "$dst" "$TEST_ROOT/dotfiles/bashrc" 0644 true /bin/bash --noprofile --norc -c >/dev/null
+grep -q '^# Host-local environment' "$dst"
+cp "$dst" "$TEST_TMP/repaired"
+# shellcheck disable=SC2016 # $PATH is the literal text the installer writes
+printf '\n# opencode\nexport PATH=%s/.opencode/bin:$PATH\n' "$HOME" >> "$dst"
+install_regular_file "$src" "$dst" fixture
+assert_regular_equal "$src" "$dst"
+[[ "$CONFIG_LAST_ACTION" == upgraded ]]
+sed 's/^alias la=true$/alias la=false/' "$TEST_TMP/repaired" > "$dst"
+before_conflicts=$CONFIG_CONFLICT_COUNT
+install_regular_file "$src" "$dst" fixture
+[[ "$CONFIG_LAST_ACTION" == conflict ]]
+((CONFIG_CONFLICT_COUNT == before_conflicts + 1))
+
 # Unknown user content is never silently replaced.
 printf 'user-owned\n' > "$dst"
 : > "$inventory"
