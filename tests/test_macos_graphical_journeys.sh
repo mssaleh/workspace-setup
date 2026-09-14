@@ -2,6 +2,10 @@
 set -euo pipefail
 
 TEST_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+# shellcheck disable=SC1091
+. "$TEST_ROOT/tests/helpers.sh"
+# macOS postflight resolves node through a real /bin/zsh.
+[[ -x /bin/zsh ]] || test_skip 'needs /bin/zsh to verify the macOS shell files'
 TEST_TMP=$(mktemp -d "${TMPDIR:-/tmp}/macos-graphical-test.XXXXXX")
 trap 'rm -rf "$TEST_TMP"' EXIT
 HOME="$TEST_TMP/home"

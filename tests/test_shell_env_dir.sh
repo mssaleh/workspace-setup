@@ -8,6 +8,8 @@ TEST_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # shellcheck disable=SC2034 # consumed by test_skip from helpers.sh
 TEST_NAME='host-local environment tests'
 
+# Postflight rejects group-writable parents; Ubuntu's umask 002 would create them.
+umask 022
 TEST_TMP=$(mktemp -d "${TMPDIR:-/tmp}/shell-env-test.XXXXXX")
 trap 'rm -rf "$TEST_TMP"' EXIT
 
