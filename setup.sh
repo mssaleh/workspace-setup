@@ -270,6 +270,11 @@ apply_linux_host_profile() {
 
 # ── Main ─────────────────────────────────────────────────────────────────
 main() {
+  # Directories this run creates hold one user's configuration. Ubuntu's
+  # usergroups umask of 002 would make them group-writable, which postflight
+  # and zsh's compaudit then reject.
+  umask 022
+
   setup_color bold; printf '\n╔══════════════════════════════════════════════════════════════╗\n'; setup_color reset
   setup_color bold; printf '║  workspace-setup — one-shot host provisioning (macOS/Linux) ║\n'; setup_color reset
   setup_color bold; printf '╚══════════════════════════════════════════════════════════════╝\n'; setup_color reset

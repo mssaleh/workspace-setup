@@ -41,6 +41,11 @@ for stage_name in bootstrap packages docker groups flatpak update dotfiles \
   printf '%s() { :; }\n' "$function_name" > "$fixture/scripts/$function_name.sh"
 done
 
+# Records the umask the stages run under.
+# shellcheck disable=SC2016 # the expansion belongs to the fixture stage
+printf 'stage_bootstrap() { umask > "$LINUX_PRESERVATION_CALLS.umask"; }\n' \
+  > "$fixture/scripts/stage_bootstrap.sh"
+
 run_linux_setup() {
   : > "$calls"
   env -i HOME="$TEST_TMP/home" USER=test PATH="/usr/bin:/bin" \
@@ -63,9 +68,11 @@ stage_postflight
 EXPECTED
 )
 
-run_linux_setup
+(umask 002; run_linux_setup)
 [[ "$(cat "$calls")" == "$expected_default" ]] \
   || fail_test "default Linux stage order changed: $(tr '\n' ' ' < "$calls")"
+[[ "$(cat "$calls.umask")" == 0022 ]] \
+  || fail_test "stages inherit the caller's umask $(cat "$calls.umask") instead of 0022"
 
 # The macOS session override and narrow graphical switches are inert on Linux.
 run_linux_setup SETUP_SESSION_KIND=local \
