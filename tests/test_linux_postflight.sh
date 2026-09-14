@@ -290,4 +290,22 @@ postflight_apparmor_attachments "$TEST_TMP/nonexistent-apparmor.d" >/dev/null
 [[ "$POSTFLIGHT_FAILURES" == 0 ]]
 [[ "$POSTFLIGHT_PASSES" == 0 ]]
 
+# SKIP_FLATPAK keeps flatpak off the host, so its absence is not a failure.
+(
+  # shellcheck disable=SC1091
+  . "$TEST_ROOT/lib/os.sh"
+  # shellcheck disable=SC1091
+  . "$TEST_ROOT/lib/apt.sh"
+  PKGMGR=apt
+  PACKAGES_APT=(flatpak kubectl)
+  apt-cache() { [[ "$1" == show ]]; }
+  # The alias check in the same function reads this host's commands, so the
+  # assertion is on the package message rather than the failure count.
+  grep -q 'missing apt packages: flatpak' <<< "$(postflight_packages 2>&1)"
+  if grep -q 'missing apt packages' <<< "$(SKIP_FLATPAK=1 postflight_packages 2>&1)"; then
+    printf 'FAIL: SKIP_FLATPAK=1 still requires the flatpak package\n' >&2
+    exit 1
+  fi
+)
+
 printf 'Linux postflight tests: ok\n'

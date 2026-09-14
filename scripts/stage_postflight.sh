@@ -335,6 +335,7 @@ postflight_packages() {
 
   local missing=() pkg
   for pkg in "${PACKAGES_APT[@]}"; do
+    apt_manifest_package_wanted "$pkg" || continue
     # Only require a manifest package when this distro release advertises it.
     if apt-cache show "$pkg" >/dev/null 2>&1 && ! pkg_installed "$pkg"; then
       missing+=("$pkg")

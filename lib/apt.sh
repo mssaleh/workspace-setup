@@ -194,3 +194,11 @@ apt_gui_app_wanted() {
   [[ "$arch" == amd64 || "$arch" == arm64 ]]
 }
 
+# apt_manifest_package_wanted <package> — whether this run installs and
+# verifies a PACKAGES_APT entry. flatpak follows SKIP_FLATPAK: apt installs its
+# recommended GTK desktop portal along with it.
+apt_manifest_package_wanted() {
+  [[ "$1" == flatpak && -n "${SKIP_FLATPAK:-}" ]] && return 1
+  return 0
+}
+

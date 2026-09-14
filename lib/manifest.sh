@@ -132,8 +132,8 @@ GCM_CREDENTIAL_STORE=secretservice
 
 # Flatpak runtime and the Flathub remote, per https://flathub.org/setup/Ubuntu.
 # The GNOME Software plugin is a graphical component and is installed only when
-# the flatpak stage runs. flatpak itself is in PACKAGES_APT and installed unless
-# SKIP_FLATPAK is set, because apt brings its recommended GTK portal with it.
+# the flatpak stage runs. flatpak itself is in PACKAGES_APT, which
+# apt_manifest_package_wanted filters by SKIP_FLATPAK.
 FLATHUB_REMOTE_URL=https://dl.flathub.org/repo/flathub.flatpakrepo
 PACKAGES_APT_FLATPAK_DESKTOP=(gnome-software-plugin-flatpak)
 
