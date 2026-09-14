@@ -11,8 +11,11 @@ mkdir -p "$fixture" "$TEST_TMP/runtime" "$TEST_TMP/home"
 # derived from setup.sh rather than listed by hand. A hand-kept list turns
 # adding a library into a silent break of the streamed `curl | bash` path,
 # discovered only by whoever next installs a host that way.
+sourced=()
 # shellcheck disable=SC2016 # the pattern matches setup.sh's literal $(repo_dir) text
-mapfile -t sourced < <(sed -n 's|^[[:space:]]*\. "\$(repo_dir)/\(.*\)"$|\1|p' "$TEST_ROOT/setup.sh")
+while IFS= read -r relative; do
+  sourced+=("$relative")
+done < <(sed -n 's|^[[:space:]]*\. "\$(repo_dir)/\(.*\)"$|\1|p' "$TEST_ROOT/setup.sh")
 ((${#sourced[@]})) || {
   printf 'setup.sh sources nothing; the extraction pattern no longer matches\n' >&2
   exit 1
@@ -121,11 +124,14 @@ run_bootstrap() {
 # contains nothing else, because the point is a host where curl is genuinely
 # absent — leaving the real /usr/bin on PATH would find the system's curl and
 # the test would prove nothing.
-BOOTSTRAP_UTILITIES=(bash tar gzip mktemp rm mkdir cp mv chmod cat sed awk dirname uname id)
+BOOTSTRAP_UTILITIES=(tar gzip mktemp rm mkdir cp mv chmod cat sed awk dirname uname id)
 tools_dir() {
   local tool path dir="$TEST_TMP/tools-$1"
   shift
   rm -rf "$dir"; mkdir -p "$dir"
+  # setup.sh is streamed into the bash running this test; tests/run.sh runs it
+  # under each bash the repository supports.
+  ln -sf "$BASH" "$dir/bash"
   for tool in "${BOOTSTRAP_UTILITIES[@]}"; do
     if path=$(command -v "$tool" 2>/dev/null); then
       ln -sf "$path" "$dir/$tool"

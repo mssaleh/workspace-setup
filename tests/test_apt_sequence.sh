@@ -184,11 +184,12 @@ raw_installs=$(printf '%s\n' "$branch" \
 [[ -z "$raw_installs" ]] || fail "a toolbox install bypasses apt_install_packages: $raw_installs"
 (
   sudo() { printf '%s\n' "$*"; }
-  APT_ENV=()
+  # detect_pkgmgr always sets a non-empty APT_ENV for apt-get.
+  APT_ENV=(env DEBIAN_FRONTEND=noninteractive)
   PKGMGR=apt-get
-  [[ "$(INSTALL_RECOMMENDS=0 apt_install_packages jq)" == 'apt-get install -y --no-install-recommends jq' ]] \
+  [[ "$(INSTALL_RECOMMENDS=0 apt_install_packages jq)" == 'env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends jq' ]] \
     || fail 'INSTALL_RECOMMENDS=0 did not leave recommendations out'
-  [[ "$(apt_install_packages jq)" == 'apt-get install -y jq' ]] \
+  [[ "$(apt_install_packages jq)" == 'env DEBIAN_FRONTEND=noninteractive apt-get install -y jq' ]] \
     || fail 'a default install changed its apt arguments'
 )
 

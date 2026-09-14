@@ -830,7 +830,11 @@ bash tests/run.sh
 ```
 
 `tests/run.sh` runs every test file, then names each one that failed and exits
-non-zero.
+non-zero. On macOS it runs the suite twice, under Apple's `/bin/bash` (what a
+fresh Mac runs `setup.sh` with) and under Homebrew's bash (`brew install bash`).
+Each test starts from `env -i` with an empty `HOME` and `TMPDIR`,
+`LANG=C.UTF-8`, and a `PATH` of system and Homebrew directories, so the shell
+that starts the suite cannot change a result.
 
 The suite runs against temporary `HOME` directories and never touches the real one. It covers convergence decisions (install / no-op / legacy-link repair / known-version upgrade / merge / preserved conflict), the `~/.ssh/config` baseline merge and the opt-out and unparseable cases it must refuse, the exact Linux and macOS setup-stage routing contracts, Darwin-module isolation from Linux, host-role/session separation, Command Line Tools gating before Homebrew, generated-completion ownership/syntax/registration, the directory modes
 Linux apt sequencing/removal reporting, AppArmor attachment collisions, native-platform postflight, the host-local environment directory and every way a loader can be present in a file and still reach no shell, and the streamed `curl | bash` payload bootstrap.

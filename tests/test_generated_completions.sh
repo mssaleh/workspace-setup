@@ -14,7 +14,9 @@ HOME="$TEST_TMP/home"
 OS_KIND=macos
 PKGMGR=brew
 BREW_BIN="$TEST_TMP/brew"
-export HOME OS_KIND PKGMGR BREW_BIN
+# setup.sh always provides the real prefix; the completion probes run its bash.
+BREW_PREFIX=$(brew --prefix)
+export HOME OS_KIND PKGMGR BREW_BIN BREW_PREFIX
 mkdir -p "$HOME"
 
 cat > "$BREW_BIN" <<'BREW'
