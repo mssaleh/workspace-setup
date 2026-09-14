@@ -50,6 +50,29 @@ config_hash_is_known() {
     '$1 == key && $2 == hash { found = 1 } END { exit !found }' "$inventory"
 }
 
+# `opencode upgrade` reruns opencode's installer, which appends an empty line,
+# "# opencode" and "export PATH=$HOME/.opencode/bin:$PATH" to a shell startup
+# file. The shipped files already put that directory on PATH, so a shipped
+# version followed by exactly that appendix is still a shipped version.
+config_file_is_known() {
+  local key="$1" file="$2" hash stripped
+  hash=$(config_sha256 "$file" 2>/dev/null) || return 1
+  [[ -n "$hash" ]] || return 1
+  config_hash_is_known "$key" "$hash" && return 0
+  stripped=$(mktemp "${TMPDIR:-/tmp}/config-known.XXXXXX") || return 1
+  awk -v path_line="export PATH=$HOME/.opencode/bin:\$PATH" '
+    { line[NR] = $0 }
+    END {
+      n = NR
+      if (n >= 3 && line[n] == path_line && line[n - 1] == "# opencode" && line[n - 2] == "") n -= 3
+      for (i = 1; i <= n; i++) print line[i]
+    }' "$file" > "$stripped"
+  hash=""
+  cmp -s "$file" "$stripped" || hash=$(config_sha256 "$stripped" 2>/dev/null)
+  rm -f "$stripped"
+  [[ -n "$hash" ]] && config_hash_is_known "$key" "$hash"
+}
+
 # A dotfile byte-identical to the distribution's skeleton copy is not user
 # content — it is exactly what adduser/useradd placed there when the account
 # was created. Every fresh Ubuntu/Debian account starts with /etc/skel/.bashrc
@@ -148,7 +171,6 @@ config_atomic_replace() {
 # it returns zero it sets CONFIG_MERGE_ACTION to "merged" or "unchanged".
 install_regular_file() {
   local src="$1" dst="$2" key="$3" mode="${4:-0644}" merge_fn="${5:-}"
-  local hash
   CONFIG_LAST_ACTION=none
 
   if [[ ! -f "$src" ]]; then
@@ -182,8 +204,7 @@ install_regular_file() {
         info "migrated legacy link to regular file: $dst"
         return 0
       fi
-      hash=$(config_sha256 "$dst" 2>/dev/null || true)
-      if [[ -n "$hash" ]] && config_hash_is_known "$key" "$hash"; then
+      if config_file_is_known "$key" "$dst"; then
         config_atomic_replace "$src" "$dst" "$mode"
         CONFIG_MIGRATED_COUNT=$((CONFIG_MIGRATED_COUNT + 1))
         CONFIG_LAST_ACTION=migrated
@@ -245,8 +266,7 @@ install_regular_file() {
     return 0
   fi
 
-  hash=$(config_sha256 "$dst" 2>/dev/null || true)
-  if [[ -n "$hash" ]] && config_hash_is_known "$key" "$hash"; then
+  if config_file_is_known "$key" "$dst"; then
     config_atomic_replace "$src" "$dst" "$mode"
     CONFIG_UPGRADED_COUNT=$((CONFIG_UPGRADED_COUNT + 1))
     CONFIG_LAST_ACTION=upgraded

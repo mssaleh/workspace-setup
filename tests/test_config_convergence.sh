@@ -87,6 +87,20 @@ install_regular_file "$src" "$dst" fixture
 assert_regular_equal "$src" "$dst"
 [[ "$CONFIG_LAST_ACTION" == upgraded ]]
 
+# opencode's installer appends its PATH lines to a shipped version, which stays
+# upgradable; any other addition keeps the file user-owned.
+# shellcheck disable=SC2016 # $PATH is the literal text the installer writes
+printf 'historical\n\n# opencode\nexport PATH=%s/.opencode/bin:$PATH\n' "$HOME" > "$dst"
+install_regular_file "$src" "$dst" fixture
+assert_regular_equal "$src" "$dst"
+[[ "$CONFIG_LAST_ACTION" == upgraded ]]
+# shellcheck disable=SC2016 # $PATH is the literal text the installer writes
+printf 'historical\nalias mine=true\n\n# opencode\nexport PATH=%s/.opencode/bin:$PATH\n' "$HOME" > "$dst"
+before_conflicts=$CONFIG_CONFLICT_COUNT
+install_regular_file "$src" "$dst" fixture
+[[ "$CONFIG_LAST_ACTION" == conflict ]]
+((CONFIG_CONFLICT_COUNT == before_conflicts + 1))
+
 # Unknown user content is never silently replaced.
 printf 'user-owned\n' > "$dst"
 : > "$inventory"

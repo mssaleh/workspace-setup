@@ -542,6 +542,8 @@ stage_packages() {
     #    Ubuntu/Debian release.
     local apt_pkgs=()
     for pkg in "${PACKAGES_APT[@]}"; do
+      # apt installs flatpak's recommended GTK desktop portal along with it.
+      [[ "$pkg" == flatpak && -n "${SKIP_FLATPAK:-}" ]] && continue
       if apt-cache show "$pkg" >/dev/null 2>&1; then
         if ! pkg_installed "$pkg"; then
           apt_pkgs+=("$pkg")

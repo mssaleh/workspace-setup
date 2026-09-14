@@ -31,14 +31,15 @@ On macOS, host role and invocation context are separate. The default `HOST_PROFI
 `workstation`, including when that workstation is provisioned over SSH. An SSH
 or noninteractive run still installs the requested workstation applications,
 but it never opens Terminal.app or another GUI. Use `HOST_PROFILE=headless` for
-a Mac that should not receive graphical applications. Linux retains its
-existing `SKIP_FONT`-gated desktop journey unchanged.
+a host that should not receive graphical applications. On Linux it skips the
+font and kitty stages, Flatpak, VS Code, LibreOffice, Claude Desktop, the Codex
+app and the GNOME extension manager; each `SKIP_*` control still overrides it.
 
 ## What it does
 
 | Stage | What |
 |---|---|
-| **context** | macOS only: separately classifies the host as `workstation`/`headless` and the current run as `local`/`ssh`/`noninteractive`. Host role controls installation; session kind controls whether GUI activation is permitted. Neither the login shell nor the default terminal is changed. Linux keeps its prior stage selection. |
+| **context** | On macOS, separately classifies the host as `workstation`/`headless` and the current run as `local`/`ssh`/`noninteractive`. Host role controls installation; session kind controls whether GUI activation is permitted. Neither the login shell nor the default terminal is changed. On Linux only the host role applies: `HOST_PROFILE=headless` drops the desktop stages and GUI applications. |
 | **bootstrap** | On macOS, verifies that the selected Xcode Command Line Tools actually provide `xcrun clang` before touching Homebrew, then discovers Homebrew at its real prefix or installs it. It never launches the asynchronous CLT installer dialog. On Linux, ensures curl + git. |
 | **packages** | Installs the cross-platform CLI toolbox: `eza`, `fd`, `bat`, `ripgrep` (`rg`), `fzf`, `zoxide`, `yazi`, `git`, `git-delta` (`delta`), `lazygit`, `gh`, `tmux`, `rsync`, `rclone`, `nmap`, `jq`, `yq`, `pandoc`, `7zz` (`7z`), `cmake`, `ninja`, `node`, `uv`, `ruff`, `helm`, `kubectl`, `cosign`, `ffmpeg`, `poppler` (`poppler-utils`), `nano`, `himalaya`, `ncdu`, `shellcheck`, `pre-commit`, … It installs `xterm-kitty` terminfo as a non-GUI SSH capability on every host. On Linux it registers **every** vendor archive before installing anything (see below), then installs the toolbox, the **Claude Desktop** app (skip with `SKIP_CLAUDE_DESKTOP=1`) and the **Codex app** (skip with `SKIP_CODEX_APP=1`). |
 | **docker** | Linux only: installs the official **Docker Engine** + **Docker Compose v2** from download.docker.com. Docker's documented pre-clean of the distribution's `docker.io`, `containerd` and `runc` names every package apt would take with them before it runs, since those runtimes carry reverse dependencies of their own. A complete, responsive official installation is a no-op on rerun. |
@@ -163,7 +164,7 @@ All optional:
 |---|---|---|
 | `GIT_NAME` | `Your Name` | Name for `~/.gitconfig` `[user].name` |
 | `GIT_EMAIL` | `you@example.com` | Email for `~/.gitconfig` `[user].email` |
-| `HOST_PROFILE` | `workstation` | macOS only: `workstation` installs the requested desktop payload regardless of whether setup is run locally or over SSH; `headless` sets the macOS graphical skip controls. Linux does not read this variable. |
+| `HOST_PROFILE` | `workstation` | `workstation` installs the requested desktop payload regardless of whether setup is run locally or over SSH; `headless` sets the platform's graphical skip controls (on Linux `SKIP_FONT`, `SKIP_FLATPAK`, `SKIP_LIBREOFFICE`, `SKIP_VSCODE`, `SKIP_CLAUDE_DESKTOP`, `SKIP_CODEX_APP` and `SKIP_GNOME_EXTENSIONS`). |
 | `SETUP_SESSION_KIND` | auto-detected | macOS only: test/orchestration override, exactly `local`, `ssh`, or `noninteractive`; SSH/CI evidence cannot be relabeled `local`, and normal runs should leave this unset |
 | `SKIP_FONT` | (unset) | Existing cross-platform umbrella: skip the graphical font/Kitty stages (and, on macOS, workstation applications and Terminal integration); SSH terminfo remains installed |
 | `SKIP_NERD_FONT` | (unset) | macOS only: skip only the Nerd Font |
@@ -685,7 +686,7 @@ The script detects the OS and adapts:
 | Component | macOS | Linux |
 |---|---|---|
 | Package manager | Homebrew | apt-get (Ubuntu/Debian) |
-| Host/session policy | `HOST_PROFILE=workstation` by default; SSH/noninteractive sessions suppress activation, not the workstation package set | unchanged: the historical `SKIP_FONT`-gated graphical path remains in force and desktop integration never selects a default terminal; macOS `HOST_PROFILE`/`SETUP_SESSION_KIND` are not applied |
+| Host/session policy | `HOST_PROFILE=workstation` by default; SSH/noninteractive sessions suppress activation, not the workstation package set | `HOST_PROFILE=headless` sets the Linux graphical skip controls; `SETUP_SESSION_KIND` is not applied, and desktop integration never selects a default terminal |
 | Container runtime | Apple `container` CLI (Apple-signed release pkg) + Homebrew `container-compose`; installed-and-stopped is healthy, with no baseline CPU/memory override | **Docker Engine** (official, from download.docker.com) + Docker Compose v2 |
 | Apple Terminal defaults | untouched unless locally authorized with `CONFIGURE_APPLE_TERMINAL=1`; selecting Clear Dark needs the additional `SET_APPLE_TERMINAL_DEFAULT=1` | skipped |
 | SSH agent | macOS Keychain (launchd-managed `com.openssh.ssh-agent`, `--apple-use-keychain`) | systemd user unit (Ubuntu 26.04+: socket-activated; Ubuntu 24.04: headless drop-in), forwarding-aware local socket fallback, linger + `AddKeysToAgent yes`; passphrase typed once per boot |

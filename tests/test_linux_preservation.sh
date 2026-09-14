@@ -67,12 +67,19 @@ run_linux_setup
 [[ "$(cat "$calls")" == "$expected_default" ]] \
   || fail_test "default Linux stage order changed: $(tr '\n' ' ' < "$calls")"
 
-# The new macOS role/session and narrow graphical switches must be inert on
-# Linux. Historically, only SKIP_FONT gates both Linux graphical stages.
-run_linux_setup HOST_PROFILE=headless SETUP_SESSION_KIND=local \
+# The macOS session override and narrow graphical switches are inert on Linux.
+run_linux_setup SETUP_SESSION_KIND=local \
   SKIP_NERD_FONT=1 SKIP_KITTY=1 SKIP_TERMINAL_PROFILE=1 SKIP_COMPLETIONS=1
 [[ "$(cat "$calls")" == "$expected_default" ]] \
   || fail_test 'a macOS-only control changed the Linux stage journey'
+
+# A headless Linux host drops the desktop stages and nothing else.
+run_linux_setup HOST_PROFILE=headless
+[[ "$(cat "$calls")" == "$(grep -vxE 'stage_(flatpak|fonts_terminal|terminal_profile)' <<< "$expected_default")" ]] \
+  || fail_test "HOST_PROFILE=headless changed more than the desktop stages: $(tr '\n' ' ' < "$calls")"
+if run_linux_setup HOST_PROFILE=server 2>/dev/null; then
+  fail_test 'an unknown HOST_PROFILE was accepted on Linux'
+fi
 
 run_linux_setup SKIP_FONT=1
 if grep -Eq '^stage_(fonts_terminal|terminal_profile)$' "$calls"; then

@@ -19,8 +19,9 @@
 #                xterm-kitty terminfo remains a non-GUI SSH requirement.
 #                Retained as a compatibility umbrella. The narrower controls
 #                below are macOS-only; Linux keeps this existing umbrella.
-#   HOST_PROFILE — macOS only: workstation (default) or headless. A headless
-#                profile sets the macOS graphical SKIP_* controls.
+#   HOST_PROFILE — workstation (default) or headless. A headless profile sets
+#                the platform's graphical SKIP_* controls; on Linux those are
+#                fonts + kitty, Flatpak, and the desktop applications.
 #   SETUP_SESSION_KIND — macOS-only local/ssh/noninteractive test override.
 #                SSH and CI evidence always wins; normally leave this unset.
 #   SKIP_NERD_FONT — macOS only: set to 1 to skip the Nerd Font only
@@ -245,6 +246,28 @@ source_macos_stages() {
   . "$(repo_dir)/scripts/stage_macos_postflight.sh"
 }
 
+# A headless Linux host gets no desktop payload. Every control stays
+# individually overridable.
+apply_linux_host_profile() {
+  HOST_PROFILE=${HOST_PROFILE:-workstation}
+  case "$HOST_PROFILE" in
+    workstation) ;;
+    headless)
+      SKIP_FONT=${SKIP_FONT:-1}
+      SKIP_FLATPAK=${SKIP_FLATPAK:-1}
+      SKIP_LIBREOFFICE=${SKIP_LIBREOFFICE:-1}
+      SKIP_VSCODE=${SKIP_VSCODE:-1}
+      SKIP_CLAUDE_DESKTOP=${SKIP_CLAUDE_DESKTOP:-1}
+      SKIP_CODEX_APP=${SKIP_CODEX_APP:-1}
+      SKIP_GNOME_EXTENSIONS=${SKIP_GNOME_EXTENSIONS:-1}
+      export SKIP_FONT SKIP_FLATPAK SKIP_LIBREOFFICE SKIP_VSCODE \
+        SKIP_CLAUDE_DESKTOP SKIP_CODEX_APP SKIP_GNOME_EXTENSIONS
+      ;;
+    *) fail "HOST_PROFILE must be 'workstation' or 'headless' (got '$HOST_PROFILE')" ;;
+  esac
+  export HOST_PROFILE
+}
+
 # ── Main ─────────────────────────────────────────────────────────────────
 main() {
   setup_color bold; printf '\n╔══════════════════════════════════════════════════════════════╗\n'; setup_color reset
@@ -259,7 +282,8 @@ main() {
     apply_host_profile_policy
     info "OS=$OS_KIND  DISTRO=$DISTRO  PKGMGR=$PKGMGR  HOST_PROFILE=$HOST_PROFILE  SESSION=$SESSION_KIND"
   else
-    info "OS=$OS_KIND  DISTRO=$DISTRO  PKGMGR=$PKGMGR"
+    apply_linux_host_profile
+    info "OS=$OS_KIND  DISTRO=$DISTRO  PKGMGR=$PKGMGR  HOST_PROFILE=$HOST_PROFILE"
   fi
 
   if [[ "$OS_KIND" == macos ]]; then
