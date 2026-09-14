@@ -143,6 +143,11 @@ esac
 _path_append "$NPM_PACKAGES/bin"
 export NPM_PACKAGES NODE_PATH
 
+# `opencode upgrade` reruns opencode's installer without --no-modify-path, and
+# the installer appends an export line to this file unless its directory is
+# already on PATH. Appended: ~/.local/bin holds the verified link to the binary.
+_path_append "$HOME/.opencode/bin"
+
 _path_dedupe
 export PATH BREW_PREFIX
 unset _brew_bin
@@ -420,9 +425,10 @@ fi
 # from every login shell and ~/.config/direnv/direnvrc hands back to the one
 # project that wants them (`use stm32` in its .envrc).
 #
-# Hooked last, after zoxide and fzf: direnv's hook appends to PROMPT_COMMAND and
-# must see the finished value. The re-source guard at the top of this file keeps
-# a second source from stacking a second hook.
+# Hooked last, after zoxide and fzf: direnv's documentation places the hook after
+# every extension that manipulates the prompt, and the hook inserts itself first
+# in PROMPT_COMMAND. The re-source guard at the top of this file keeps a second
+# source from stacking a second hook.
 if command -v direnv >/dev/null 2>&1; then
   eval "$(direnv hook bash)"
 fi

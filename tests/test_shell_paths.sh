@@ -113,6 +113,32 @@ npm_index=$(awk -F: -v wanted="$npm_bin" \
 [[ -n "$local_index" && -n "$npm_index" ]]
 ((local_index < npm_index))
 
+# ── opencode's installer ───────────────────────────────────────────────────
+# `opencode upgrade` reruns https://opencode.ai/install without
+# --no-modify-path, and that installer appends an export line to ~/.bashrc
+# unless `:$PATH:` already contains its directory. Both startup files must pass
+# that check, exactly once, and behind ~/.local/bin.
+opencode_bin="$TEST_TMP/home/.opencode/bin"
+mkdir -p "$opencode_bin"
+# shellcheck disable=SC2016 # expansions belong to the clean child shell
+bash_path=$(env -i HOME="$TEST_TMP/home" USER=test PATH="$clean_path" \
+  /bin/bash --noprofile --norc -c '. "$HOME/.bashrc"; . "$HOME/.bashrc"; printf "%s\n" "$PATH"')
+# shellcheck disable=SC2016 # expansions belong to the clean child shell
+profile_path=$(env -i HOME="$TEST_TMP/home" USER=test PATH="$clean_path" \
+  /bin/sh -c '. "$HOME/.profile"; . "$HOME/.profile"; printf "%s\n" "$PATH"')
+for startup_path in "$bash_path" "$profile_path"; do
+  count=$(awk -F: -v wanted="$opencode_bin" \
+    '{ n=0; for (i=1; i<=NF; i++) if ($i == wanted) n++; print n }' <<< "$startup_path")
+  [[ "$count" == 1 ]] \
+    || { printf 'FAIL: ~/.opencode/bin is on PATH %s times\n' "$count" >&2; exit 1; }
+  local_index=$(awk -F: -v wanted="$TEST_TMP/home/.local/bin" \
+    '{ for (i=1; i<=NF; i++) if ($i == wanted) { print i; exit } }' <<< "$startup_path")
+  opencode_index=$(awk -F: -v wanted="$opencode_bin" \
+    '{ for (i=1; i<=NF; i++) if ($i == wanted) { print i; exit } }' <<< "$startup_path")
+  ((local_index < opencode_index)) \
+    || { printf 'FAIL: ~/.opencode/bin outranks ~/.local/bin\n' >&2; exit 1; }
+done
+
 # An existing NPM_PACKAGES is a deliberate override and must be honoured, not
 # replaced by the default.
 # shellcheck disable=SC2016 # expansions belong to the clean child shell
@@ -204,8 +230,8 @@ for build_tool in CMake/bin Make/bin Ninja/bin; do
     && { printf 'FAIL: %s is back on the global PATH\n' "$build_tool" >&2; exit 1; }
 done
 
-# direnv's hook appends to PROMPT_COMMAND, so it has to be evaluated after the
-# other tools that touch it rather than before them.
+# direnv's documentation places its hook after every extension that manipulates
+# the prompt, so it has to be evaluated after the other tools rather than before.
 direnv_line=$(grep -n 'direnv hook bash' "$TEST_ROOT/dotfiles/bashrc" | cut -d: -f1)
 [[ -n "$direnv_line" ]] || { printf 'FAIL: bash does not hook direnv\n' >&2; exit 1; }
 for earlier in 'zoxide init bash' 'fzf --bash'; do
