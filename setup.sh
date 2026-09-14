@@ -44,7 +44,7 @@
 #   UPDATE_CONTAINER — set to 1 to reinstall the latest Apple-signed package;
 #                refuses to stop a running system automatically
 #   SKIP_LIBREOFFICE — set to 1 to skip LibreOffice (both platforms)
-#   CONFIG_ADOPT — resolve preserved configuration conflicts by installing the
+#   CONFIG_ADOPT — replace preserved conflicts and kept shell files with the
 #                shipped version. Either `all` or a colon-separated list of
 #                paths or basenames. The existing content is copied to
 #                <path>.superseded.<timestamp> first, never discarded.

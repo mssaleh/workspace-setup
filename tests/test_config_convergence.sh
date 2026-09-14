@@ -140,6 +140,14 @@ install_regular_file "$src" "$dst" fixture 0644 accept_shell_file > "$TEST_TMP/k
 ((CONFIG_KEPT_COUNT == before_kept + 1))
 grep -q 'CONFIG_ADOPT=config' "$TEST_TMP/kept.log"
 
+# ...and naming it in CONFIG_ADOPT, as that message says, installs the shipped
+# version with the previous content kept beside it.
+CONFIG_ADOPT=config install_regular_file "$src" "$dst" fixture 0644 accept_shell_file > "$TEST_TMP/adopt-kept.log" 2>&1
+assert_regular_equal "$src" "$dst"
+[[ "$CONFIG_LAST_ACTION" == upgraded ]]
+[[ "$(cat "$dst".superseded.*)" == 'working custom shell file' ]]
+rm -f "$dst".superseded.*
+
 # Claude JSON uses a narrow union merge and preserves unrelated settings.
 claude_src="$TEST_ROOT/dotfiles/claude/settings.json"
 claude_dst="$TEST_TMP/claude.json"

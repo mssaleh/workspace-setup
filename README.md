@@ -193,7 +193,7 @@ All optional:
 | `UPDATE_SYSTEM` | (unset) | `1` applies the documented Linux full-upgrade/autoremove path; never used on macOS |
 | `UPDATE_HOMEBREW` | (unset) | `1` runs `brew update` across all installed taps (including Homebrew migrations), then reports outdated repository-managed formulae/casks without upgrading packages |
 | `UPGRADE_HOMEBREW_FORMULAE` | (unset) | `1` implies the metadata refresh and upgrades only outdated repository-managed formulae; suppresses cask upgrades, cleanup, and unrelated installed-dependent checks |
-| `CONFIG_ADOPT` | (unset) | `all` or a colon-separated path/basename list authorizes backup-first adoption of preserved configuration conflicts |
+| `CONFIG_ADOPT` | (unset) | `all` or a colon-separated path/basename list authorizes backup-first adoption of preserved configuration conflicts and of shell files reported as kept |
 | `REPO_ARCHIVE_URL` | GitHub `main` archive | Source archive used for the temporary `curl\|bash` payload |
 | `REPO_URL` | (unset) | Optional git repository override; requires `git` before bootstrap |
 | `FORCE_COLOR` | (unset) | Set to `1` to force colored output |

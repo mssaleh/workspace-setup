@@ -160,23 +160,28 @@ config_emit_merge_reason() {
   CONFIG_MERGE_REASON=
 }
 
+# config_adopt_shipped <source> <destination> [mode] — install the shipped
+# version after copying the current file to <destination>.superseded.<timestamp>.
+# The user's content is never discarded, only moved aside, so a wrong call is
+# recoverable.
+config_adopt_shipped() {
+  local src="$1" dst="$2" mode="${3:-0644}" backup
+  backup="${dst}.superseded.$(date +%Y%m%d%H%M%S)"
+  if ! cp -p "$dst" "$backup" 2>/dev/null || ! config_atomic_replace "$src" "$dst" "$mode"; then
+    warn "could not adopt $dst; leaving what is there"
+    return 1
+  fi
+  CONFIG_UPGRADED_COUNT=$((CONFIG_UPGRADED_COUNT + 1))
+  CONFIG_LAST_ACTION=upgraded
+  info "adopted the shipped version of $dst (previous content kept at $backup)"
+}
+
 config_record_conflict() {
   local dst="$1" src="${2:-}"
 
-  # Adopting keeps a timestamped copy first. The user's content is never
-  # discarded, only moved aside, so a wrong call is recoverable.
-  if [[ -n "$src" ]] && config_adopt_requested "$dst"; then
-    local backup
-    backup="${dst}.superseded.$(date +%Y%m%d%H%M%S)"
-    if cp -p "$dst" "$backup" 2>/dev/null \
-       && config_atomic_replace "$src" "$dst"; then
-      CONFIG_UPGRADED_COUNT=$((CONFIG_UPGRADED_COUNT + 1))
-      CONFIG_LAST_ACTION=upgraded
-      info "adopted the shipped version of $dst (previous content kept at $backup)"
-      config_emit_merge_reason
-      return 0
-    fi
-    warn "could not adopt $dst; preserving what is there"
+  if [[ -n "$src" ]] && config_adopt_requested "$dst" && config_adopt_shipped "$src" "$dst"; then
+    config_emit_merge_reason
+    return 0
   fi
 
   CONFIG_CONFLICT_COUNT=$((CONFIG_CONFLICT_COUNT + 1))
@@ -330,7 +335,11 @@ install_regular_file() {
           info "merged required settings into: $dst"
           ;;
         kept)
-          # Works, but is not a shipped version, so no later run updates it.
+          # Works, but is not a shipped version, so no later run updates it
+          # unless the operator names it in CONFIG_ADOPT.
+          if config_adopt_requested "$dst" && config_adopt_shipped "$src" "$dst" "$mode"; then
+            return 0
+          fi
           CONFIG_KEPT_COUNT=$((CONFIG_KEPT_COUNT + 1))
           CONFIG_LAST_ACTION=kept
           info "kept $dst: it works but is not the shipped version, so it is not updated"
