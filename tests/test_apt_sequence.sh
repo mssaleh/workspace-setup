@@ -148,4 +148,30 @@ line="$(printf 'deb [signed-by=/usr/share/keyrings/example.gpg] https://example.
 [[ "$(apt_write_sources "$tmp_sources" "${line/stable/testing}")" == changed ]] \
   || fail 'apt_write_sources ignored a genuine content change'
 
+# ── 7. A key's fingerprint does not depend on the user's GnuPG home ────────
+# An unwritable ~/.gnupg, such as one created by `sudo gpg`, made gpg print
+# nothing, and every vendor key then read as a fingerprint mismatch.
+if command -v gpg >/dev/null 2>&1; then
+  mkdir -p "$tmp_root/home/.gnupg"
+  chmod 000 "$tmp_root/home/.gnupg"
+  cat > "$tmp_root/key.asc" <<'KEY'
+-----BEGIN PGP PUBLIC KEY BLOCK-----
+
+mDMEaqej0RYJKwYBBAHaRw8BAQdAt2oo4MfbinoIKro6PLrvH0yHiQdQ3vxUomTU
+hufbft60L3dvcmtzcGFjZS1zZXR1cCB0ZXN0IGtleSA8dGVzdEBleGFtcGxlLmlu
+dmFsaWQ+iJAEExYKADgWIQTlpbhaShnPQQkR//IrZHAKd7Q6MQUCaqej0QIbAwUL
+CQgHAgYVCgkICwIEFgIDAQIeAQIXgAAKCRArZHAKd7Q6MQozAQDNqbebNfyG36w5
+zDzSGsXSrdRn9Mt9Cj5eBEfHwBAmEwEA2JxuP5jkN9ITVjuK/ZonLOcV/+/dT64m
+3MNLImYJDQ4=
+=aDLp
+-----END PGP PUBLIC KEY BLOCK-----
+KEY
+  fingerprint=$(unset GNUPGHOME; HOME="$tmp_root/home" apt_keyring_fingerprints "$tmp_root/key.asc" || true)
+  chmod 700 "$tmp_root/home/.gnupg"
+  [[ "$fingerprint" == E5A5B85A4A19CF410911FFF22B64700A77B43A31 ]] \
+    || fail "apt_keyring_fingerprints read '$fingerprint' with an unwritable ~/.gnupg"
+else
+  printf 'SKIP: gpg is not installed, so the key fingerprint check did not run\n'
+fi
+
 printf 'apt sequence tests: ok\n'

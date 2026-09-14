@@ -7,9 +7,20 @@
 # Every one is guarded by the state it produces, so a host that is already
 # configured performs no download, no write, and no apt update.
 
+# apt_gpg <gpg arguments...> — gpg with a throwaway home directory. Reading or
+# dearmouring a downloaded key needs no keyring, and an unwritable ~/.gnupg
+# (one left by `sudo gpg`, for example) makes gpg print nothing at all.
+apt_gpg() {
+  local home rc=0
+  home=$(mktemp -d "${TMPDIR:-/tmp}/apt-gpg.XXXXXX") || return 1
+  GNUPGHOME="$home" gpg --batch --no-autostart "$@" || rc=$?
+  rm -rf -- "$home"
+  return "$rc"
+}
+
 # apt_keyring_fingerprints <keyring> — print each primary key's fingerprint.
 apt_keyring_fingerprints() {
-  gpg --show-keys --with-colons "$1" 2>/dev/null \
+  apt_gpg --show-keys --with-colons "$1" 2>/dev/null \
     | awk -F: '$1 == "pub" { want = 1; next } $1 == "fpr" && want { print $10; want = 0 }'
 }
 
@@ -62,7 +73,7 @@ apt_trust_repo_key() {
   # gpg --dearmor accepts an armoured or an already-binary key and emits the
   # binary keyring apt expects, so a failure here means the download is not an
   # OpenPGP key at all.
-  elif ! gpg --dearmor < "$key" > "$installable" 2>/dev/null; then
+  elif ! apt_gpg --dearmor < "$key" > "$installable" 2>/dev/null; then
     warn "$label: the download from $url is not an OpenPGP key — skipping"
     rm -f "$key" "$installable"
     return 1
