@@ -33,7 +33,9 @@ printf '\033]2;host: ~/dir\033\\'
 sleep 2
 PANE
   chmod +x "$TEST_TMP/title-pane.sh"
-  TERM=xterm-kitty timeout 20 script -qfec \
+  # xterm-256color is in every ncurses base install; tmux refuses to start on a
+  # TERM whose terminfo entry is missing, as xterm-kitty's is on a fresh host.
+  TERM=xterm-256color timeout 20 script -qfec \
     "tmux -L workspace-setup-title-test -f '$TEST_ROOT/dotfiles/tmux.conf' new-session -s title '$TEST_TMP/title-pane.sh'" \
     "$TEST_TMP/title.log" >/dev/null 2>&1 || true
   tmux -L workspace-setup-title-test kill-server >/dev/null 2>&1 || true

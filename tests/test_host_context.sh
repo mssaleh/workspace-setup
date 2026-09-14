@@ -67,10 +67,12 @@ fail_test() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
   ! session_allows_gui_activation
 ) || fail_test 'SETUP_SESSION_KIND bypassed CI session evidence'
 
-if (HOST_PROFILE=server SETUP_SESSION_KIND=local detect_host_context) >/dev/null 2>&1; then
+# As from a local terminal: SSH or CI evidence decides the session kind before
+# SETUP_SESSION_KIND is read, which would hide an invalid value.
+if (unset SSH_CONNECTION SSH_TTY CI; HOST_PROFILE=server SETUP_SESSION_KIND=local detect_host_context) >/dev/null 2>&1; then
   fail_test 'an unknown host profile was accepted'
 fi
-if (HOST_PROFILE=workstation SETUP_SESSION_KIND=desktop detect_host_context) >/dev/null 2>&1; then
+if (unset SSH_CONNECTION SSH_TTY CI; HOST_PROFILE=workstation SETUP_SESSION_KIND=desktop detect_host_context) >/dev/null 2>&1; then
   fail_test 'an unknown session kind was accepted'
 fi
 
