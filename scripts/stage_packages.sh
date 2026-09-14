@@ -511,15 +511,14 @@ stage_packages() {
     # APT_ENV makes this non-interactive (no debconf/needrestart prompts).
     sudo "${APT_ENV[@]}" "$PKGMGR" update >/dev/null 2>&1 || warn "apt update failed (continuing; installs may use a stale index)"
 
-    # 0. Ensure en_US.UTF-8 locale is generated. The `ds` mosh wrapper forces
-    #    LC_ALL=en_US.UTF-8 and mosh-server exits 1 if that locale isn't
-    #    available (verified in mosh source: src/util/locale_utils.cc). Ubuntu
-    #    server images generate it by default; minimal images don't even
-    #    install the `locales` package. This is idempotent (locale-gen is a
-    #    no-op for already-generated locales; the sed is a no-op if the line
-    #    is already uncommented).
+    # 0. Ensure en_US.UTF-8 locale is generated. The dotfiles LANG guard
+    #    exports it, and perl warns on every start when LANG names a locale
+    #    that was never generated. Ubuntu server images generate it by
+    #    default; minimal images don't even install the `locales` package.
+    #    This is idempotent (locale-gen is a no-op for already-generated
+    #    locales; the sed is a no-op if the line is already uncommented).
     if ! locale -a 2>/dev/null | grep -qi '^en_US\.utf8$\|^en_US\.UTF-8$'; then
-      info "generating en_US.UTF-8 locale (needed by mosh + the dotfiles LANG guard)…"
+      info "generating en_US.UTF-8 locale (needed by the dotfiles LANG guard)…"
       # Install the `locales` package first (absent on minimal images).
       if ! dpkg -s locales >/dev/null 2>&1; then
         sudo "${APT_ENV[@]}" "$PKGMGR" install -y locales
@@ -528,7 +527,7 @@ stage_packages() {
       if [[ -f /etc/locale.gen ]]; then
         sudo sed -i 's/^# *en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen
       fi
-      sudo "${APT_ENV[@]}" locale-gen en_US.UTF-8 || warn "locale-gen en_US.UTF-8 failed (mosh to this host may break)"
+      sudo "${APT_ENV[@]}" locale-gen en_US.UTF-8 || warn "locale-gen en_US.UTF-8 failed"
     else
       ok "en_US.UTF-8 locale already generated"
     fi

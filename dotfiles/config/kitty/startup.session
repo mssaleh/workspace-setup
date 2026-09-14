@@ -1,8 +1,10 @@
 # kitty startup session — your default workspace, opened on launch.
 # Docs: https://sw.kovidgoyal.net/kitty/overview/#startup-sessions
 #
-# Best workflow: arrange the panes/tabs you want, press Cmd+Shift+S to snapshot
-# the live layout to a file, then point `startup_session` in kitty.conf at it.
+# Best workflow: arrange the panes/tabs you want, press Ctrl+Shift+Alt+S
+# (Cmd+Shift+S) to save them as a session in ~/.config/kitty, then point
+# `startup_session` in kitty.conf at it. Ctrl+Shift+Alt+O (Cmd+Shift+O) lists
+# every session there, this file included, and switches to the one you pick.
 # Directives apply to the tab/window currently being built, in order.
 
 layout splits

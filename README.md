@@ -40,7 +40,7 @@ existing `SKIP_FONT`-gated desktop journey unchanged.
 |---|---|
 | **context** | macOS only: separately classifies the host as `workstation`/`headless` and the current run as `local`/`ssh`/`noninteractive`. Host role controls installation; session kind controls whether GUI activation is permitted. Neither the login shell nor the default terminal is changed. Linux keeps its prior stage selection. |
 | **bootstrap** | On macOS, verifies that the selected Xcode Command Line Tools actually provide `xcrun clang` before touching Homebrew, then discovers Homebrew at its real prefix or installs it. It never launches the asynchronous CLT installer dialog. On Linux, ensures curl + git. |
-| **packages** | Installs the cross-platform CLI toolbox: `eza`, `fd`, `bat`, `ripgrep` (`rg`), `fzf`, `zoxide`, `yazi`, `git`, `git-delta` (`delta`), `lazygit`, `gh`, `tmux`, `mosh`, `rsync`, `rclone`, `nmap`, `jq`, `yq`, `pandoc`, `7zz` (`7z`), `cmake`, `ninja`, `node`, `uv`, `ruff`, `helm`, `kubectl`, `cosign`, `ffmpeg`, `poppler` (`poppler-utils`), `nano`, `himalaya`, `ncdu`, `shellcheck`, `pre-commit`, … It installs `xterm-kitty` terminfo as a non-GUI SSH capability on every host. On Linux it registers **every** vendor archive before installing anything (see below), then installs the toolbox, the **Claude Desktop** app (skip with `SKIP_CLAUDE_DESKTOP=1`) and the **Codex app** (skip with `SKIP_CODEX_APP=1`). |
+| **packages** | Installs the cross-platform CLI toolbox: `eza`, `fd`, `bat`, `ripgrep` (`rg`), `fzf`, `zoxide`, `yazi`, `git`, `git-delta` (`delta`), `lazygit`, `gh`, `tmux`, `rsync`, `rclone`, `nmap`, `jq`, `yq`, `pandoc`, `7zz` (`7z`), `cmake`, `ninja`, `node`, `uv`, `ruff`, `helm`, `kubectl`, `cosign`, `ffmpeg`, `poppler` (`poppler-utils`), `nano`, `himalaya`, `ncdu`, `shellcheck`, `pre-commit`, … It installs `xterm-kitty` terminfo as a non-GUI SSH capability on every host. On Linux it registers **every** vendor archive before installing anything (see below), then installs the toolbox, the **Claude Desktop** app (skip with `SKIP_CLAUDE_DESKTOP=1`) and the **Codex app** (skip with `SKIP_CODEX_APP=1`). |
 | **docker** | Linux only: installs the official **Docker Engine** + **Docker Compose v2** from download.docker.com. Docker's documented pre-clean of the distribution's `docker.io`, `containerd` and `runc` names every package apt would take with them before it runs, since those runtimes carry reverse dependencies of their own. A complete, responsive official installation is a no-op on rerun. |
 | **toolchains** | Installs upstream **rustup**, Astral's standalone **uv/uvx** (plus its receipt), native Claude Code and Codex CLIs, and upstream opencode on Linux. Linux also retains its existing upstream Microsoft Graph CLI (`mgc`) provider. The separate Homebrew `uv` formula remains an intentional backup. |
 | **configuration** | Converges ordinary files under `$HOME`; repairs old links into temporary checkouts, atomically upgrades exact known historical versions, semantically merges supported JSON/TOML/Git/ssh formats and repairs a shell startup file that has lost the host-local environment loader, preserves ambiguous user-owned content, installs the coding-agent skills into each agent home, and provisions the host-local environment directory `~/.config/shell/env.d/` that the supported shells source. |
@@ -467,11 +467,13 @@ bash setup.sh
 ```
 
 Kitty and tmux are configured as one clipboard path for coding agents: OSC 52
-writes work locally and through SSH/Mosh/tmux, while clipboard reads always ask
+writes work locally and through SSH and tmux, while clipboard reads always ask
 for confirmation. tmux uses `set-clipboard on` specifically so applications in
 a pane—not only tmux copy mode—can copy results to the desktop clipboard. tmux
 also forwards each pane's title, which the shell sets to `<host>: <dir>`, so the
-outer tab still names the remote machine inside `ds`.
+outer tab still names the remote machine inside `ds`. `ds <host>` runs `ks` into
+the tmux session `main` on the host: its shells survive a dropped connection,
+and running `ds <host>` again reattaches.
 
 ## Working on a Mac over SSH
 

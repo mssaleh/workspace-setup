@@ -11,12 +11,13 @@
 
 # `ks <host>` is the managed-host profile: kitty ships its terminfo and shell
 # integration. `s <host>` is the legacy profile and advertises xterm-256color.
-# `ds <host>` remains the durable Mosh + tmux profile.
+# `ds <host>` is the durable profile: `ks` into a tmux session on the host.
 
 # Defaults for every host. Plain SSH fails a dead connection in about three
-# minutes; Mosh + tmux, rather than a three-hour keepalive grace period, owns
-# session durability. Multiplexing removes repeat-authentication latency while
-# keeping each master short-lived and its socket inside a private directory.
+# minutes; tmux on the host, rather than a three-hour keepalive grace period,
+# owns session durability. Multiplexing removes repeat-authentication latency
+# while keeping each master short-lived and its socket inside a private
+# directory.
 Host *
     AddKeysToAgent yes
     ConnectTimeout 10

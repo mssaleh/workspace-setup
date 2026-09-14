@@ -25,7 +25,7 @@ PACKAGES_BREW=(
   bash bash-completion@2 zsh-autosuggestions zsh-syntax-highlighting coreutils
   eza fd bat ripgrep zoxide yazi fzf chafa
   git git-delta lazygit git-filter-repo pre-commit gh shellcheck
-  mosh tmux rsync rclone nmap curl wget
+  tmux rsync rclone nmap curl wget
   jq yq pandoc sevenzip
   direnv
   cmake ninja
@@ -87,7 +87,7 @@ PACKAGES_APT=(
   ffmpeg poppler-utils nano
   ncdu smartmontools xsel pkg-config
   ca-certificates gnupg lsb-release unzip xz-utils fontconfig ncurses-bin
-  eza chafa mosh
+  eza chafa
   flatpak
   # Remote shells inherit TERM=xterm-kitty even when this host has no GUI.
   # This package is only terminal capability metadata; it does not install

@@ -142,6 +142,27 @@ if ! env -i HOME="$TEST_TMP/home" USER=test TERM=dumb \
   fail_test 're-sourcing bashrc changes PROMPT_COMMAND'
 fi
 
+# `ds` goes through `ks` and requests the terminal itself: neither ssh nor the
+# ssh kitten allocates one for a remote command, and tmux will not start without.
+stub_bin="$TEST_TMP/stub-bin"
+mkdir -p "$stub_bin"
+for stub in ssh kitten; do
+  printf '#!/bin/sh\nprintf "%%s\\n" "%s $*" > "%s/ds-argv"\n' "$stub" "$TEST_TMP" \
+    > "$stub_bin/$stub"
+  chmod +x "$stub_bin/$stub"
+done
+for kitty_window in '' 7; do
+  rm -f "$TEST_TMP/ds-argv"
+  env -i HOME="$TEST_TMP/home" USER=test TERM=dumb KITTY_WINDOW_ID="$kitty_window" \
+      PATH="$stub_bin:/usr/bin:/bin:/usr/sbin:/sbin" \
+      /bin/bash --noprofile --rcfile "$TEST_TMP/home/.bashrc" -ic 'ds devhost' \
+      >/dev/null 2>&1 || true
+  expected='ssh -t devhost tmux new -A -D -s main'
+  [[ -z "$kitty_window" ]] || expected="kitten $expected"
+  [[ "$(cat "$TEST_TMP/ds-argv" 2>/dev/null)" == "$expected" ]] \
+    || fail_test "ds did not run: $expected"
+done
+
 # ── GNOME terminal: share behaviour, never appearance ──────────────────────
 # Ptyxis keeps Ubuntu's palette and font on purpose. Looking different from
 # kitty is how you tell at a glance which terminal a window belongs to, so a
