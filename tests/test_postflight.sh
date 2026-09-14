@@ -61,9 +61,11 @@ repo_dir() { printf '%s\n' "$REPO_DIR"; }
 # shellcheck disable=SC1091
 . "$TEST_ROOT/scripts/stage_macos_postflight.sh"
 
-# Keep this focused on the unified checks rather than the host's package list.
+# Keep this focused on the unified checks rather than the host's package list,
+# so every command a check resolves comes from this fixture: delta is the pager
+# and diff filter ~/.gitconfig names.
 PACKAGES_BREW=()
-for command_name in uv uvx claude codex; do
+for command_name in uv uvx claude codex delta; do
   printf '%s\n' '#!/bin/sh' 'exit 0' > "$HOME/.local/bin/$command_name"
   chmod +x "$HOME/.local/bin/$command_name"
 done
