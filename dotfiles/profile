@@ -66,6 +66,9 @@ if [ -n "$_profile_brew" ]; then
     export BREW_PREFIX
   fi
 fi
+# rustup's toolchain proxies outrank Homebrew, whose rustup formula links its
+# own rustup into the prefix.
+_profile_prepend "$HOME/.cargo/bin"
 _profile_prepend "$HOME/.local/bin"
 
 # npm's global prefix — see the matching block in ~/.bashrc. Appended so an

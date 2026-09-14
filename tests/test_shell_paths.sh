@@ -61,6 +61,43 @@ if [[ "$(uname -s)" == Darwin ]]; then
   fi
 fi
 
+# ── rustup outranks Homebrew ───────────────────────────────────────────────
+# Homebrew's rustup formula links rustup into the prefix, so a Homebrew prefix
+# ahead of ~/.cargo/bin shadows the toolchain the setup installs and verifies.
+cargo_bin="$TEST_TMP/home/.cargo/bin"
+mkdir -p "$cargo_bin"
+# shellcheck disable=SC2016 # literal content for the fixture's future shell
+printf '%s\n' 'export PATH="$HOME/.cargo/bin:$PATH"' > "$TEST_TMP/home/.cargo/env"
+# path_index <PATH> <entry> — the 1-based position of <entry>, or nothing.
+path_index() {
+  awk -F: -v wanted="$2" '{ for (i=1; i<=NF; i++) if ($i == wanted) { print i; exit } }' <<< "$1"
+}
+# shellcheck disable=SC2016 # expansions belong to the clean child shell
+output=$(env -i HOME="$TEST_TMP/home" USER=test PATH="$clean_path" \
+  /bin/bash --noprofile --norc -c '. "$HOME/.bashrc"; printf "%s\n%s\n" "${BREW_PREFIX:-}" "$PATH"')
+brew_prefix=${output%%$'\n'*}
+if [[ -z "$brew_prefix" ]]; then
+  printf 'SKIP: this host has no Homebrew prefix, so rustup-over-Homebrew ordering was not checked\n'
+else
+  startup_paths=("bash:${output#*$'\n'}")
+  # shellcheck disable=SC2016 # expansions belong to the clean child shell
+  startup_paths+=("sh:$(env -i HOME="$TEST_TMP/home" USER=test PATH="$clean_path" \
+    /bin/sh -c '. "$HOME/.profile"; printf "%s\n" "$PATH"')")
+  if [[ "$(uname -s)" == Darwin ]]; then
+    # shellcheck disable=SC2016 # expansions belong to the clean child shell
+    startup_paths+=("zsh:$(env -i HOME="$TEST_TMP/home" USER=test PATH="$clean_path" \
+      /bin/zsh -dfc 'source "$HOME/.zshenv"; source "$HOME/.zprofile"; printf "%s\n" "$PATH"')")
+  fi
+  for startup_path in "${startup_paths[@]}"; do
+    cargo_index=$(path_index "${startup_path#*:}" "$cargo_bin")
+    brew_index=$(path_index "${startup_path#*:}" "$brew_prefix/bin")
+    if [[ -z "$cargo_index" || -z "$brew_index" ]] || ! ((cargo_index < brew_index)); then
+      printf 'FAIL: %s puts %s ahead of ~/.cargo/bin\n' "${startup_path%%:*}" "$brew_prefix/bin" >&2
+      exit 1
+    fi
+  done
+fi
+
 # ── npm's global prefix ────────────────────────────────────────────────────
 # The NodeSource instructions add these by appending export lines to ~/.bashrc,
 # which grows the file and duplicates the PATH entry every time it is run. Here

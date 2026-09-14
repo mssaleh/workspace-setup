@@ -129,6 +129,9 @@ if [[ -n "$_brew_bin" ]]; then
     _path_prepend "$BREW_PREFIX/bin"
   fi
 fi
+# rustup's toolchain proxies outrank Homebrew, whose rustup formula links its
+# own rustup into the prefix.
+_path_prepend "$HOME/.cargo/bin"
 _path_prepend "$HOME/.local/bin"
 
 # npm's global prefix lives in $HOME so `npm i -g` never needs sudo and never

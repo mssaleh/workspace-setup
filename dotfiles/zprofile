@@ -6,5 +6,6 @@ if [[ -n "${BREW_PREFIX:-}" && -x "$BREW_PREFIX/bin/brew" ]]; then
   eval "$("$BREW_PREFIX/bin/brew" shellenv zsh)"
   path=("$BREW_PREFIX/bin" "$BREW_PREFIX/sbin" $path)
 fi
+[[ -d "$HOME/.cargo/bin" ]] && path=("$HOME/.cargo/bin" $path)
 path=("$HOME/.local/bin" $path)
 export PATH BREW_PREFIX

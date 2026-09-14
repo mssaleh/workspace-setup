@@ -21,6 +21,9 @@ if [[ -n "$_brew_bin" ]]; then
   [[ -n "$BREW_PREFIX" && -d "$BREW_PREFIX/bin" ]] && \
     path=("$BREW_PREFIX/bin" "$BREW_PREFIX/sbin" $path)
 fi
+# rustup's toolchain proxies outrank Homebrew, whose rustup formula links its
+# own rustup into the prefix.
+[[ -d "$HOME/.cargo/bin" ]] && path=("$HOME/.cargo/bin" $path)
 # Standalone user tools (notably uv/uvx, Claude, and Codex) are the winner even
 # when path_helper or Homebrew had already inserted the directory elsewhere.
 path=("$HOME/.local/bin" $path)
