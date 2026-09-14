@@ -29,3 +29,6 @@ Host *
     ControlPath ~/.ssh/controlmasters/%C
     HashKnownHosts yes
     UpdateHostKeys yes
+    # Ubuntu's /etc/ssh/ssh_config enables GSSAPI, which costs every new
+    # connection a Kerberos attempt. Set it to yes per Host where you use Kerberos.
+    GSSAPIAuthentication no

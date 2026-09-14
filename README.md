@@ -469,7 +469,9 @@ bash setup.sh
 Kitty and tmux are configured as one clipboard path for coding agents: OSC 52
 writes work locally and through SSH/Mosh/tmux, while clipboard reads always ask
 for confirmation. tmux uses `set-clipboard on` specifically so applications in
-a pane—not only tmux copy mode—can copy results to the desktop clipboard.
+a pane—not only tmux copy mode—can copy results to the desktop clipboard. tmux
+also forwards each pane's title, which the shell sets to `<host>: <dir>`, so the
+outer tab still names the remote machine inside `ds`.
 
 ## Working on a Mac over SSH
 

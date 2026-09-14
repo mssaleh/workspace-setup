@@ -22,6 +22,35 @@ grep -qE '^[[:space:]]*set[[:space:]]+-s[[:space:]]+set-clipboard[[:space:]]+on(
   "$TEST_ROOT/dotfiles/tmux.conf" \
   || fail_test 'tmux does not allow pane applications to write the clipboard'
 
+# The shell titles each pane "<host>: <dir>"; a real attached client must receive
+# it. util-linux `script` provides the pty; BSD script takes different flags.
+if command -v tmux >/dev/null 2>&1 && command -v timeout >/dev/null 2>&1 \
+    && script --version 2>/dev/null | grep -q util-linux; then
+  cat > "$TEST_TMP/title-pane.sh" <<'PANE'
+#!/bin/sh
+sleep 1
+printf '\033]2;host: ~/dir\033\\'
+sleep 2
+PANE
+  chmod +x "$TEST_TMP/title-pane.sh"
+  TERM=xterm-kitty timeout 20 script -qfec \
+    "tmux -L workspace-setup-title-test -f '$TEST_ROOT/dotfiles/tmux.conf' new-session -s title '$TEST_TMP/title-pane.sh'" \
+    "$TEST_TMP/title.log" >/dev/null 2>&1 || true
+  tmux -L workspace-setup-title-test kill-server >/dev/null 2>&1 || true
+  LC_ALL=C grep -aqE $'\e\\][02];host: ~/dir' "$TEST_TMP/title.log" \
+    || fail_test 'tmux does not forward the pane title to the outer terminal'
+fi
+
+# Ubuntu's /etc/ssh/ssh_config enables GSSAPI and ssh reads it after the user's
+# file, first value winning; the shipped Host * has to decide it first.
+if command -v ssh >/dev/null 2>&1; then
+  printf '%s\n' "Include \"$TEST_ROOT/dotfiles/ssh/config\"" 'Host *' \
+    '    GSSAPIAuthentication yes' > "$TEST_TMP/ssh-with-ubuntu-default"
+  [[ "$(ssh -G -F "$TEST_TMP/ssh-with-ubuntu-default" example.invalid 2>/dev/null \
+        | awk '$1 == "gssapiauthentication" { print $2 }')" == no ]] \
+    || fail_test 'shipped ssh config leaves Ubuntu GSSAPI authentication on'
+fi
+
 # Writes are deliberate; reads remain confirmation-gated to protect clipboard
 # secrets from local and remote programs.
 clipboard_line=$(grep -E '^[[:space:]]*clipboard_control[[:space:]]' \
