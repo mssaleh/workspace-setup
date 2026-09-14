@@ -186,6 +186,15 @@ POSTFLIGHT_FAILURES=0
 postflight_upstream_tools
 [[ "$POSTFLIGHT_FAILURES" == 1 ]]
 
+# ...and one that is there but cannot start, such as a build for a newer glibc.
+printf '%s\n' '#!/bin/sh' 'exit 1' > "$HOME/.local/bin/ruff"
+chmod +x "$HOME/.local/bin/ruff"
+POSTFLIGHT_PASSES=0
+POSTFLIGHT_FAILURES=0
+postflight_upstream_tools > "$TEST_TMP/unrunnable.log" 2>&1
+[[ "$POSTFLIGHT_FAILURES" == 1 ]]
+grep -q 'do not run on this host:.*/ruff' "$TEST_TMP/unrunnable.log"
+
 # ── STM32CubeCLT must not shadow the system build tools ────────────────────
 # The vendor profile script prepends its bundled CMake, Make and Ninja ahead of
 # /usr/bin for every login shell. Resolution is stubbed rather than run against
@@ -216,7 +225,7 @@ postflight_login_path_resolve() {
 }
 POSTFLIGHT_PASSES=0
 POSTFLIGHT_FAILURES=0
-postflight_vendor_toolchain_paths
+postflight_vendor_toolchain_paths >/dev/null 2>&1
 [[ "$POSTFLIGHT_FAILURES" == 1 ]]
 
 # Removing the vendor directories entirely must not be reported as success for
@@ -228,7 +237,7 @@ postflight_login_path_resolve() {
 }
 POSTFLIGHT_PASSES=0
 POSTFLIGHT_FAILURES=0
-postflight_vendor_toolchain_paths
+postflight_vendor_toolchain_paths >/dev/null 2>&1
 [[ "$POSTFLIGHT_FAILURES" == 1 ]]
 
 # A host without STM32CubeCLT is not a host with a problem.
@@ -238,6 +247,21 @@ POSTFLIGHT_FAILURES=0
 postflight_vendor_toolchain_paths
 [[ "$POSTFLIGHT_FAILURES" == 0 ]]
 [[ "$POSTFLIGHT_PASSES" == 0 ]]
+
+# ── The pager ~/.gitconfig names must resolve ─────────────────────────────
+git config --file "$HOME/.gitconfig" core.pager delta
+git config --file "$HOME/.gitconfig" interactive.diffFilter 'delta --color-only'
+postflight_login_path_resolve() { return 0; }
+POSTFLIGHT_PASSES=0
+POSTFLIGHT_FAILURES=0
+postflight_git_tools > "$TEST_TMP/git-tools.log" 2>&1
+[[ "$POSTFLIGHT_FAILURES" == 1 ]]
+grep -q 'login PATH: delta$' "$TEST_TMP/git-tools.log"
+postflight_login_path_resolve() { printf '/usr/bin/%s\n' "$1"; }
+POSTFLIGHT_PASSES=0
+POSTFLIGHT_FAILURES=0
+postflight_git_tools >/dev/null
+[[ "$POSTFLIGHT_FAILURES" == 0 && "$POSTFLIGHT_PASSES" == 1 ]]
 
 # ── Two AppArmor profiles must not claim one executable ────────────────────
 # A fixture directory rather than /etc/apparmor.d, so both states are exercised
@@ -261,8 +285,12 @@ postflight_apparmor_attachments "$apparmor_fixture" >/dev/null
 [[ "$POSTFLIGHT_FAILURES" == 0 ]]
 [[ "$POSTFLIGHT_PASSES" == 1 ]]
 
-# The Edge case: a second profile under a different name for the same binary.
+# The Edge case: a second profile under a different name for the same binary,
+# copied into place from Edge's own package on every upgrade.
 write_profile microsoft-edge-stable 4.0 /opt/microsoft/msedge/msedge
+postflight_apparmor_profile_source() {
+  [[ "$2" != microsoft-edge-stable ]] || printf '/opt/microsoft/msedge/apparmor.d/microsoft-edge-stable\n'
+}
 POSTFLIGHT_PASSES=0
 POSTFLIGHT_FAILURES=0
 # To a file, not $(…): a subshell would discard the counters it increments.
@@ -273,6 +301,8 @@ collision_report=$(cat "$TEST_TMP/collision.log")
 # Naming both claimants is the actionable half.
 [[ "$collision_report" == *"/opt/microsoft/msedge/msedge"* ]]
 [[ "$collision_report" == *msedge* && "$collision_report" == *microsoft-edge-stable* ]]
+# ...and the diversion that keeps the upgrade from copying it back.
+[[ "$collision_report" == *"dpkg-divert --local --rename --divert /opt/microsoft/msedge/apparmor.d/microsoft-edge-stable.disabled"* ]]
 rm "$apparmor_fixture/microsoft-edge-stable"
 
 # A disable/ symlink is not a second claim on the executable.
@@ -289,6 +319,25 @@ POSTFLIGHT_FAILURES=0
 postflight_apparmor_attachments "$TEST_TMP/nonexistent-apparmor.d" >/dev/null
 [[ "$POSTFLIGHT_FAILURES" == 0 ]]
 [[ "$POSTFLIGHT_PASSES" == 0 ]]
+
+# A tool this release's apt does not carry must come from its upstream release.
+(
+  # shellcheck disable=SC1091
+  . "$TEST_ROOT/lib/os.sh"
+  # shellcheck disable=SC1091
+  . "$TEST_ROOT/lib/apt.sh"
+  PKGMGR=apt
+  PACKAGES_APT=(git-delta)
+  # shellcheck disable=SC2030 # scoped to this subshell on purpose
+  APT_UPSTREAM_FALLBACKS=(git-delta:delta)
+  apt-cache() { return 1; }
+  grep -q 'upstream releases are missing: delta' <<< "$(postflight_packages 2>&1)"
+  make_executable "$HOME/.local/bin/delta"
+  if grep -q 'upstream releases are missing' <<< "$(postflight_packages 2>&1)"; then
+    printf 'FAIL: an installed upstream delta was reported missing\n' >&2
+    exit 1
+  fi
+)
 
 # SKIP_FLATPAK keeps flatpak off the host, so its absence is not a failure.
 (

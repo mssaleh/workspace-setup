@@ -21,7 +21,8 @@
 #                below are macOS-only; Linux keeps this existing umbrella.
 #   HOST_PROFILE — workstation (default) or headless. A headless profile sets
 #                the platform's graphical SKIP_* controls; on Linux those are
-#                fonts + kitty, Flatpak, and the desktop applications.
+#                fonts + kitty, Flatpak and the desktop applications, plus
+#                SKIP_SSH and INSTALL_RECOMMENDS=0.
 #   SETUP_SESSION_KIND — macOS-only local/ssh/noninteractive test override.
 #                SSH and CI evidence always wins; normally leave this unset.
 #   SKIP_NERD_FONT — macOS only: set to 1 to skip the Nerd Font only
@@ -61,6 +62,8 @@
 #   SKIP_GNOME_EXTENSIONS — set to 1 to skip the GNOME Shell extension manager.
 #                It is installed only where GNOME Shell itself is present.
 #   SKIP_FLATPAK — set to 1 to skip Flatpak and the Flathub remote (Linux only)
+#   INSTALL_RECOMMENDS — set to 0 to install apt packages without their
+#                recommendations (Linux only)
 #   SKIP_FLATPAK_DESKTOP — set to 1 to add Flathub without the GNOME Software
 #                plugin, for a host with no desktop store
 #   SKIP_CLAUDE_DESKTOP — set to 1 to skip the Claude Desktop app (Linux only)
@@ -260,8 +263,13 @@ apply_linux_host_profile() {
       SKIP_CLAUDE_DESKTOP=${SKIP_CLAUDE_DESKTOP:-1}
       SKIP_CODEX_APP=${SKIP_CODEX_APP:-1}
       SKIP_GNOME_EXTENSIONS=${SKIP_GNOME_EXTENSIONS:-1}
+      # A server is reached over SSH; it has no use for a key of its own, and
+      # generating one would stop an unattended run at the passphrase prompt.
+      SKIP_SSH=${SKIP_SSH:-1}
+      INSTALL_RECOMMENDS=${INSTALL_RECOMMENDS:-0}
       export SKIP_FONT SKIP_FLATPAK SKIP_LIBREOFFICE SKIP_VSCODE \
-        SKIP_CLAUDE_DESKTOP SKIP_CODEX_APP SKIP_GNOME_EXTENSIONS
+        SKIP_CLAUDE_DESKTOP SKIP_CODEX_APP SKIP_GNOME_EXTENSIONS \
+        SKIP_SSH INSTALL_RECOMMENDS
       ;;
     *) fail "HOST_PROFILE must be 'workstation' or 'headless' (got '$HOST_PROFILE')" ;;
   esac
@@ -357,18 +365,27 @@ main() {
   fi
 
   setup_color green; printf '\n✓ All stages complete.\n'; setup_color reset
-  cat <<'NEXT'
+  print_next_steps
+}
 
-Next steps (manual, not automated by design):
-  1. Set your git identity if the defaults weren't right:
-       git config --global user.name  "Your Name"
-       git config --global user.email "you@example.com"
-  2. Authenticate with GitHub:
-       gh auth login
-  3. Edit ~/.ssh/config to add your hosts (the file has an example Host block).
-  4. Restart the terminal, or run: exec "$SHELL" -l
-Report bugs at: https://github.com/mssaleh/workspace-setup/issues
-NEXT
+# The manual steps this host still needs, and nothing when it needs none.
+print_next_steps() {
+  local steps="" name
+  name=$(git config --global user.name 2>/dev/null || true)
+  if [[ -z "$name" || "$name" == "Your Name" ]]; then
+    steps="${steps}  - set your git identity: git config --global user.name \"…\"; git config --global user.email \"…\"
+"
+  fi
+  if command -v gh >/dev/null 2>&1 && ! gh auth token >/dev/null 2>&1; then
+    steps="${steps}  - authenticate with GitHub: gh auth login
+"
+  fi
+  if ((${CONFIG_INSTALLED_COUNT:-0} + ${CONFIG_UPGRADED_COUNT:-0} + ${CONFIG_MERGED_COUNT:-0} > 0)); then
+    steps="${steps}  - start a new shell to load the updated configuration: exec \"\$SHELL\" -l
+"
+  fi
+  [[ -n "$steps" ]] || return 0
+  printf '\nNext steps:\n%s' "$steps"
 }
 
 main "$@"

@@ -33,15 +33,16 @@ or noninteractive run still installs the requested workstation applications,
 but it never opens Terminal.app or another GUI. Use `HOST_PROFILE=headless` for
 a host that should not receive graphical applications. On Linux it skips the
 font and kitty stages, Flatpak, VS Code, LibreOffice, Claude Desktop, the Codex
-app and the GNOME extension manager; each `SKIP_*` control still overrides it.
+app, the GNOME extension manager and SSH key generation, and installs apt
+packages without their recommendations; each control still overrides it.
 
 ## What it does
 
 | Stage | What |
 |---|---|
-| **context** | On macOS, separately classifies the host as `workstation`/`headless` and the current run as `local`/`ssh`/`noninteractive`. Host role controls installation; session kind controls whether GUI activation is permitted. Neither the login shell nor the default terminal is changed. On Linux only the host role applies: `HOST_PROFILE=headless` drops the desktop stages and GUI applications. |
+| **context** | On macOS, separately classifies the host as `workstation`/`headless` and the current run as `local`/`ssh`/`noninteractive`. Host role controls installation; session kind controls whether GUI activation is permitted. Neither the login shell nor the default terminal is changed. On Linux only the host role applies: `HOST_PROFILE=headless` drops the desktop stages, GUI applications and SSH key generation. |
 | **bootstrap** | On macOS, verifies that the selected Xcode Command Line Tools actually provide `xcrun clang` before touching Homebrew, then discovers Homebrew at its real prefix or installs it. It never launches the asynchronous CLT installer dialog. On Linux, ensures curl + git. |
-| **packages** | Installs the cross-platform CLI toolbox: `eza`, `fd`, `bat`, `ripgrep` (`rg`), `fzf`, `zoxide`, `yazi`, `git`, `git-delta` (`delta`), `lazygit`, `gh`, `tmux`, `rsync`, `rclone`, `nmap`, `jq`, `yq`, `pandoc`, `7zz` (`7z`), `cmake`, `ninja`, `node`, `uv`, `ruff`, `helm`, `kubectl`, `cosign`, `ffmpeg`, `poppler` (`poppler-utils`), `nano`, `himalaya`, `ncdu`, `shellcheck`, `pre-commit`, … It installs `xterm-kitty` terminfo as a non-GUI SSH capability on every host. On Linux it registers **every** vendor archive before installing anything (see below), then installs the toolbox, the **Claude Desktop** app (skip with `SKIP_CLAUDE_DESKTOP=1`) and the **Codex app** (skip with `SKIP_CODEX_APP=1`). |
+| **packages** | Installs the cross-platform CLI toolbox: `eza`, `fd`, `bat`, `ripgrep` (`rg`), `fzf`, `zoxide`, `yazi`, `git`, `git-delta` (`delta`), `lazygit`, `gh`, `tmux`, `rsync`, `rclone`, `nmap`, `jq`, `yq`, `pandoc`, `7zz` (`7z`), `cmake`, `ninja`, `node`, `uv`, `ruff`, `helm`, `kubectl`, `cosign`, `ffmpeg`, `poppler` (`poppler-utils`), `nano`, `himalaya`, `ncdu`, `shellcheck`, `pre-commit`, … It installs `xterm-kitty` terminfo as a non-GUI SSH capability on every host. Where a Linux release's apt has no `git-delta`, `eza` or `lazygit`, their upstream releases install into `~/.local/bin`. On Linux it registers **every** vendor archive before installing anything (see below), then installs the toolbox, the **Claude Desktop** app (skip with `SKIP_CLAUDE_DESKTOP=1`) and the **Codex app** (skip with `SKIP_CODEX_APP=1`). |
 | **docker** | Linux only: installs the official **Docker Engine** + **Docker Compose v2** from download.docker.com. Docker's documented pre-clean of the distribution's `docker.io`, `containerd` and `runc` names every package apt would take with them before it runs, since those runtimes carry reverse dependencies of their own. A complete, responsive official installation is a no-op on rerun. |
 | **toolchains** | Installs upstream **rustup**, Astral's standalone **uv/uvx** (plus its receipt), native Claude Code and Codex CLIs, and upstream opencode on Linux. Linux also retains its existing upstream Microsoft Graph CLI (`mgc`) provider. The separate Homebrew `uv` formula remains an intentional backup. |
 | **configuration** | Converges ordinary files under `$HOME`; repairs old links into temporary checkouts, atomically upgrades exact known historical versions, semantically merges supported JSON/TOML/Git/ssh formats and repairs a shell startup file that has lost the host-local environment loader, preserves ambiguous user-owned content, installs the coding-agent skills into each agent home, and provisions the host-local environment directory `~/.config/shell/env.d/` that the supported shells source. |
@@ -164,7 +165,7 @@ All optional:
 |---|---|---|
 | `GIT_NAME` | `Your Name` | Name for `~/.gitconfig` `[user].name` |
 | `GIT_EMAIL` | `you@example.com` | Email for `~/.gitconfig` `[user].email` |
-| `HOST_PROFILE` | `workstation` | `workstation` installs the requested desktop payload regardless of whether setup is run locally or over SSH; `headless` sets the platform's graphical skip controls (on Linux `SKIP_FONT`, `SKIP_FLATPAK`, `SKIP_LIBREOFFICE`, `SKIP_VSCODE`, `SKIP_CLAUDE_DESKTOP`, `SKIP_CODEX_APP` and `SKIP_GNOME_EXTENSIONS`). |
+| `HOST_PROFILE` | `workstation` | `workstation` installs the requested desktop payload regardless of whether setup is run locally or over SSH; `headless` sets the platform's graphical skip controls (on Linux `SKIP_FONT`, `SKIP_FLATPAK`, `SKIP_LIBREOFFICE`, `SKIP_VSCODE`, `SKIP_CLAUDE_DESKTOP`, `SKIP_CODEX_APP`, `SKIP_GNOME_EXTENSIONS` and `SKIP_SSH`, plus `INSTALL_RECOMMENDS=0`). |
 | `SETUP_SESSION_KIND` | auto-detected | macOS only: test/orchestration override, exactly `local`, `ssh`, or `noninteractive`; SSH/CI evidence cannot be relabeled `local`, and normal runs should leave this unset |
 | `SKIP_FONT` | (unset) | Existing cross-platform umbrella: skip the graphical font/Kitty stages (and, on macOS, workstation applications and Terminal integration); SSH terminfo remains installed |
 | `SKIP_NERD_FONT` | (unset) | macOS only: skip only the Nerd Font |
@@ -188,6 +189,7 @@ All optional:
 | `SKIP_REMOTE_AUDIT` | (unset) | macOS only: skip the read-only Remote Login/FileVault/firewall/power report |
 | `SKIP_HEADLESS_CREDENTIALS` | (unset) | Set to `1` to skip the check that credentials are reachable without a GUI session, on a Mac only ever used at its own keyboard (macOS only) |
 | `SSH_KEY_PASSPHRASE` | (unset) | Linux uses an interactive passphrase by default; set `none` for a disposable host |
+| `INSTALL_RECOMMENDS` | `1` | Linux only: `0` installs the toolbox's apt packages without their recommendations; what setup needs from them is declared in `PACKAGES_APT` |
 | `UPDATE_SYSTEM` | (unset) | `1` applies the documented Linux full-upgrade/autoremove path; never used on macOS |
 | `UPDATE_HOMEBREW` | (unset) | `1` runs `brew update` across all installed taps (including Homebrew migrations), then reports outdated repository-managed formulae/casks without upgrading packages |
 | `UPGRADE_HOMEBREW_FORMULAE` | (unset) | `1` implies the metadata refresh and upgrades only outdated repository-managed formulae; suppresses cask upgrades, cleanup, and unrelated installed-dependent checks |
@@ -736,9 +738,11 @@ to the vendor's build the first time rather than being installed from the
 distribution and replaced afterwards. One index refresh covers them all.
 
 **Publisher-installed tools** — `ruff`, `yazi`, `himalaya`, `opencode`, `yq`,
-`cosign` — have no package manager carrying them forward, so each run compares
-what is installed against what the project publishes and upgrades when they
-differ. Nothing is replaced unless it identifies itself: an unreachable
+`cosign`, standalone `uv`, and `delta`, `eza` and `lazygit` where apt lacks them —
+have no package manager carrying them forward, so each run compares what is
+installed against what the project publishes and upgrades when they differ.
+Archives downloaded from GitHub releases are checked against the sha256 GitHub
+records for each asset, and uv upgrades itself with `uv self update`. Nothing is replaced unless it identifies itself: an unreachable
 publisher, an unparseable version, or a file this project did not place all
 mean it is left alone and reported.
 
@@ -824,6 +828,9 @@ workspace-setup/
 ```bash
 bash tests/run.sh
 ```
+
+`tests/run.sh` runs every test file, then names each one that failed and exits
+non-zero. GitHub Actions runs the same command on Ubuntu and macOS.
 
 The suite runs against temporary `HOME` directories and never touches the real one. It covers convergence decisions (install / no-op / legacy-link repair / known-version upgrade / merge / preserved conflict), the `~/.ssh/config` baseline merge and the opt-out and unparseable cases it must refuse, the exact Linux and macOS setup-stage routing contracts, Darwin-module isolation from Linux, host-role/session separation, Command Line Tools gating before Homebrew, generated-completion ownership/syntax/registration, the directory modes
 Linux apt sequencing/removal reporting, AppArmor attachment collisions, native-platform postflight, the host-local environment directory and every way a loader can be present in a file and still reach no shell, and the streamed `curl | bash` payload bootstrap.

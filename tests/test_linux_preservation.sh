@@ -41,10 +41,13 @@ for stage_name in bootstrap packages docker groups flatpak update dotfiles \
   printf '%s() { :; }\n' "$function_name" > "$fixture/scripts/$function_name.sh"
 done
 
-# Records the umask the stages run under.
-# shellcheck disable=SC2016 # the expansion belongs to the fixture stage
+# Records the umask the stages run under and the recommendations policy.
+# shellcheck disable=SC2016 # the expansions belong to the fixture stages
 printf 'stage_bootstrap() { umask > "$LINUX_PRESERVATION_CALLS.umask"; }\n' \
   > "$fixture/scripts/stage_bootstrap.sh"
+# shellcheck disable=SC2016
+printf 'stage_packages() { printf "%%s\\n" "${INSTALL_RECOMMENDS:-1}" > "$LINUX_PRESERVATION_CALLS.recommends"; }\n' \
+  > "$fixture/scripts/stage_packages.sh"
 
 run_linux_setup() {
   : > "$calls"
@@ -73,6 +76,8 @@ EXPECTED
   || fail_test "default Linux stage order changed: $(tr '\n' ' ' < "$calls")"
 [[ "$(cat "$calls.umask")" == 0022 ]] \
   || fail_test "stages inherit the caller's umask $(cat "$calls.umask") instead of 0022"
+[[ "$(cat "$calls.recommends")" == 1 ]] \
+  || fail_test 'a workstation installs apt packages without their recommendations' 
 
 # The macOS session override and narrow graphical switches are inert on Linux.
 run_linux_setup SETUP_SESSION_KIND=local \
@@ -80,10 +85,13 @@ run_linux_setup SETUP_SESSION_KIND=local \
 [[ "$(cat "$calls")" == "$expected_default" ]] \
   || fail_test 'a macOS-only control changed the Linux stage journey'
 
-# A headless Linux host drops the desktop stages and nothing else.
+# A headless Linux host drops the desktop stages and SSH key generation, and
+# installs without recommendations.
 run_linux_setup HOST_PROFILE=headless
-[[ "$(cat "$calls")" == "$(grep -vxE 'stage_(flatpak|fonts_terminal|terminal_profile)' <<< "$expected_default")" ]] \
-  || fail_test "HOST_PROFILE=headless changed more than the desktop stages: $(tr '\n' ' ' < "$calls")"
+[[ "$(cat "$calls")" == "$(grep -vxE 'stage_(flatpak|fonts_terminal|terminal_profile|ssh)' <<< "$expected_default")" ]] \
+  || fail_test "HOST_PROFILE=headless changed more than the desktop and SSH stages: $(tr '\n' ' ' < "$calls")"
+[[ "$(cat "$calls.recommends")" == 0 ]] \
+  || fail_test 'HOST_PROFILE=headless installs apt recommendations' 
 if run_linux_setup HOST_PROFILE=server 2>/dev/null; then
   fail_test 'an unknown HOST_PROFILE was accepted on Linux'
 fi

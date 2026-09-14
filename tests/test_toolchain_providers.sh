@@ -26,17 +26,40 @@ fake_command "$HOME/.opencode/bin/opencode"
 printf '%s\n' 'export PATH="$HOME/.cargo/bin:$PATH"' > "$HOME/.cargo/env"
 printf '%s\n' '{}' > "$HOME/.config/uv/uv-receipt.json"
 
+# uv reports its version and records a self update, so the test can tell
+# whether the stage asked for one.
+cat > "$HOME/.local/bin/uv" <<EOF
+#!/bin/sh
+case "\$1 \$2" in
+  "self update") : > "$TEST_TMP/uv-self-update" ;;
+  "--version "*) printf 'uv 0.1.0 (x86_64-unknown-linux-gnu)\\n' ;;
+esac
+EOF
+chmod +x "$HOME/.local/bin/uv"
+
 # shellcheck disable=SC1091
 . "$TEST_ROOT/lib/log.sh"
 # shellcheck disable=SC1091
+. "$TEST_ROOT/lib/manifest.sh"
+# shellcheck disable=SC1091
+. "$TEST_ROOT/lib/upstream.sh"
+# shellcheck disable=SC1091
 . "$TEST_ROOT/scripts/stage_toolchains.sh"
 
-# The real setup sources lib/upstream.sh before this stage. This fixture keeps
-# publisher-installed artifacts fixed, so no network update is requested.
+# Publisher-installed artifacts stay fixed and nothing reaches the network; the
+# published uv release is supplied directly.
 upstream_artifact_needed() { return 1; }
+STUB_UV_RELEASE=0.1.0
+upstream_latest_version() { printf '%s\n' "$STUB_UV_RELEASE"; }
 
 stage_toolchains
 [[ -L "$HOME/.local/bin/opencode" ]]
 [[ "$(readlink "$HOME/.local/bin/opencode")" == "$HOME/.opencode/bin/opencode" ]]
+[[ ! -e "$TEST_TMP/uv-self-update" ]] || { printf 'FAIL: a current uv was updated\n' >&2; exit 1; }
+
+# A standalone uv behind its release updates itself.
+STUB_UV_RELEASE=0.2.0
+stage_toolchains >/dev/null
+[[ -e "$TEST_TMP/uv-self-update" ]] || { printf 'FAIL: a uv behind its release was not updated\n' >&2; exit 1; }
 
 printf 'toolchain provider tests: ok\n'

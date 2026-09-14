@@ -138,4 +138,14 @@ upstream_binary_is_current "$TEST_TMP/bin" '' \
 upstream_binary_is_current "$TEST_TMP/nonexistent" "$sum" \
   && fail_test 'a missing artifact was reported as current'
 
+# ── A version below a banner line is still read ───────────────────────────
+# yazi prints "Yazi" and puts the version on the next line.
+fake_tool yazi "$(printf 'Yazi\n    Version: 26.8.15 (1f3588d 2026-08-15)')"
+[[ "$(upstream_installed_version "$HOME/.local/bin/yazi" --version)" == 26.8.15 ]] \
+  || fail_test 'the version on the line after a banner was not read'
+STUB_PUBLISHED=26.9.1
+[[ "$(decide yazi)" == upgrade ]] || fail_test 'yazi behind its release was not upgraded'
+STUB_PUBLISHED=26.8.15
+[[ "$(decide yazi)" == skip ]] || fail_test 'a current yazi was replaced'
+
 printf 'upstream currency tests: ok\n'

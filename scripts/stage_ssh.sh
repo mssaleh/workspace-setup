@@ -84,6 +84,7 @@ stage_ssh() {
   chmod 700 "$HOME/.ssh"
 
   # --- Generate a default ed25519 key if none exists ---
+  local key_generated=0
   if [[ ! -f "$HOME/.ssh/id_ed25519" ]]; then
     local use_passphrase
     use_passphrase=$(ssh_key_use_passphrase)
@@ -105,6 +106,7 @@ stage_ssh() {
       fi
     fi
     ok "keypair generated at ~/.ssh/id_ed25519"
+    key_generated=1
   else
     ok "SSH keypair already present"
   fi
@@ -233,7 +235,8 @@ DROPIN
       warn "local OpenSSH agent is unavailable; preserving the current session's agent environment"
     fi
 
-    cat <<'OPT'
+    if ((key_generated)); then
+      cat <<'OPT'
 
   Optional: Keychain-like persistence across reboots
   On a headless Linux box there is no exact equivalent of the macOS Keychain
@@ -247,8 +250,10 @@ DROPIN
   systemd user agent + AddKeysToAgent yes (already configured) is sufficient.
 
 OPT
+    fi
   fi
 
+  ((key_generated)) || return 0
   cat <<'NEXT'
 
   SSH keypair is ready. Next steps (manual):

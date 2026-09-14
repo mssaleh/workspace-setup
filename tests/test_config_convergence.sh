@@ -129,6 +129,17 @@ install_regular_file "$src" "$dst" fixture
 [[ "$CONFIG_LAST_ACTION" == conflict ]]
 ((CONFIG_CONFLICT_COUNT == before_conflicts + 1))
 
+# A shell file that works but is not a shipped version is kept, and the run
+# says so: no later run updates it.
+accept_shell_file() { CONFIG_MERGE_ACTION=kept; }
+printf 'working custom shell file\n' > "$dst"
+before_kept=$CONFIG_KEPT_COUNT
+install_regular_file "$src" "$dst" fixture 0644 accept_shell_file > "$TEST_TMP/kept.log" 2>&1
+[[ "$(<"$dst")" == 'working custom shell file' ]]
+[[ "$CONFIG_LAST_ACTION" == kept ]]
+((CONFIG_KEPT_COUNT == before_kept + 1))
+grep -q 'CONFIG_ADOPT=config' "$TEST_TMP/kept.log"
+
 # Claude JSON uses a narrow union merge and preserves unrelated settings.
 claude_src="$TEST_ROOT/dotfiles/claude/settings.json"
 claude_dst="$TEST_TMP/claude.json"

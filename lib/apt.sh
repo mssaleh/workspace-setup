@@ -140,7 +140,7 @@ apt_install_candidate() {
     return 0
   fi
   info "installing $label $candidate…"
-  sudo "${APT_ENV[@]}" "$PKGMGR" install -y "$pkg" \
+  apt_install_packages "$pkg" \
     || { warn "$label install failed (skipped)"; return 1; }
 }
 
@@ -211,5 +211,24 @@ apt_gui_app_wanted() {
 apt_manifest_package_wanted() {
   [[ "$1" == flatpak && -n "${SKIP_FLATPAK:-}" ]] && return 1
   return 0
+}
+
+# apt_install_packages <package...> — apt-get install for everything the
+# toolbox asks for. INSTALL_RECOMMENDS=0, which HOST_PROFILE=headless sets,
+# leaves recommendations out; what the setup needs from them is in PACKAGES_APT.
+apt_install_packages() {
+  local opts=(-y)
+  [[ "${INSTALL_RECOMMENDS:-1}" == 0 ]] && opts+=(--no-install-recommends)
+  sudo "${APT_ENV[@]}" "$PKGMGR" install "${opts[@]}" "$@"
+}
+
+# apt_upstream_fallback <apt package> — the command an upstream release
+# provides when this release's repositories do not carry the package.
+apt_upstream_fallback() {
+  local entry
+  for entry in "${APT_UPSTREAM_FALLBACKS[@]}"; do
+    [[ "${entry%%:*}" == "$1" ]] && { printf '%s\n' "${entry#*:}"; return 0; }
+  done
+  return 1
 }
 

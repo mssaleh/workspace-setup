@@ -9,12 +9,12 @@
 # unreachable publisher, an unparseable version, or a file this project did not
 # place all mean leave it alone and say so.
 
-# upstream_latest_version <owner/repo> — the current release, without a leading
-# "v". Empty when it cannot be determined.
+# upstream_latest_tag <owner/repo> — the current release tag as published.
+# Empty when it cannot be determined.
 #
 # Read from the releases/latest redirect, not the API: the API is rate limited
 # per address, and being rate limited must not look like "nothing to upgrade".
-upstream_latest_version() {
+upstream_latest_tag() {
   local repo="$1" location
   location=$(curl -fsSI "https://github.com/${repo}/releases/latest" 2>/dev/null \
     | awk 'BEGIN { IGNORECASE = 1 } /^location:/ { print $2 }' | tr -d '\r')
@@ -25,18 +25,58 @@ upstream_latest_version() {
     */releases/tag/*) ;;
     *) return 1 ;;
   esac
-  printf '%s\n' "${location##*/releases/tag/}" | sed 's/^v//'
+  printf '%s\n' "${location##*/releases/tag/}"
 }
 
-# upstream_installed_version <command...> — the first dotted version on the
-# first line the command prints. Empty when it prints nothing versionlike.
+# upstream_latest_version <owner/repo> — the current release, without a leading
+# "v". Empty when it cannot be determined.
+upstream_latest_version() {
+  local tag
+  tag=$(upstream_latest_tag "$1") || return 1
+  printf '%s\n' "${tag#v}"
+}
+
+# upstream_release_asset_sha256 <owner/repo> <tag> <asset> — the sha256 GitHub
+# recorded when the asset was uploaded. These publishers post no checksum file,
+# so the API is the only published digest; empty when it cannot be read.
+upstream_release_asset_sha256() {
+  local repo="$1" tag="$2" asset="$3"
+  curl -fsSL "https://api.github.com/repos/${repo}/releases/tags/${tag}" 2>/dev/null \
+    | jq -r --arg name "$asset" '.assets[] | select(.name == $name) | .digest // empty' 2>/dev/null \
+    | sed -n 's/^sha256://p'
+}
+
+# upstream_fetch_verified_asset <owner/repo> <tag> <asset> <destination>
+# Downloads one release asset and keeps it only when it matches that digest.
+upstream_fetch_verified_asset() {
+  local repo="$1" tag="$2" asset="$3" dst="$4" want got
+  want=$(upstream_release_asset_sha256 "$repo" "$tag" "$asset")
+  if [[ -z "$want" ]]; then
+    warn "$asset: could not read the published digest — skipping rather than installing unverified"
+    return 1
+  fi
+  if ! curl -fsSL "https://github.com/${repo}/releases/download/${tag}/${asset}" -o "$dst" 2>/dev/null; then
+    warn "$asset: download failed"
+    return 1
+  fi
+  got=$(upstream_sha256 "$dst")
+  if [[ "$got" != "$want" ]]; then
+    warn "$asset: checksum mismatch — skipping for safety"
+    rm -f "$dst"
+    return 1
+  fi
+}
+
+# upstream_installed_version <command...> — the first dotted version the
+# command prints. Empty when it prints nothing versionlike.
 #
-# Only the first line, because version blocks carry unrelated numbers:
-# `cosign version` reports its Go toolchain as "GoVersion: go1.25.0".
+# The first one, because version blocks carry unrelated numbers further down
+# (`cosign version` reports its Go toolchain as "GoVersion: go1.25.0"), and not
+# necessarily on the first line: yazi prints "Yazi" above "Version: 26.9.1".
 upstream_installed_version() {
   local output
   output=$("$@" 2>/dev/null) || return 1
-  head -n1 <<< "$output" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1
+  grep -oE '[0-9]+\.[0-9]+\.[0-9]+' <<< "$output" | head -n1
 }
 
 # upstream_artifact_state <label> <installed version> <published version>

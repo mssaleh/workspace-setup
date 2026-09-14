@@ -50,7 +50,7 @@ branch=$(linux_branch)
 register_line=$(grep -n '^ *register_third_party_apt_repos$' <<< "$branch" | head -n1 | cut -d: -f1)
 [[ -n "$register_line" ]] || fail 'the Linux branch never registers the vendor repositories'
 
-first_install=$(grep -nE 'apt_install_candidate|install_nodesource_package|install_codex_app|"\$PKGMGR" install' \
+first_install=$(grep -nE 'apt_install_packages|apt_install_candidate|install_nodesource_package|install_codex_app|"\$PKGMGR" install' \
   <<< "$branch" | grep -v '^[0-9]*: *#' | head -n1 | cut -d: -f1)
 [[ -n "$first_install" ]] || fail 'the Linux branch installs nothing at all'
 
@@ -173,5 +173,23 @@ KEY
 else
   printf 'SKIP: gpg is not installed, so the key fingerprint check did not run\n'
 fi
+
+# ── 8. Toolbox installs go through apt_install_packages ────────────────────
+# That is where INSTALL_RECOMMENDS is honoured; a direct apt call would bring a
+# headless host the desktop libraries recommendations pull in.
+raw_installs=$(printf '%s\n' "$branch" \
+    "$(function_body install_nodesource_package)" "$(function_body install_codex_app)" \
+    "$(function_body apt_install_candidate "$HELPERS")" \
+  | grep -E '"\$PKGMGR" install' | grep -vE '^[[:space:]]*#' || true)
+[[ -z "$raw_installs" ]] || fail "a toolbox install bypasses apt_install_packages: $raw_installs"
+(
+  sudo() { printf '%s\n' "$*"; }
+  APT_ENV=()
+  PKGMGR=apt-get
+  [[ "$(INSTALL_RECOMMENDS=0 apt_install_packages jq)" == 'apt-get install -y --no-install-recommends jq' ]] \
+    || fail 'INSTALL_RECOMMENDS=0 did not leave recommendations out'
+  [[ "$(apt_install_packages jq)" == 'apt-get install -y jq' ]] \
+    || fail 'a default install changed its apt arguments'
+)
 
 printf 'apt sequence tests: ok\n'

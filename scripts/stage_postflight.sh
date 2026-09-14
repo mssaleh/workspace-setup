@@ -134,7 +134,24 @@ postflight_apparmor_attachments() {
     postflight_fail "AppArmor profiles collide on $attachment: $claimants"
     postflight_note "  keep the one dpkg owns (dpkg -S names it) and remove the other:"
     postflight_note "  sudo apparmor_parser -R <unowned profile> && sudo rm <unowned profile>"
+    local claimant copied_from
+    for claimant in $claimants; do
+      copied_from=$(postflight_apparmor_profile_source "$dir" "$claimant") || copied_from=""
+      [[ -n "$copied_from" ]] || continue
+      postflight_note "  $claimant is copied from $copied_from whenever its package is upgraded; divert that file first:"
+      postflight_note "  sudo dpkg-divert --local --rename --divert $copied_from.disabled --add $copied_from"
+    done
   done <<< "$collisions"
+}
+
+# postflight_apparmor_profile_source <dir> <profile> — for a profile no package
+# owns, a packaged file of the same name that a maintainer script copies into
+# <dir>. Microsoft Edge's postinst does this on every upgrade.
+postflight_apparmor_profile_source() {
+  local dir="$1" name="$2"
+  dpkg -S "$dir/$name" >/dev/null 2>&1 && return 0
+  dpkg -S "apparmor.d/$name" 2>/dev/null \
+    | awk -F ': ' -v own="$dir/$name" '$2 != own && $2 ~ /\/apparmor\.d\// { print $2; exit }'
 }
 
 postflight_desktop_ssh_agent() {
@@ -250,6 +267,25 @@ postflight_configs() {
       postflight_fail "Apple Container configuration is incomplete"
     fi
   fi
+  postflight_git_tools
+}
+
+# ~/.gitconfig hands paging and interactive diffs to delta. A command that does
+# not resolve makes every `git log` and `git diff` in a terminal fail.
+postflight_git_tools() {
+  local key value missing=""
+  for key in core.pager interactive.diffFilter; do
+    value=$(git config --global --get "$key" 2>/dev/null || true)
+    value=${value%% *}
+    [[ -n "$value" ]] || continue
+    [[ " $missing " == *" $value "* ]] && continue
+    [[ -n "$(postflight_login_path_resolve "$value")" ]] || missing="$missing $value"
+  done
+  if [[ -z "$missing" ]]; then
+    postflight_pass "the pager and diff filter ~/.gitconfig names are on the login PATH"
+  else
+    postflight_fail "$HOME/.gitconfig names commands that are not on the login PATH:$missing"
+  fi
 }
 
 postflight_ssh_agent() {
@@ -345,6 +381,17 @@ postflight_packages() {
     postflight_pass "all available apt packages in the provider manifest are installed"
   else
     postflight_fail "missing apt packages: ${missing[*]}"
+  fi
+
+  local entry fallback_missing=""
+  for entry in "${APT_UPSTREAM_FALLBACKS[@]}"; do
+    apt-cache show "${entry%%:*}" >/dev/null 2>&1 && continue
+    [[ -x "$HOME/.local/bin/${entry#*:}" ]] || fallback_missing="$fallback_missing ${entry#*:}"
+  done
+  if [[ -z "$fallback_missing" ]]; then
+    postflight_pass "tools this release's apt does not carry come from their upstream releases"
+  else
+    postflight_fail "apt does not carry these tools and their upstream releases are missing:$fallback_missing"
   fi
 
   local alias_name provider_name alias_failures=()
@@ -733,20 +780,30 @@ postflight_upstream_tools() {
     postflight_fail "missing native Codex CLI at ~/.local/bin/codex"
   fi
   if [[ "$OS_KIND" == linux ]]; then
-    local linux_upstream_missing=() artifact
-    for artifact in \
-      "$HOME/.local/bin/ruff" \
-      "$HOME/.local/bin/yazi" \
-      "$HOME/.local/bin/ya" \
-      "$HOME/.local/bin/himalaya" \
-      "$HOME/.local/bin/yq" \
-      "$HOME/.local/bin/cosign"; do
-      [[ -x "$artifact" ]] || linux_upstream_missing+=("$artifact")
+    local linux_upstream_missing=() artifact name probe entry unrunnable=""
+    local upstream_names=(ruff yazi ya himalaya yq cosign)
+    for entry in "${APT_UPSTREAM_FALLBACKS[@]}"; do
+      [[ -e "$HOME/.local/bin/${entry#*:}" ]] && upstream_names+=("${entry#*:}")
     done
-    if ((${#linux_upstream_missing[@]} == 0)); then
-      postflight_pass "Linux upstream toolbox artifacts exist at their declared paths"
-    else
+    for name in "${upstream_names[@]}"; do
+      artifact="$HOME/.local/bin/$name"
+      if [[ ! -x "$artifact" ]]; then
+        linux_upstream_missing+=("$artifact")
+        continue
+      fi
+      # A release built against a newer glibc than the host has installs
+      # cleanly and then fails every time it starts.
+      probe=--version
+      [[ "$name" == cosign ]] && probe=version
+      "$artifact" "$probe" >/dev/null 2>&1 || unrunnable="$unrunnable $artifact"
+    done
+    if ((${#linux_upstream_missing[@]})); then
       postflight_fail "missing Linux upstream toolbox artifacts: ${linux_upstream_missing[*]}"
+    elif [[ -n "$unrunnable" ]]; then
+      postflight_fail "Linux upstream toolbox artifacts that do not run on this host:$unrunnable"
+      postflight_note "  remove them and re-run setup to install a build this host can run"
+    else
+      postflight_pass "Linux upstream toolbox artifacts exist at their declared paths and run"
     fi
 
     local repo_tool_missing=() repo_tool

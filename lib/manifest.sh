@@ -88,6 +88,11 @@ PACKAGES_APT=(
   ncdu smartmontools xsel pkg-config
   ca-certificates gnupg lsb-release unzip xz-utils fontconfig ncurses-bin
   eza chafa
+  # Each of these otherwise arrives only as a recommendation of something above,
+  # and a headless run installs without recommendations: Rust links through the
+  # C toolchain, git pages through less and fetches over openssh-client, and
+  # rclone mounts through fuse3.
+  build-essential less openssh-client patch bzip2 fuse3
   flatpak
   # Remote shells inherit TERM=xterm-kitty even when this host has no GUI.
   # This package is only terminal capability metadata; it does not install
@@ -108,7 +113,16 @@ UPSTREAM_RELEASE_PROJECTS=(
   opencode:anomalyco/opencode
   mgc:microsoftgraph/msgraph-cli
   git-credential-manager:git-ecosystem/git-credential-manager
+  uv:astral-sh/uv
+  delta:dandavison/delta
+  eza:eza-community/eza
+  lazygit:jesseduffield/lazygit
 )
+
+# apt names a release may not carry, each with the command whose upstream
+# release installs into ~/.local/bin in its place. Ubuntu 22.04 has none of the
+# three and 24.04 has no lazygit, while ~/.gitconfig pages through delta.
+APT_UPSTREAM_FALLBACKS=(git-delta:delta eza:eza lazygit:lazygit)
 
 # Python applications installed with `uv tool install`, which gives each its own
 # environment and a launcher in ~/.local/bin. Preferred over pipx or a shared

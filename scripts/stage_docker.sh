@@ -70,6 +70,12 @@ stage_docker() {
       ok "official Docker Engine + Compose v2 already installed and responsive"
       return 0
     fi
+    # Installed but not answering. A reinstall would upgrade the engine and
+    # restart every container over a problem apt does not fix; postflight
+    # reports the engine as not responding.
+    warn "Docker Engine is installed but not responding — leaving the installation as it is"
+    warn "  check: sudo systemctl status docker; sudo journalctl -u docker -b"
+    return 0
   fi
 
   local docker_repo_os

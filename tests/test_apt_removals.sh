@@ -113,4 +113,24 @@ failure=$(docker_remove_conflicting_packages 2>&1) && failed=0 || failed=1
 [[ "$failure" == *"could not remove the conflicting packages"* ]]
 sudo_exit=0
 
+# ── Docker Engine installed but not answering ─────────────────────────────
+# A reinstall would upgrade the engine and restart every container, so the
+# stage reports the problem and runs no apt transaction.
+(
+  OS_KIND=linux DISTRO=ubuntu USER=test
+  dpkg() { [[ "$1" == -s ]]; }
+  # shellcheck disable=SC2032 # stage_docker calls it directly; sudo is stubbed too
+  systemctl() { return 0; }
+  sudo() {
+    printf '%s\n' "$*" >> "$CALLS"
+    case "$*" in "docker info"*|"docker compose"*) return 1 ;; esac
+    return 0
+  }
+  reset_calls
+  output=$(stage_docker 2>&1)
+  [[ "$(calls)" != *install* ]] \
+    || { printf 'FAIL: an unresponsive Docker Engine was reinstalled\n' >&2; exit 1; }
+  [[ "$output" == *"not responding"* ]]
+)
+
 printf 'apt removal reporting tests: ok\n'

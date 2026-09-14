@@ -133,4 +133,24 @@ grep -Eq 'sh -s -- .*--no-modify-path' "$TEST_ROOT/scripts/stage_toolchains.sh" 
   exit 1
 }
 
+# ── A small host without swap is warned before anything is installed ──────
+# shellcheck disable=SC1091
+. "$TEST_ROOT/scripts/stage_bootstrap.sh"
+meminfo="$TEST_TMP/meminfo"
+printf 'MemTotal:         421000 kB\nSwapTotal:             0 kB\n' > "$meminfo"
+[[ "$(MEMINFO_FILE="$meminfo" bootstrap_report_memory 2>&1)" == *"no swap"* ]] || {
+  printf 'FAIL: a 412 MiB host without swap was not warned\n' >&2
+  exit 1
+}
+printf 'MemTotal:         421000 kB\nSwapTotal:       1048572 kB\n' > "$meminfo"
+[[ -z "$(MEMINFO_FILE="$meminfo" bootstrap_report_memory 2>&1)" ]] || {
+  printf 'FAIL: a small host with swap was warned\n' >&2
+  exit 1
+}
+printf 'MemTotal:       32000000 kB\nSwapTotal:             0 kB\n' > "$meminfo"
+[[ -z "$(MEMINFO_FILE="$meminfo" bootstrap_report_memory 2>&1)" ]] || {
+  printf 'FAIL: a large host without swap was warned\n' >&2
+  exit 1
+}
+
 printf 'linux fresh-host tests: ok\n'

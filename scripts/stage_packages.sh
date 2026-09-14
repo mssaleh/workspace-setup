@@ -69,6 +69,33 @@ install_verified_binary() {
   return "$rc"
 }
 
+# install_upstream_archive_tool <command> <asset> <member>
+# Installs or upgrades ~/.local/bin/<command> from a .tar.gz or .zip asset of
+# the command's declared project, verified against GitHub's recorded digest.
+# {version} in <asset> and <member> stands for the release without a leading v.
+install_upstream_archive_tool() {
+  local label="$1" asset_pattern="$2" member_pattern="$3" dst="$HOME/.local/bin/$1"
+  local repo tag version asset member tmp
+  upstream_artifact_needed "$label" "$dst" "$dst" --version || return 0
+  repo=$(upstream_project_repo "$label") || { warn "$label: no upstream project is declared"; return 1; }
+  tag=$(upstream_latest_tag "$repo") || { warn "$label: could not resolve its current release"; return 1; }
+  version=${tag#v}
+  asset=${asset_pattern//\{version\}/$version}
+  member=${member_pattern//\{version\}/$version}
+  tmp=$(mktemp -d) || return 1
+  if upstream_fetch_verified_asset "$repo" "$tag" "$asset" "$tmp/$asset" \
+      && case "$asset" in
+           *.zip) unzip -o "$tmp/$asset" -d "$tmp" >/dev/null 2>&1 ;;
+           *)     tar -xzf "$tmp/$asset" -C "$tmp" 2>/dev/null ;;
+         esac \
+      && upstream_place_artifact "$label" "$tmp/$member" "$dst"; then
+    ok "$label $version → ~/.local/bin/$label"
+  else
+    warn "$label download or installation failed (skipped)"
+  fi
+  rm -rf "$tmp"
+}
+
 # install_or_upgrade_verified_binary <label> <url> <expected sha256> <dest>
 # Installs the artifact when it is missing and replaces it when the published
 # checksum says the one on disk is a different release. A checksum that could
@@ -390,7 +417,7 @@ install_nodesource_pin() {
 # separate `npm` package, so apt retires that one on its own rather than
 # refusing the install; the NodeSource build carries its own matching npm.
 install_nodesource_package() {
-  if sudo "${APT_ENV[@]}" "$PKGMGR" install -y nodejs; then
+  if apt_install_packages nodejs; then
     ok "Node.js $(dpkg-query -W -f='${Version}' nodejs 2>/dev/null || printf unknown) installed from NodeSource"
   else
     warn "Node.js install failed — see https://github.com/nodesource/distributions"
@@ -462,7 +489,7 @@ install_codex_app() {
     rm -rf "$tmp"
     return 1
   fi
-  if sudo "${APT_ENV[@]}" "$PKGMGR" install -y "$deb"; then
+  if apt_install_packages "$deb"; then
     sudo "${APT_ENV[@]}" "$PKGMGR" update >/dev/null 2>&1 || true
     codex_app_verify_repository || rc=1
   else
@@ -540,20 +567,22 @@ stage_packages() {
     #    Filter out packages that aren't in this Ubuntu version's repos so a
     #    missing name doesn't fail the whole batch; availability varies by
     #    Ubuntu/Debian release.
-    local apt_pkgs=()
+    local apt_pkgs=() fallback
     for pkg in "${PACKAGES_APT[@]}"; do
       apt_manifest_package_wanted "$pkg" || continue
       if apt-cache show "$pkg" >/dev/null 2>&1; then
         if ! pkg_installed "$pkg"; then
           apt_pkgs+=("$pkg")
         fi
+      elif fallback=$(apt_upstream_fallback "$pkg"); then
+        info "apt: this release has no $pkg; $fallback comes from its upstream release below"
       else
-        warn "apt: $pkg not in this repo (will install via GitHub release if applicable)"
+        warn "apt: this release has no $pkg — skipped"
       fi
     done
     if ((${#apt_pkgs[@]})); then
       info "installing ${#apt_pkgs[@]} apt packages…"
-      sudo "${APT_ENV[@]}" "$PKGMGR" install -y "${apt_pkgs[@]}"
+      apt_install_packages "${apt_pkgs[@]}"
     else
       ok "all apt packages already installed or unavailable (handled below)"
     fi
@@ -584,7 +613,7 @@ stage_packages() {
       done
       if ((${#gnome_missing[@]})); then
         info "installing GNOME desktop tools: ${gnome_missing[*]}"
-        sudo "${APT_ENV[@]}" "$PKGMGR" install -y "${gnome_missing[@]}" \
+        apt_install_packages "${gnome_missing[@]}" \
           || warn "could not install ${gnome_missing[*]}"
       else
         ok "GNOME desktop tools already installed"
@@ -668,41 +697,47 @@ stage_packages() {
     esac
 
     if [[ -n "$rust_triple" ]]; then
-      # --- ruff (Astral Python linter/formatter, not in apt) — flat URL ---
+      # --- ruff (Astral Python linter/formatter, not in apt) ---
       # The release is an archive rather than a bare binary, so currency is
       # decided by the version ruff reports against the version the project
-      # published, not by a checksum.
-      if upstream_artifact_needed ruff "$HOME/.local/bin/ruff" ruff --version; then
-        local tmp; tmp=$(mktemp -d)
-        if curl -fsSL "https://github.com/astral-sh/ruff/releases/latest/download/ruff-${rust_triple}.tar.gz" \
-            -o "$tmp/ruff.tar.gz" 2>/dev/null \
-            && tar -xzf "$tmp/ruff.tar.gz" -C "$tmp" 2>/dev/null \
-            && upstream_place_artifact ruff \
-              "$tmp/ruff-${rust_triple}/ruff" "$HOME/.local/bin/ruff"; then
-          ok "ruff → ~/.local/bin/ruff"
-        else
-          warn "ruff download or installation failed (skipped)"
-        fi
-        rm -rf "$tmp"
-      fi
+      # published; the download is checked against GitHub's recorded digest.
+      install_upstream_archive_tool ruff "ruff-${rust_triple}.tar.gz" "ruff-${rust_triple}/ruff"
 
-      # --- yazi (TUI file manager, not in apt) — flat URL, .zip archive ---
+      # --- yazi (TUI file manager, not in apt) — .zip archive ---
       # yazi ships two executables and both come from the same release, so the
-      # version yazi reports governs the pair.
-      if upstream_artifact_needed yazi "$HOME/.local/bin/yazi" yazi --version; then
-        local tmp; tmp=$(mktemp -d)
-        if curl -fsSL "https://github.com/sxyazi/yazi/releases/latest/download/yazi-${rust_triple}.zip" \
-            -o "$tmp/yazi.zip" 2>/dev/null \
+      # version yazi reports governs the pair. The musl build, because the gnu
+      # build needs glibc 2.39 and will not start on Ubuntu 22.04.
+      if upstream_artifact_needed yazi "$HOME/.local/bin/yazi" "$HOME/.local/bin/yazi" --version; then
+        local tmp tag musl_triple=${rust_triple/-gnu/-musl}; tmp=$(mktemp -d)
+        if tag=$(upstream_latest_tag sxyazi/yazi) \
+            && upstream_fetch_verified_asset sxyazi/yazi "$tag" "yazi-${musl_triple}.zip" "$tmp/yazi.zip" \
             && unzip -o "$tmp/yazi.zip" -d "$tmp" >/dev/null 2>&1 \
             && upstream_place_artifact yazi \
-              "$tmp/yazi-${rust_triple}/yazi" "$HOME/.local/bin/yazi" \
+              "$tmp/yazi-${musl_triple}/yazi" "$HOME/.local/bin/yazi" \
             && upstream_place_artifact yazi \
-              "$tmp/yazi-${rust_triple}/ya" "$HOME/.local/bin/ya"; then
+              "$tmp/yazi-${musl_triple}/ya" "$HOME/.local/bin/ya"; then
           ok "yazi → ~/.local/bin/yazi"
         else
           warn "yazi download or installation failed (skipped)"
         fi
         rm -rf "$tmp"
+      fi
+
+      # --- toolbox commands this release's apt does not carry ---
+      # Where apt has the package it owns the command; otherwise the upstream
+      # release does. See APT_UPSTREAM_FALLBACKS.
+      local lazygit_arch=x86_64
+      [[ "$rust_triple" == aarch64-* ]] && lazygit_arch=arm64
+      if ! apt-cache show git-delta >/dev/null 2>&1; then
+        install_upstream_archive_tool delta \
+          "delta-{version}-${rust_triple}.tar.gz" "delta-{version}-${rust_triple}/delta"
+      fi
+      if ! apt-cache show eza >/dev/null 2>&1; then
+        install_upstream_archive_tool eza "eza_${rust_triple}.tar.gz" eza
+      fi
+      if ! apt-cache show lazygit >/dev/null 2>&1; then
+        install_upstream_archive_tool lazygit \
+          "lazygit_{version}_linux_${lazygit_arch}.tar.gz" lazygit
       fi
     fi
 

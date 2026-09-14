@@ -36,7 +36,19 @@ stage_toolchains() {
   # Do not use command -v here: on macOS that can find the intentional
   # Homebrew backup and incorrectly skip Astral's standalone copy + receipt.
   if [[ -x "$HOME/.local/bin/uv" && -x "$HOME/.local/bin/uvx" && -f "$HOME/.config/uv/uv-receipt.json" ]]; then
-    ok "uv standalone install already present ($("$HOME/.local/bin/uv" --version 2>/dev/null || echo present))"
+    # The receipt is what lets the standalone install update itself.
+    local uv_installed uv_published uv_state
+    uv_installed=$(upstream_installed_version "$HOME/.local/bin/uv" --version)
+    uv_published=$(upstream_latest_version "$(upstream_project_repo uv)" 2>/dev/null || true)
+    uv_state=$(upstream_artifact_state uv "$uv_installed" "$uv_published")
+    upstream_report_state uv "$uv_state" "$uv_installed" "$uv_published"
+    if [[ "$uv_state" == stale ]]; then
+      if "$HOME/.local/bin/uv" self update >/dev/null 2>&1; then
+        ok "uv $(upstream_installed_version "$HOME/.local/bin/uv" --version) → ~/.local/bin/uv"
+      else
+        warn "uv self update failed; still on $uv_installed"
+      fi
+    fi
   else
     info "installing uv (Astral self-install)…"
     # Profiles are converged separately; prevent the upstream installer from

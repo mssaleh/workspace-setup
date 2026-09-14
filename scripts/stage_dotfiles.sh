@@ -116,7 +116,7 @@ bash_path_semantically_compliant() {
   bash_path_probe "$dst" || return 1
   shell_env_loader_converge "$dst" "$(dirname "$src")/bashrc" "$mode" \
     bash_path_probe /bin/bash --noprofile --norc -c || return 1
-  CONFIG_MERGE_ACTION=${CONFIG_MERGE_ACTION:-unchanged}
+  CONFIG_MERGE_ACTION=${CONFIG_MERGE_ACTION:-kept}
   return 0
 }
 
@@ -131,7 +131,7 @@ profile_path_semantically_compliant() {
   profile_path_probe "$dst" || return 1
   shell_env_loader_converge "$dst" "$src" "$mode" \
     profile_path_probe /bin/sh -c || return 1
-  CONFIG_MERGE_ACTION=${CONFIG_MERGE_ACTION:-unchanged}
+  CONFIG_MERGE_ACTION=${CONFIG_MERGE_ACTION:-kept}
   return 0
 }
 
@@ -154,7 +154,7 @@ zsh_path_semantically_compliant() {
     shell_env_loader_converge "$dst" "$src" "$mode" \
       zsh_path_probe /bin/zsh -dfc || return 1
   fi
-  CONFIG_MERGE_ACTION=${CONFIG_MERGE_ACTION:-unchanged}
+  CONFIG_MERGE_ACTION=${CONFIG_MERGE_ACTION:-kept}
   return 0
 }
 
@@ -167,7 +167,7 @@ zshrc_semantically_compliant() {
         [[ "$EDITOR" == nano ]]
         (( $+functions[y] && $+functions[ds] && $+functions[s] && $+functions[ks] ))
       ' zsh "$dst" >/dev/null 2>&1; then
-    CONFIG_MERGE_ACTION=unchanged
+    CONFIG_MERGE_ACTION=kept
     return 0
   fi
   return 1
@@ -746,5 +746,5 @@ stage_dotfiles() {
   chmod 0700 "$HOME/.ssh/controlmasters"
   install_repo_config "$repo" dotfiles/ssh/config "$HOME/.ssh/config" 0600 merge_ssh_config
 
-  ok "configuration: installed=$CONFIG_INSTALLED_COUNT migrated=$CONFIG_MIGRATED_COUNT upgraded=$CONFIG_UPGRADED_COUNT merged=$CONFIG_MERGED_COUNT unchanged=$CONFIG_UNCHANGED_COUNT conflicts=$CONFIG_CONFLICT_COUNT"
+  ok "configuration: installed=$CONFIG_INSTALLED_COUNT migrated=$CONFIG_MIGRATED_COUNT upgraded=$CONFIG_UPGRADED_COUNT merged=$CONFIG_MERGED_COUNT kept=$CONFIG_KEPT_COUNT unchanged=$CONFIG_UNCHANGED_COUNT conflicts=$CONFIG_CONFLICT_COUNT"
 }

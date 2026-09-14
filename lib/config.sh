@@ -16,6 +16,7 @@ CONFIG_MIGRATED_COUNT=${CONFIG_MIGRATED_COUNT:-0}
 CONFIG_UPGRADED_COUNT=${CONFIG_UPGRADED_COUNT:-0}
 CONFIG_MERGED_COUNT=${CONFIG_MERGED_COUNT:-0}
 CONFIG_UNCHANGED_COUNT=${CONFIG_UNCHANGED_COUNT:-0}
+CONFIG_KEPT_COUNT=${CONFIG_KEPT_COUNT:-0}
 CONFIG_CONFLICT_COUNT=${CONFIG_CONFLICT_COUNT:-0}
 CONFIG_CONFLICT_PATHS=${CONFIG_CONFLICT_PATHS:-}
 CONFIG_LAST_ACTION=none
@@ -327,6 +328,13 @@ install_regular_file() {
           CONFIG_MERGED_COUNT=$((CONFIG_MERGED_COUNT + 1))
           CONFIG_LAST_ACTION=merged
           info "merged required settings into: $dst"
+          ;;
+        kept)
+          # Works, but is not a shipped version, so no later run updates it.
+          CONFIG_KEPT_COUNT=$((CONFIG_KEPT_COUNT + 1))
+          CONFIG_LAST_ACTION=kept
+          info "kept $dst: it works but is not the shipped version, so it is not updated"
+          info "  adopt the shipped version with: CONFIG_ADOPT=$(basename "$dst") bash setup.sh"
           ;;
         *)
           CONFIG_UNCHANGED_COUNT=$((CONFIG_UNCHANGED_COUNT + 1))

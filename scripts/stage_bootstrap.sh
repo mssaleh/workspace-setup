@@ -2,6 +2,20 @@
 # scripts/stage_bootstrap.sh — install the package manager itself if missing.
 # Idempotent: skips if brew/apt are already present.
 
+# A host with under 1 GiB of memory and no swap can have apt or the toolchain
+# installers killed partway through this run, along with the services it hosts.
+bootstrap_report_memory() {
+  local meminfo="${MEMINFO_FILE:-/proc/meminfo}" mem_kib swap_kib
+  [[ -r "$meminfo" ]] || return 0
+  mem_kib=$(awk '/^MemTotal:/ { print $2 }' "$meminfo")
+  swap_kib=$(awk '/^SwapTotal:/ { print $2 }' "$meminfo")
+  [[ -n "$mem_kib" ]] || return 0
+  if ((mem_kib < 1048576 && ${swap_kib:-0} == 0)); then
+    warn "this host has $((mem_kib / 1024)) MiB of memory and no swap; package and toolchain installs can exhaust it"
+    warn "  add swap before running setup, for example a 1 GiB /swapfile"
+  fi
+}
+
 stage_bootstrap() {
   if [[ "$OS_KIND" == macos ]]; then
     if find_brew >/dev/null 2>&1; then
@@ -39,5 +53,6 @@ stage_bootstrap() {
       sudo "${APT_ENV[@]}" "$PKGMGR" install -y git
     fi
     ok "curl + git available"
+    bootstrap_report_memory
   fi
 }
