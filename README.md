@@ -474,9 +474,9 @@ writes work locally and through SSH and tmux, while clipboard reads always ask
 for confirmation. tmux uses `set-clipboard on` specifically so applications in
 a pane—not only tmux copy mode—can copy results to the desktop clipboard. tmux
 also forwards each pane's title, which the shell sets to `<host>: <dir>`, so the
-outer tab still names the remote machine inside `ds`. `ds <host>` runs `ks` into
-the tmux session `main` on the host: its shells survive a dropped connection,
-and running `ds <host>` again reattaches.
+outer tab still names the remote machine inside `ds`. `ds <host>` runs plain
+`ssh` on its own connection into the tmux session `main` on the host: its shells
+survive a dropped connection, and running `ds <host>` again reattaches.
 
 ## Working on a Mac over SSH
 

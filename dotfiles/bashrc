@@ -313,14 +313,17 @@ function y() {
 
 # ds: durable remote session. tmux on the host keeps its shells running through
 # a dropped connection (not a host reboot); `ds <host>` again reattaches.
-# -t: neither ssh nor the ssh kitten gives a remote command a terminal otherwise.
+# Plain ssh: the ssh kitten types its setup data into this shell when the
+# connection fails. -S none: a shared connection whose link died hangs the
+# reattach until its keepalive gives up.
+# -t: ssh gives a remote command no terminal otherwise.
 # -D: detach every other client, including one a dropped connection left behind.
 function ds() {
   if [ -z "$1" ]; then
     echo "usage: ds <host>" >&2
     return 2
   fi
-  ks -t "$1" tmux new -A -D -s main
+  command ssh -S none -t "$1" tmux new -A -D -s main
 }
 
 # Managed hosts install xterm-kitty terminfo without a GUI dependency, so plain
