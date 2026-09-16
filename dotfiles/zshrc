@@ -89,7 +89,24 @@ PROMPT="%B%F{$_host_color}${_host_label}%f%b %F{blue}%~%f%F{242}\${vcs_info_msg_
 # and the Cmd+` window switcher. kitty.conf sets `shell_integration ... no-title`
 # so kitty won't overwrite this. OSC 2 sets the title; print -P expands %~.
 function _set_term_title() { print -Pn "\e]2;${_host_label}: %~\a"; }
-precmd_functions+=(vcs_info _set_term_title)
+
+# Undo what a signal-killed TUI left set: same policy and the same reasons as
+# the __restore_term block in ~/.bashrc. $signals is indexed from EXIT, so
+# signal N is element N+1. First in the list: only the first precmd function
+# sees the real $?, which it then passes on.
+function _restore_term() {
+  local _status=$? _signal
+  if (( _status > 128 )); then
+    _signal=${signals[_status-127]}
+    case $_signal in
+      ''|STOP|TSTP|TTIN|TTOU) ;;
+      *) [[ -t 1 ]] && print -n \
+        '\e[?1049l\e[?1000l\e[?1002l\e[?1003l\e[?1004l\e[?1006l\e[?25h\e[<u\e[>4m' ;;
+    esac
+  fi
+  return $_status
+}
+precmd_functions=(_restore_term $precmd_functions vcs_info _set_term_title)
 
 export EDITOR=nano
 

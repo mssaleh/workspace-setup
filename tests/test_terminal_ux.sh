@@ -43,6 +43,53 @@ PANE
     || fail_test 'tmux does not forward the pane title to the outer terminal'
 fi
 
+# A coding agent killed by a signal never sends the disables for the alternate
+# screen and mouse reporting it turned on, so the shell undoes them at the next
+# prompt. tmux is both the emulator `ds` runs agents under and the only one here
+# that can be asked what state a pane is left in. An ordinary exit must not
+# trigger the same cleanup: a program that is still running owns the terminal.
+if command -v tmux >/dev/null 2>&1; then
+  restore_socket=workspace-setup-restore-test
+  tmux -L "$restore_socket" kill-server >/dev/null 2>&1 || true
+  mkdir -p "$TEST_TMP/restore"
+  cp "$TEST_ROOT/dotfiles/bashrc" "$TEST_TMP/restore/.bashrc"
+  # \033 not \e: /bin/sh printf on macOS does not expand \e.
+  printf '%s\n' '#!/bin/sh' \
+    "printf '\\033[?1049h\\033[?1000h\\033[?1003h\\033[?1006h'" \
+    > "$TEST_TMP/restore/grab-and-exit.sh"
+  cp "$TEST_TMP/restore/grab-and-exit.sh" "$TEST_TMP/restore/grab-and-hang.sh"
+  printf '%s\n' 'echo $$ > "$0.pid"' 'sleep 60' >> "$TEST_TMP/restore/grab-and-hang.sh"
+  chmod +x "$TEST_TMP/restore/grab-and-exit.sh" "$TEST_TMP/restore/grab-and-hang.sh"
+
+  TERM=xterm-256color HOME="$TEST_TMP/restore" tmux -L "$restore_socket" \
+    -f "$TEST_ROOT/dotfiles/tmux.conf" new-session -d -x 80 -y 24 \
+    "bash --noprofile --rcfile '$TEST_TMP/restore/.bashrc' -i" >/dev/null 2>&1
+  sleep 2
+  # #{alternate_on}#{mouse_any_flag}: what tmux parsed, not what was written.
+  pane_modes() { tmux -L "$restore_socket" display -p '#{alternate_on}#{mouse_any_flag}'; }
+
+  tmux -L "$restore_socket" send-keys "$TEST_TMP/restore/grab-and-exit.sh" Enter
+  sleep 2
+  restore_after_clean_exit=$(pane_modes)
+  tmux -L "$restore_socket" send-keys 'true; false; (exit 42)' Enter
+  sleep 2
+  restore_after_ordinary=$(pane_modes)
+
+  tmux -L "$restore_socket" send-keys "$TEST_TMP/restore/grab-and-hang.sh" Enter
+  sleep 2
+  kill -9 "$(cat "$TEST_TMP/restore/grab-and-hang.sh.pid" 2>/dev/null || echo 0)" 2>/dev/null
+  sleep 2
+  restore_after_kill=$(pane_modes)
+  tmux -L "$restore_socket" kill-server >/dev/null 2>&1 || true
+
+  [[ "$restore_after_clean_exit" == 11 ]] \
+    || fail_test 'tmux never saw the alternate screen and mouse modes turned on'
+  [[ "$restore_after_ordinary" == 11 ]] \
+    || fail_test 'the shell cleans up terminal modes after an ordinary command exit'
+  [[ "$restore_after_kill" == 00 ]] \
+    || fail_test 'a signal-killed program leaves the alternate screen or mouse reporting on'
+fi
+
 # Ubuntu's /etc/ssh/ssh_config enables GSSAPI and ssh reads it after the user's
 # file, first value winning; the shipped Host * has to decide it first.
 if command -v ssh >/dev/null 2>&1; then

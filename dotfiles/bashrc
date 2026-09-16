@@ -261,6 +261,25 @@ PS1="\[\e[1;38;5;${_host_color}m\]${_host_label}\[\e[0m\] \[\e[34m\]\w\[\e[0m\]\
 # shell owns it).
 __set_term_title() { printf '\e]2;%s: %s\a' "$_host_label" "${PWD/#$HOME/\~}"; }
 
+# A TUI killed by a signal never sends the disables for what it turned on, so a
+# killed `claude` or `opencode` leaves the alternate screen, mouse reporting,
+# focus events and the kitty keyboard flags set. Undo them at the next prompt,
+# and only after a signal: ?1049l restores the cursor ?1049h saved, so sending
+# it on the normal screen would move it. Stop signals are excluded because a
+# suspended program restored the terminal itself and takes it back on `fg`.
+# The status is passed through so every later prompt hook still reads it.
+__restore_term() {
+  local _status=$? _signal
+  if ((_status > 128)) && _signal=$(builtin kill -l "$((_status - 128))" 2>/dev/null); then
+    case $_signal in
+      STOP|TSTP|TTIN|TTOU) ;;
+      *) [[ -t 1 ]] && printf \
+        '\e[?1049l\e[?1000l\e[?1002l\e[?1003l\e[?1004l\e[?1006l\e[?25h\e[<u\e[>4m' ;;
+    esac
+  fi
+  return "$_status"
+}
+
 # Shared, genuinely deduplicated history across every live terminal.
 #
 # HISTCONTROL=erasedups prunes the in-memory list, never the file, and `history
@@ -276,14 +295,14 @@ __history_sync() { history -n; history -w; history -c; history -r; }
 if ((BASH_VERSINFO[0] >= 5)); then
   if [[ "$(declare -p PROMPT_COMMAND 2>/dev/null)" != 'declare -a'* ]]; then
     _prompt_command_previous=${PROMPT_COMMAND:-}
-    PROMPT_COMMAND=()
+    PROMPT_COMMAND=(__restore_term)
     [[ -z "$_prompt_command_previous" ]] || PROMPT_COMMAND+=("$_prompt_command_previous")
     unset _prompt_command_previous
   fi
   PROMPT_COMMAND+=(__history_sync __set_term_title)
 else
   # shellcheck disable=SC2128,SC2178 # Bash <5 scalar compatibility branch
-  PROMPT_COMMAND="${PROMPT_COMMAND:+$PROMPT_COMMAND; }__history_sync; __set_term_title"
+  PROMPT_COMMAND="__restore_term; ${PROMPT_COMMAND:+$PROMPT_COMMAND; }__history_sync; __set_term_title"
 fi
 
 export EDITOR=nano VISUAL=nano SUDO_EDITOR=nano

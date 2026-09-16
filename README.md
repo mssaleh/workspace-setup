@@ -478,6 +478,13 @@ outer tab still names the remote machine inside `ds`. `ds <host>` runs plain
 `ssh` on its own connection into the tmux session `main` on the host: its shells
 survive a dropped connection, and running `ds <host>` again reattaches.
 
+A TUI killed by a signal never sends the disables for what it turned on, so a
+killed `claude` or `opencode` would leave the terminal on the alternate screen
+with mouse reporting, focus events and the kitty keyboard flags still set.
+`~/.bashrc` and `~/.zshrc` clear all of those at the next prompt. They act only
+on a signal death, and never on a stop signal, because a suspended program still
+owns the terminal and takes it back on `fg`.
+
 ## Working on a Mac over SSH
 
 Unless `SKIP_REMOTE_AUDIT=1` is set, every macOS run emits a read-only
