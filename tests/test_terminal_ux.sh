@@ -150,6 +150,20 @@ env -i HOME="$TEST_TMP/home" USER=test TERM=dumb \
     >/dev/null 2>&1 || true
 [[ ! -e "$TEST_TMP/ds-argv" ]] || fail_test 'ds accepted an unsafe session name'
 
+if [[ -x /bin/zsh ]]; then
+  cp "$TEST_ROOT/dotfiles/zshenv" "$TEST_TMP/home/.zshenv"
+  cp "$TEST_ROOT/dotfiles/zshrc" "$TEST_TMP/home/.zshrc"
+  printf '#!/bin/sh\nexit 255\n' > "$stub_bin/ssh"
+  chmod +x "$stub_bin/ssh"
+  zsh_ds_status=0
+  env -i HOME="$TEST_TMP/home" USER=test TERM=dumb \
+      PATH="$stub_bin:/usr/bin:/bin:/usr/sbin:/sbin" \
+      /bin/zsh -dfc 'source "$HOME/.zshenv"; source "$HOME/.zshrc"; ds devhost' \
+      >"$TEST_TMP/zsh-ds.log" 2>&1 || zsh_ds_status=$?
+  [[ "$zsh_ds_status" == 255 ]] \
+    || fail_test 'zsh ds did not preserve the SSH exit status'
+fi
+
 # Postflight must reject an old helper retained by a customized shell file.
 # shellcheck disable=SC1091
 . "$TEST_ROOT/lib/log.sh"

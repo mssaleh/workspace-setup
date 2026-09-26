@@ -165,7 +165,7 @@ postflight_apparmor_edge() {
 
 postflight_legacy_tmux() {
   if [[ "$PKGMGR" == brew ]]; then
-    if "$BREW_BIN" list --formula tmux >/dev/null 2>&1; then
+    if pkg_installed tmux; then
       postflight_fail "legacy tmux package is still installed"
     else
       postflight_pass "legacy tmux package is absent"

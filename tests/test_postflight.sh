@@ -65,6 +65,20 @@ repo_dir() { printf '%s\n' "$REPO_DIR"; }
 # so every command a check resolves comes from this fixture: delta is the pager
 # and diff filter ~/.gitconfig names.
 PACKAGES_BREW=()
+fixture_tmux_installed=0
+pkg_installed() {
+  if [[ "$1" == tmux ]]; then
+    [[ "$fixture_tmux_installed" == 1 ]]
+  else
+    "$BREW_BIN" list --formula "$1" >/dev/null 2>&1
+  fi
+}
+POSTFLIGHT_PASSES=0 POSTFLIGHT_FAILURES=0
+fixture_tmux_installed=1 postflight_legacy_tmux >/dev/null
+[[ "$POSTFLIGHT_FAILURES" == 1 ]]
+POSTFLIGHT_PASSES=0 POSTFLIGHT_FAILURES=0
+postflight_legacy_tmux >/dev/null
+[[ "$POSTFLIGHT_PASSES" == 1 && "$POSTFLIGHT_FAILURES" == 0 ]]
 for command_name in uv uvx claude codex delta; do
   printf '%s\n' '#!/bin/sh' 'exit 0' > "$HOME/.local/bin/$command_name"
   chmod +x "$HOME/.local/bin/$command_name"

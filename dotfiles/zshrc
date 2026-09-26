@@ -134,17 +134,17 @@ function ds() {
     print -u2 "usage: ds <host> [session]"
     return 2
   fi
-  local session=${2:-main} status
+  local session=${2:-main} ssh_status
   case "$session" in
     *[!a-zA-Z0-9._-]*|''|-*) print -u2 "invalid session name: $session"; return 2 ;;
   esac
   command ssh -S none -t -- "$1" zmx attach "$session"
-  status=$?
+  ssh_status=$?
   if [[ -t 1 ]]; then
-    if ((status == 255)); then print -n '\e[?1049l'; fi
+    if ((ssh_status == 255)); then print -n '\e[?1049l'; fi
     print -n '\e[?1000l\e[?1002l\e[?1003l\e[?1004l\e[?1006l\e[?25h\e[<u\e[>4m'
   fi
-  return "$status"
+  return "$ssh_status"
 }
 
 # Managed hosts install xterm-kitty terminfo without a GUI dependency, so plain
