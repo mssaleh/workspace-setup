@@ -222,6 +222,7 @@ fi
 . "$(repo_dir)/scripts/stage_terminal_profile.sh"
 # shellcheck disable=SC1091
 . "$(repo_dir)/scripts/stage_postflight.sh"
+. "$(repo_dir)/scripts/stage_apparmor.sh"
 
 # Keep macOS-only definitions out of Linux processes entirely. Besides making
 # the current boundary explicit, this prevents a future top-level initializer
@@ -350,6 +351,9 @@ main() {
 
   if [[ "$OS_KIND" == linux && "${UPDATE_SYSTEM:-}" == 1 ]]; then
     stage "update: bring the host current"          stage_update
+  fi
+  if [[ "$OS_KIND" == linux ]]; then
+    stage "apparmor: converge Edge profile"          stage_apparmor
   fi
   if [[ "$OS_KIND" == macos ]] \
       && [[ "${UPDATE_HOMEBREW:-}" == 1 || "${UPGRADE_HOMEBREW_FORMULAE:-}" == 1 ]]; then

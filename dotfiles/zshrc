@@ -124,19 +124,27 @@ function y() {
 	command rm -f -- "$tmp"
 }
 
-# ds: durable remote session. tmux on the host keeps its shells running through
-# a dropped connection (not a host reboot); `ds <host>` again reattaches.
+# ds: attach to a persistent remote shell. Kitty owns tabs, splits, and input.
 # Plain ssh: the ssh kitten types its setup data into this shell when the
 # connection fails. -S none: a shared connection whose link died hangs the
 # reattach until its keepalive gives up.
 # -t: ssh gives a remote command no terminal otherwise.
-# -D: detach every other client, including one a dropped connection left behind.
 function ds() {
-  if [ -z "$1" ]; then
-    print -u2 "usage: ds <host>"
+  if (( $# < 1 || $# > 2 )) || [[ -z "$1" ]]; then
+    print -u2 "usage: ds <host> [session]"
     return 2
   fi
-  command ssh -S none -t "$1" tmux new -A -D -s main
+  local session=${2:-main} status
+  case "$session" in
+    *[!a-zA-Z0-9._-]*|''|-*) print -u2 "invalid session name: $session"; return 2 ;;
+  esac
+  command ssh -S none -t -- "$1" zmx attach "$session"
+  status=$?
+  if [[ -t 1 ]]; then
+    if ((status == 255)); then print -n '\e[?1049l'; fi
+    print -n '\e[?1000l\e[?1002l\e[?1003l\e[?1004l\e[?1006l\e[?25h\e[<u\e[>4m'
+  fi
+  return "$status"
 }
 
 # Managed hosts install xterm-kitty terminfo without a GUI dependency, so plain
@@ -212,7 +220,7 @@ _zsh_plugin zsh-autosuggestions zsh-autosuggestions.zsh
 # Make Home / End / forward-Delete work at the shell prompt like they do on
 # Linux, regardless of $TERM. We bind the escape sequences every common
 # terminal emits (xterm normal + application cursor mode + vt/linux + rxvt) so
-# this is correct in kitty, Terminal.app, iTerm, tmux and over ssh. Page Up/Down
+# this is correct in kitty, Terminal.app, iTerm and over ssh. Page Up/Down
 # have no per-line meaning in a shell, so they fall through to the terminal's
 # scrollback (kitty: Shift+PageUp/Down) — same as Linux.
 bindkey '^[[H'    beginning-of-line     # Home  (xterm)

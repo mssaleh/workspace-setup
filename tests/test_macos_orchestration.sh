@@ -51,6 +51,7 @@ write_stage_stub stage_ssh.sh stage_ssh
 write_stage_stub stage_fonts_terminal.sh stage_fonts_terminal
 write_stage_stub stage_terminal_profile.sh stage_terminal_profile
 write_stage_stub stage_postflight.sh stage_postflight
+write_stage_stub stage_apparmor.sh stage_apparmor
 write_stage_stub stage_macos_bootstrap.sh stage_macos_bootstrap
 write_stage_stub stage_macos_cli.sh stage_macos_cli
 write_stage_stub stage_completions.sh stage_completions

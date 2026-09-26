@@ -58,7 +58,7 @@ make_executable() {
   chmod +x "$1"
 }
 
-for tool in uv uvx claude codex ruff yazi ya himalaya yq cosign; do
+for tool in uv uvx claude codex zmx ruff yazi ya himalaya yq cosign; do
   make_executable "$HOME/.local/bin/$tool"
 done
 make_executable "$HOME/.cargo/bin/rustup"
@@ -301,8 +301,8 @@ collision_report=$(cat "$TEST_TMP/collision.log")
 # Naming both claimants is the actionable half.
 [[ "$collision_report" == *"/opt/microsoft/msedge/msedge"* ]]
 [[ "$collision_report" == *msedge* && "$collision_report" == *microsoft-edge-stable* ]]
-# ...and the diversion that keeps the upgrade from copying it back.
-[[ "$collision_report" == *"dpkg-divert --local --rename --divert /opt/microsoft/msedge/apparmor.d/microsoft-edge-stable.disabled"* ]]
+# Setup converges this supported collision; postflight names the failure.
+[[ "$collision_report" == *"rerun setup"* ]]
 rm "$apparmor_fixture/microsoft-edge-stable"
 
 # A disable/ symlink is not a second claim on the executable.

@@ -33,6 +33,7 @@ tests=(
   test_macos_remote_audit.sh
   test_postflight.sh
   test_linux_postflight.sh
+  test_apparmor_edge.sh
   test_linux_fresh_host.sh
   test_headless_credentials.sh
   test_streamed_bootstrap.sh

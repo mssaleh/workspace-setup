@@ -48,6 +48,59 @@ fi
 stage_dotfiles
 [[ "$CONFIG_CONFLICT_COUNT" == 0 ]]
 
+# A previous setup-owned config is removed on upgrade and stays absent. An
+# unrelated user config remains untouched.
+printf 'managed old config\n' > "$HOME/.tmux.conf"
+legacy_hash=$(config_sha256 "$HOME/.tmux.conf")
+printf 'dotfiles/tmux.conf\t%s\n' "$legacy_hash" > "$TEST_TMP/old-hashes.tsv"
+KNOWN_CONFIG_HASHES_FILE="$TEST_TMP/old-hashes.tsv" stage_dotfiles >/dev/null
+[[ ! -e "$HOME/.tmux.conf" ]]
+printf 'user config\n' > "$HOME/.tmux.conf"
+KNOWN_CONFIG_HASHES_FILE="$TEST_TMP/old-hashes.tsv" stage_dotfiles >/dev/null
+[[ "$(cat "$HOME/.tmux.conf")" == 'user config' ]]
+rm "$HOME/.tmux.conf"
+
+mkdir -p "$HOME/.local/bin" "$HOME/.cargo/bin"
+printf '#!/bin/sh\nexit 0\n' > "$HOME/.local/bin/uv"
+printf '#!/bin/sh\nexit 0\n' > "$HOME/.cargo/bin/rustup"
+chmod +x "$HOME/.local/bin/uv" "$HOME/.cargo/bin/rustup"
+printf '%s\n' 'export PATH="$HOME/.cargo/bin:$PATH"' > "$HOME/.cargo/env"
+
+cat > "$TEST_TMP/old-ds" <<'OLD_DS'
+# ds: durable remote session. tmux on the host keeps its shells running through
+# a dropped connection (not a host reboot); `ds <host>` again reattaches.
+# Plain ssh: the ssh kitten types its setup data into this shell when the
+# connection fails. -S none: a shared connection whose link died hangs the
+# reattach until its keepalive gives up.
+# -t: ssh gives a remote command no terminal otherwise.
+# -D: detach every other client, including one a dropped connection left behind.
+function ds() {
+  if [ -z "$1" ]; then
+    echo "usage: ds <host>" >&2
+    return 2
+  fi
+  command ssh -S none -t "$1" tmux new -A -D -s main
+}
+OLD_DS
+awk -v replacement="$TEST_TMP/old-ds" '
+  /^# ds: attach to a persistent remote shell/ {
+    while ((getline line < replacement) > 0) print line
+    close(replacement)
+    skip = 1
+    next
+  }
+  skip && /^}$/ { skip = 0; next }
+  !skip { print }
+' "$HOME/.bashrc" > "$TEST_TMP/custom-bashrc"
+printf '\n# user preference\n' >> "$TEST_TMP/custom-bashrc"
+mv "$TEST_TMP/custom-bashrc" "$HOME/.bashrc"
+stage_dotfiles >/dev/null
+grep -Fq 'command ssh -S none -t -- "$1" zmx attach "$session"' "$HOME/.bashrc"
+grep -Fq '# user preference' "$HOME/.bashrc"
+! grep -Fq 'tmux new -A -D -s main' "$HOME/.bashrc"
+cp "$TEST_ROOT/dotfiles/bashrc" "$HOME/.bashrc"
+rm "$HOME/.local/bin/uv" "$HOME/.cargo/bin/rustup" "$HOME/.cargo/env"
+
 # Both agents must find the skill in their own home, and its helper script must
 # stay executable so an agent can actually run it. The skill describes Apple
 # Container, so it is installed on macOS only — a Linux host runs Docker and

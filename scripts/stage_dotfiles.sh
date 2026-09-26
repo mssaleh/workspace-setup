@@ -116,8 +116,46 @@ bash_path_semantically_compliant() {
   bash_path_probe "$dst" || return 1
   shell_env_loader_converge "$dst" "$(dirname "$src")/bashrc" "$mode" \
     bash_path_probe /bin/bash --noprofile --norc -c || return 1
+  if [[ "$dst" == "$HOME/.bashrc" ]]; then
+    shell_legacy_ds_converge "$src" "$dst" "$mode" bash || return 1
+  fi
   CONFIG_MERGE_ACTION=${CONFIG_MERGE_ACTION:-kept}
   return 0
+}
+
+shell_legacy_ds_converge() {
+  local src="$1" dst="$2" mode="$3" shell_name="$4" expected tmp
+  grep -Fq 'tmux new -A -D -s main' "$dst" || return 0
+  case "$shell_name" in
+    bash) expected=c8fbba482cdb03604ff59910e03807e344d349a50d224e5429152fc45571b238 ;;
+    zsh) expected=94cca7e3d55bdf084efcdd6d4dd59a5a2d385f5c591b0ab7a8451eb6bce2c160 ;;
+    *) return 1 ;;
+  esac
+  tmp=$(mktemp -d "${TMPDIR:-/tmp}/legacy-ds.XXXXXX") || return 1
+  sed -n '/^# ds: durable remote session/,/^}/p' "$dst" > "$tmp/old"
+  if [[ "$(config_sha256 "$tmp/old")" != "$expected" ]]; then
+    CONFIG_MERGE_REASON="legacy ds definition differs from the shipped version"
+    rm -rf -- "$tmp"
+    return 1
+  fi
+  sed -n '/^# ds: attach to a persistent remote shell/,/^}/p' "$src" > "$tmp/new"
+  awk -v replacement="$tmp/new" '
+    /^# ds: durable remote session/ {
+      while ((getline line < replacement) > 0) print line
+      close(replacement)
+      skip = 1
+      next
+    }
+    skip && /^}$/ { skip = 0; next }
+    !skip { print }
+  ' "$dst" > "$tmp/merged"
+  if ! "$shell_name" -n "$tmp/merged" >/dev/null 2>&1 \
+      || ! config_atomic_replace "$tmp/merged" "$dst" "$mode"; then
+    rm -rf -- "$tmp"
+    return 1
+  fi
+  rm -rf -- "$tmp"
+  CONFIG_MERGE_ACTION=merged
 }
 
 profile_path_probe() {
@@ -159,7 +197,7 @@ zsh_path_semantically_compliant() {
 }
 
 zshrc_semantically_compliant() {
-  local _src="$1" dst="$2" _mode="$3"
+  local src="$1" dst="$2" mode="$3"
   if env -i HOME="$HOME" USER="${USER:-$(id -un)}" PATH=/usr/bin:/bin:/usr/sbin:/sbin \
       /bin/zsh -dfc '
         source "$HOME/.zshenv"
@@ -167,7 +205,8 @@ zshrc_semantically_compliant() {
         [[ "$EDITOR" == nano ]]
         (( $+functions[y] && $+functions[ds] && $+functions[s] && $+functions[ks] ))
       ' zsh "$dst" >/dev/null 2>&1; then
-    CONFIG_MERGE_ACTION=kept
+    shell_legacy_ds_converge "$src" "$dst" "$mode" zsh || return 1
+    CONFIG_MERGE_ACTION=${CONFIG_MERGE_ACTION:-kept}
     return 0
   fi
   return 1
@@ -471,6 +510,27 @@ install_repo_config() {
   install_regular_file "$repo/$relative" "$dst" "$relative" "$mode" "$merge_fn"
 }
 
+remove_legacy_tmux_config() {
+  local dst="$HOME/.tmux.conf"
+  [[ -e "$dst" || -L "$dst" ]] || return 0
+  if [[ -L "$dst" ]]; then
+    case "$(readlink "$dst")" in
+      workspace-setup/*|*/workspace-setup/*|workspace-setup|*/workspace-setup) ;;
+      *) warn "preserving user-owned tmux config: $dst"; return 0 ;;
+    esac
+    if [[ -e "$dst" ]] && ! config_file_is_known dotfiles/tmux.conf "$dst"; then
+      config_atomic_replace "$dst" "$dst" 0644 || return 1
+      warn "preserving user-edited tmux config as a regular file: $dst"
+      return 0
+    fi
+  elif ! config_file_is_known dotfiles/tmux.conf "$dst"; then
+    warn "preserving user-owned tmux config: $dst"
+    return 0
+  fi
+  rm -- "$dst"
+  info "removed managed tmux config: $dst"
+}
+
 # Claude Code and Codex both discover skills at <agent-home>/skills/<name>/,
 # so one source tree is converged into each agent home as ordinary files. A host
 # that already shares a single skill store through its own directory link keeps
@@ -645,6 +705,8 @@ stage_dotfiles() {
   local repo
   repo=$(repo_dir)
 
+  remove_legacy_tmux_config
+
   install_repo_config "$repo" dotfiles/bashrc "$HOME/.bashrc" 0644 bash_path_semantically_compliant
   install_repo_config "$repo" dotfiles/bash_profile "$HOME/.bash_profile" 0644 bash_path_semantically_compliant
   install_repo_config "$repo" dotfiles/profile "$HOME/.profile" 0644 profile_path_semantically_compliant
@@ -654,7 +716,6 @@ stage_dotfiles() {
     install_repo_config "$repo" dotfiles/zshrc "$HOME/.zshrc" 0644 zshrc_semantically_compliant
   fi
   install_repo_config "$repo" dotfiles/inputrc   "$HOME/.inputrc"
-  install_repo_config "$repo" dotfiles/tmux.conf "$HOME/.tmux.conf"
   install_repo_config "$repo" dotfiles/nanorc    "$HOME/.nanorc"
 
   # himalaya completion, generated from the installed binary on first Tab.

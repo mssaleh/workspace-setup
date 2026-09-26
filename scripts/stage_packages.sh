@@ -75,8 +75,13 @@ install_verified_binary() {
 # {version} in <asset> and <member> stands for the release without a leading v.
 install_upstream_archive_tool() {
   local label="$1" asset_pattern="$2" member_pattern="$3" dst="$HOME/.local/bin/$1"
-  local repo tag version asset member tmp
-  upstream_artifact_needed "$label" "$dst" "$dst" --version || return 0
+  local repo tag version asset member tmp probe=--version
+  [[ "$label" == zmx ]] && probe=version
+  upstream_artifact_needed "$label" "$dst" "$dst" "$probe" || return 0
+  if [[ "$label" == zmx && -x "$dst" && -n "$("$dst" list --short 2>/dev/null)" ]]; then
+    warn "zmx has active sessions; keeping its current binary until they end"
+    return 0
+  fi
   repo=$(upstream_project_repo "$label") || { warn "$label: no upstream project is declared"; return 1; }
   tag=$(upstream_latest_tag "$repo") || { warn "$label: could not resolve its current release"; return 1; }
   version=${tag#v}
@@ -94,6 +99,31 @@ install_upstream_archive_tool() {
     warn "$label download or installation failed (skipped)"
   fi
   rm -rf "$tmp"
+}
+
+remove_legacy_tmux() {
+  if [[ "$PKGMGR" == brew ]]; then
+    "$BREW_BIN" list --formula tmux >/dev/null 2>&1 || return 0
+    command -v zmx >/dev/null 2>&1 || { warn "zmx is unavailable; keeping tmux"; return 1; }
+    if command -v tmux >/dev/null 2>&1 && tmux has-session 2>/dev/null; then
+      warn "tmux has live sessions; exit them before removing its package"
+      return 1
+    fi
+    "$BREW_BIN" uninstall --formula tmux || return 1
+  else
+    dpkg --get-selections tmux 2>/dev/null | awk '$2 == "install" { found = 1 } END { exit !found }' || return 0
+    [[ -x "$HOME/.local/bin/zmx" ]] || { warn "zmx is unavailable; keeping tmux"; return 1; }
+    if command -v tmux >/dev/null 2>&1 && tmux has-session 2>/dev/null; then
+      warn "tmux has live sessions; exit them before removing its package"
+      return 1
+    fi
+    local removals
+    removals=$(sudo "${APT_ENV[@]}" "$PKGMGR" remove -s -y tmux 2>/dev/null \
+      | awk '/^(Remv|Purg) / { print $2 }') || return 1
+    [[ "$removals" == tmux ]] || { warn "tmux removal would affect other packages: $removals"; return 1; }
+    sudo "${APT_ENV[@]}" "$PKGMGR" remove -y tmux || return 1
+  fi
+  ok "removed the legacy tmux package"
 }
 
 # install_or_upgrade_verified_binary <label> <url> <expected sha256> <dest>
@@ -138,7 +168,7 @@ yq_published_sha256() {
 # Test the terminal database ncurses will use in an ordinary SSH session.
 # Kitty exports TERMINFO inside its own windows, so an unqualified infocmp can
 # accidentally validate Kitty's private application tree while the default
-# database used by ssh, sudo, and detached tmux sessions remains incomplete.
+# database used by ssh, sudo, and detached remote sessions remains incomplete.
 xterm_kitty_terminfo_available() {
   command -v infocmp >/dev/null 2>&1 || return 1
   (
@@ -697,6 +727,9 @@ stage_packages() {
     esac
 
     if [[ -n "$rust_triple" ]]; then
+      local zmx_arch=$uname_m
+      [[ "$zmx_arch" == arm64 ]] && zmx_arch=aarch64
+      install_upstream_archive_tool zmx "zmx-{version}-linux-${zmx_arch}.tar.gz" zmx
       # --- ruff (Astral Python linter/formatter, not in apt) ---
       # The release is an archive rather than a bare binary, so currency is
       # decided by the version ruff reports against the version the project
@@ -802,4 +835,5 @@ stage_packages() {
   # Keep this outside SKIP_FONT and every GUI-specific stage so a plain Kitty
   # SSH session can run ncurses applications on a headless target.
   ensure_xterm_kitty_terminfo
+  remove_legacy_tmux
 }

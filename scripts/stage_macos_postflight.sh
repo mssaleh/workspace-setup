@@ -401,6 +401,8 @@ stage_macos_postflight() {
   postflight_macos_ssh_agent
   postflight_agent_skills
   postflight_macos_packages
+  postflight_legacy_tmux
+  postflight_durable_ssh
   postflight_apparmor_attachments
   postflight_xterm_kitty_terminfo
   postflight_shell_paths

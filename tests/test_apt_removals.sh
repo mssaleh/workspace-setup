@@ -12,6 +12,8 @@ TEST_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
 TEST_TMP=$(mktemp -d "${TMPDIR:-/tmp}/apt-removals-test.XXXXXX")
 trap 'rm -rf "$TEST_TMP"' EXIT
+HOME="$TEST_TMP/home"
+mkdir -p "$HOME"
 
 # shellcheck disable=SC1091
 . "$TEST_ROOT/lib/log.sh"
@@ -21,6 +23,8 @@ trap 'rm -rf "$TEST_TMP"' EXIT
 . "$TEST_ROOT/lib/apt.sh"
 # shellcheck disable=SC1091
 . "$TEST_ROOT/scripts/stage_docker.sh"
+# shellcheck disable=SC1091
+. "$TEST_ROOT/scripts/stage_packages.sh"
 
 PKGMGR=apt-get
 APT_ENV=()
@@ -38,6 +42,68 @@ sudo() {
   esac
 }
 sudo_exit=0
+
+# The migration only removes tmux after zmx exists, never removes reverse
+# dependencies, and does nothing on the next run.
+mkdir -p "$HOME/.local/bin"
+printf '#!/bin/sh\nexit 0\n' > "$HOME/.local/bin/zmx"
+chmod +x "$HOME/.local/bin/zmx"
+legacy_installed=1
+legacy_sessions=0
+tmux() { ((legacy_sessions)); }
+dpkg() {
+  [[ "$1" == --get-selections ]] || return 1
+  ((legacy_installed)) && printf 'tmux\tinstall\n'
+  return 0
+}
+sudo() {
+  printf '%s\n' "$*" >> "$CALLS"
+  case "$*" in
+    *"remove -s -y tmux"*) printf 'Remv %s [3.6]\n' "${removal_target:-tmux}" ;;
+    *"remove -y tmux"*) legacy_installed=0 ;;
+  esac
+}
+reset_calls() { : > "$CALLS"; }
+reset_calls
+remove_legacy_tmux >/dev/null
+[[ "$(cat "$CALLS")" == *"remove -s -y tmux"*"remove -y tmux"* ]]
+reset_calls
+remove_legacy_tmux >/dev/null
+[[ ! -s "$CALLS" ]]
+legacy_installed=1
+removal_target=other-package
+reset_calls
+if remove_legacy_tmux >/dev/null 2>&1; then
+  printf 'tmux migration removed a dependent package\n' >&2
+  exit 1
+fi
+[[ "$(cat "$CALLS")" != *"remove -y tmux"* ]]
+unset removal_target
+legacy_sessions=1
+reset_calls
+if remove_legacy_tmux >/dev/null 2>&1; then
+  printf 'tmux migration stranded a live session\n' >&2
+  exit 1
+fi
+[[ ! -s "$CALLS" ]]
+legacy_sessions=0
+rm "$HOME/.local/bin/zmx"
+reset_calls
+if remove_legacy_tmux >/dev/null 2>&1; then
+  printf 'tmux migration proceeded without zmx\n' >&2
+  exit 1
+fi
+[[ ! -s "$CALLS" ]]
+
+# Restore the existing Docker fixtures below.
+sudo_exit=0
+sudo() {
+  printf '%s\n' "$*" >> "$CALLS"
+  case "$*" in
+    *"remove -s -y"*) printf '%s\n' 'Remv podman-docker [4.9.3]' 'Remv buildah [1.33.7]' ;;
+    *) return "$sudo_exit" ;;
+  esac
+}
 
 # `deinstall` means removed with config kept; only `install` may reach apt.
 selections=''

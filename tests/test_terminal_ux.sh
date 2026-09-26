@@ -17,79 +17,6 @@ if grep -qE '^[[:space:]]*include[[:space:]]+"?/usr/share/nano/' \
   fail_test 'nanorc hard-codes Ubuntu syntax paths and is not portable to Homebrew'
 fi
 
-# Coding agents in a tmux pane need `on`; `external` blocks their OSC 52 writes.
-grep -qE '^[[:space:]]*set[[:space:]]+-s[[:space:]]+set-clipboard[[:space:]]+on([[:space:]]|$)' \
-  "$TEST_ROOT/dotfiles/tmux.conf" \
-  || fail_test 'tmux does not allow pane applications to write the clipboard'
-
-# The shell titles each pane "<host>: <dir>"; a real attached client must receive
-# it. util-linux `script` provides the pty; BSD script takes different flags.
-if command -v tmux >/dev/null 2>&1 && command -v timeout >/dev/null 2>&1 \
-    && script --version 2>/dev/null | grep -q util-linux; then
-  cat > "$TEST_TMP/title-pane.sh" <<'PANE'
-#!/bin/sh
-sleep 1
-printf '\033]2;host: ~/dir\033\\'
-sleep 2
-PANE
-  chmod +x "$TEST_TMP/title-pane.sh"
-  # xterm-256color is in every ncurses base install; tmux refuses to start on a
-  # TERM whose terminfo entry is missing, as xterm-kitty's is on a fresh host.
-  TERM=xterm-256color timeout 20 script -qfec \
-    "tmux -L workspace-setup-title-test -f '$TEST_ROOT/dotfiles/tmux.conf' new-session -s title '$TEST_TMP/title-pane.sh'" \
-    "$TEST_TMP/title.log" >/dev/null 2>&1 || true
-  tmux -L workspace-setup-title-test kill-server >/dev/null 2>&1 || true
-  LC_ALL=C grep -aqE $'\e\\][02];host: ~/dir' "$TEST_TMP/title.log" \
-    || fail_test 'tmux does not forward the pane title to the outer terminal'
-fi
-
-# A coding agent killed by a signal never sends the disables for the alternate
-# screen and mouse reporting it turned on, so the shell undoes them at the next
-# prompt. tmux is both the emulator `ds` runs agents under and the only one here
-# that can be asked what state a pane is left in. An ordinary exit must not
-# trigger the same cleanup: a program that is still running owns the terminal.
-if command -v tmux >/dev/null 2>&1; then
-  restore_socket=workspace-setup-restore-test
-  tmux -L "$restore_socket" kill-server >/dev/null 2>&1 || true
-  mkdir -p "$TEST_TMP/restore"
-  cp "$TEST_ROOT/dotfiles/bashrc" "$TEST_TMP/restore/.bashrc"
-  # \033 not \e: /bin/sh printf on macOS does not expand \e.
-  printf '%s\n' '#!/bin/sh' \
-    "printf '\\033[?1049h\\033[?1000h\\033[?1003h\\033[?1006h'" \
-    > "$TEST_TMP/restore/grab-and-exit.sh"
-  cp "$TEST_TMP/restore/grab-and-exit.sh" "$TEST_TMP/restore/grab-and-hang.sh"
-  printf '%s\n' 'echo $$ > "$0.pid"' 'sleep 60' >> "$TEST_TMP/restore/grab-and-hang.sh"
-  chmod +x "$TEST_TMP/restore/grab-and-exit.sh" "$TEST_TMP/restore/grab-and-hang.sh"
-
-  TERM=xterm-256color HOME="$TEST_TMP/restore" tmux -L "$restore_socket" \
-    -f "$TEST_ROOT/dotfiles/tmux.conf" new-session -d -x 80 -y 24 \
-    "bash --noprofile --rcfile '$TEST_TMP/restore/.bashrc' -i" >/dev/null 2>&1
-  sleep 2
-  # #{alternate_on}#{mouse_any_flag}: what tmux parsed, not what was written.
-  pane_modes() { tmux -L "$restore_socket" display -p '#{alternate_on}#{mouse_any_flag}'; }
-
-  tmux -L "$restore_socket" send-keys "$TEST_TMP/restore/grab-and-exit.sh" Enter
-  sleep 2
-  restore_after_clean_exit=$(pane_modes)
-  tmux -L "$restore_socket" send-keys 'true; false; (exit 42)' Enter
-  sleep 2
-  restore_after_ordinary=$(pane_modes)
-
-  tmux -L "$restore_socket" send-keys "$TEST_TMP/restore/grab-and-hang.sh" Enter
-  sleep 2
-  kill -9 "$(cat "$TEST_TMP/restore/grab-and-hang.sh.pid" 2>/dev/null || echo 0)" 2>/dev/null
-  sleep 2
-  restore_after_kill=$(pane_modes)
-  tmux -L "$restore_socket" kill-server >/dev/null 2>&1 || true
-
-  [[ "$restore_after_clean_exit" == 11 ]] \
-    || fail_test 'tmux never saw the alternate screen and mouse modes turned on'
-  [[ "$restore_after_ordinary" == 11 ]] \
-    || fail_test 'the shell cleans up terminal modes after an ordinary command exit'
-  [[ "$restore_after_kill" == 00 ]] \
-    || fail_test 'a signal-killed program leaves the alternate screen or mouse reporting on'
-fi
-
 # Ubuntu's /etc/ssh/ssh_config enables GSSAPI and ssh reads it after the user's
 # file, first value winning; the shipped Host * has to decide it first.
 if command -v ssh >/dev/null 2>&1; then
@@ -191,9 +118,7 @@ if ! env -i HOME="$TEST_TMP/home" USER=test TERM=dumb \
   fail_test 're-sourcing bashrc changes PROMPT_COMMAND'
 fi
 
-# `ds` runs plain ssh even inside kitty, on its own connection, and requests the
-# terminal itself: ssh allocates none for a remote command, and tmux will not
-# start without one.
+# `ds` uses its own SSH connection and requests a terminal for zmx.
 stub_bin="$TEST_TMP/stub-bin"
 mkdir -p "$stub_bin"
 for stub in ssh kitten; do
@@ -207,10 +132,64 @@ for kitty_window in '' 7; do
       PATH="$stub_bin:/usr/bin:/bin:/usr/sbin:/sbin" \
       /bin/bash --noprofile --rcfile "$TEST_TMP/home/.bashrc" -ic 'ds devhost' \
       >/dev/null 2>&1 || true
-  expected='ssh -S none -t devhost tmux new -A -D -s main'
+  expected='ssh -S none -t -- devhost zmx attach main'
   [[ "$(cat "$TEST_TMP/ds-argv" 2>/dev/null)" == "$expected" ]] \
     || fail_test "ds did not run: $expected"
 done
+rm -f "$TEST_TMP/ds-argv"
+env -i HOME="$TEST_TMP/home" USER=test TERM=dumb \
+    PATH="$stub_bin:/usr/bin:/bin:/usr/sbin:/sbin" \
+    /bin/bash --noprofile --rcfile "$TEST_TMP/home/.bashrc" -ic 'ds devhost work' \
+    >/dev/null 2>&1 || true
+[[ "$(cat "$TEST_TMP/ds-argv")" == 'ssh -S none -t -- devhost zmx attach work' ]] \
+  || fail_test 'ds did not pass a named zmx session'
+rm -f "$TEST_TMP/ds-argv"
+env -i HOME="$TEST_TMP/home" USER=test TERM=dumb \
+    PATH="$stub_bin:/usr/bin:/bin:/usr/sbin:/sbin" \
+    /bin/bash --noprofile --rcfile "$TEST_TMP/home/.bashrc" -ic 'ds devhost "bad;name"' \
+    >/dev/null 2>&1 || true
+[[ ! -e "$TEST_TMP/ds-argv" ]] || fail_test 'ds accepted an unsafe session name'
+
+# Postflight must reject an old helper retained by a customized shell file.
+# shellcheck disable=SC1091
+. "$TEST_ROOT/lib/log.sh"
+# shellcheck disable=SC1091
+. "$TEST_ROOT/scripts/stage_postflight.sh"
+original_home=$HOME
+HOME="$TEST_TMP/home"
+OS_KIND=linux
+POSTFLIGHT_PASSES=0 POSTFLIGHT_FAILURES=0
+postflight_durable_ssh >/dev/null 2>&1
+[[ "$POSTFLIGHT_FAILURES" == 0 && "$POSTFLIGHT_PASSES" == 1 ]] \
+  || fail_test 'postflight rejected the zmx helper'
+cp "$TEST_TMP/home/.bashrc" "$TEST_TMP/current-bashrc"
+printf '\nfunction ds() { command ssh "$1" tmux attach; }\n' >> "$TEST_TMP/home/.bashrc"
+POSTFLIGHT_PASSES=0 POSTFLIGHT_FAILURES=0
+postflight_durable_ssh >/dev/null 2>&1
+[[ "$POSTFLIGHT_FAILURES" == 1 ]] \
+  || fail_test 'postflight accepted a retained tmux helper'
+mv "$TEST_TMP/current-bashrc" "$TEST_TMP/home/.bashrc"
+HOME=$original_home
+
+# A broken SSH link exits 255 rather than with a signal. The wrapper must
+# disable remote mouse reporting before the local prompt accepts input again.
+if command -v script >/dev/null 2>&1 \
+    && script --version 2>/dev/null | grep -q util-linux; then
+  cat > "$stub_bin/ssh" <<'STUB'
+#!/bin/sh
+printf '\033[?1049h\033[?1000h\033[?1006h'
+exit 255
+STUB
+  chmod +x "$stub_bin/ssh"
+  script -qfec "env -i HOME='$TEST_TMP/home' USER=test TERM=xterm-256color PATH='$stub_bin:/usr/bin:/bin' /bin/bash --noprofile --rcfile '$TEST_TMP/home/.bashrc' -ic 'ds devhost'" \
+    "$TEST_TMP/ds-drop.log" >/dev/null 2>&1 || true
+  LC_ALL=C grep -aFq $'\e[?1049l' "$TEST_TMP/ds-drop.log" \
+    || fail_test 'ds did not leave the alternate screen after a dropped connection'
+  LC_ALL=C grep -aFq $'\e[?1000l' "$TEST_TMP/ds-drop.log" \
+    || fail_test 'ds left mouse reporting enabled after a dropped connection'
+  LC_ALL=C grep -aFq $'\e[<u' "$TEST_TMP/ds-drop.log" \
+    || fail_test 'ds left the Kitty keyboard mode enabled after a dropped connection'
+fi
 
 # ── GNOME terminal: share behaviour, never appearance ──────────────────────
 # Ptyxis keeps Ubuntu's palette and font on purpose. Looking different from

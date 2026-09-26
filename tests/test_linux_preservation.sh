@@ -36,7 +36,7 @@ STUB
 : > "$fixture/lib/config.sh"
 
 for stage_name in bootstrap packages docker groups flatpak update dotfiles \
-    toolchains ssh fonts_terminal terminal_profile container postflight; do
+    toolchains ssh fonts_terminal terminal_profile container apparmor postflight; do
   function_name="stage_${stage_name}"
   printf '%s() { :; }\n' "$function_name" > "$fixture/scripts/$function_name.sh"
 done
@@ -67,6 +67,7 @@ stage_flatpak
 stage_ssh
 stage_fonts_terminal
 stage_terminal_profile
+stage_apparmor
 stage_postflight
 EXPECTED
 )
@@ -173,6 +174,9 @@ for function_name in \
     postflight_agent_skills \
     postflight_packages \
     postflight_apparmor_attachments \
+    postflight_apparmor_edge \
+    postflight_legacy_tmux \
+    postflight_durable_ssh \
     postflight_xterm_kitty_terminfo \
     postflight_shell_paths \
     postflight_shell_env \
@@ -198,6 +202,9 @@ postflight_ssh_agent
 postflight_agent_skills
 postflight_packages
 postflight_apparmor_attachments
+postflight_apparmor_edge
+postflight_legacy_tmux
+postflight_durable_ssh
 postflight_xterm_kitty_terminfo
 postflight_shell_paths
 postflight_shell_env

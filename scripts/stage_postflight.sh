@@ -95,10 +95,8 @@ postflight_xterm_kitty_terminfo() {
 # postflight_apparmor_attachments [profile-dir] — no two profiles may claim the
 # same executable.
 #
-# Vendor postinsts write profiles into /etc/apparmor.d themselves, and one that
-# guesses the wrong name lands a second profile on an executable the
-# distribution already confines; load order then decides which applies. Both
-# parse and apparmor.service starts clean, so only the attachments show it.
+# Vendor postinsts write profiles into /etc/apparmor.d themselves. A duplicate
+# attachment leaves the executable unconfined even when both profiles load.
 #
 # Compares the `profile <name> <attachment>` form literally: brace alternations
 # can overlap without matching textually, and a false pass beats a false alarm.
@@ -112,7 +110,7 @@ postflight_apparmor_attachments() {
   local profile pairs collisions
   pairs=$(
     for profile in "$dir"/*; do
-      [[ -f "$profile" ]] || continue
+      [[ -f "$profile" && ! -L "$profile" && ! -e "$dir/disable/${profile##*/}" ]] || continue
       awk -v name="${profile##*/}" \
         '/^profile[ \t]/ && $3 ~ /^\// { print $3 "\t" name }' "$profile" 2>/dev/null
     done
@@ -132,26 +130,77 @@ postflight_apparmor_attachments() {
   while IFS=$'\t' read -r attachment claimants; do
     [[ -n "$attachment" ]] || continue
     postflight_fail "AppArmor profiles collide on $attachment: $claimants"
-    postflight_note "  keep the one dpkg owns (dpkg -S names it) and remove the other:"
-    postflight_note "  sudo apparmor_parser -R <unowned profile> && sudo rm <unowned profile>"
-    local claimant copied_from
-    for claimant in $claimants; do
-      copied_from=$(postflight_apparmor_profile_source "$dir" "$claimant") || copied_from=""
-      [[ -n "$copied_from" ]] || continue
-      postflight_note "  $claimant is copied from $copied_from whenever its package is upgraded; divert that file first:"
-      postflight_note "  sudo dpkg-divert --local --rename --divert $copied_from.disabled --add $copied_from"
-    done
+    postflight_note "  inspect package ownership and rerun setup to converge supported profiles"
   done <<< "$collisions"
 }
 
-# postflight_apparmor_profile_source <dir> <profile> — for a profile no package
-# owns, a packaged file of the same name that a maintainer script copies into
-# <dir>. Microsoft Edge's postinst does this on every upgrade.
-postflight_apparmor_profile_source() {
-  local dir="$1" name="$2"
-  dpkg -S "$dir/$name" >/dev/null 2>&1 && return 0
-  dpkg -S "apparmor.d/$name" 2>/dev/null \
-    | awk -F ': ' -v own="$dir/$name" '$2 != own && $2 ~ /\/apparmor\.d\// { print $2; exit }'
+postflight_apparmor_edge() {
+  [[ "$OS_KIND" == linux ]] || return 0
+  local native=${1:-/etc/apparmor.d/msedge}
+  local copied=${2:-/etc/apparmor.d/microsoft-edge-stable}
+  local source=${3:-/opt/microsoft/msedge/apparmor.d/microsoft-edge-stable}
+  [[ -f "$native" ]] || return 0
+  dpkg-query -W -f='${Status}' microsoft-edge-stable 2>/dev/null \
+    | grep -Fxq 'install ok installed' || return 0
+  local actual profiles
+  actual=$(dpkg-divert --truename "$source") || {
+    postflight_fail "cannot inspect Edge's AppArmor source diversion"
+    return
+  }
+  if [[ "$actual" != "${source}.disabled" || -e "$copied" ]]; then
+    postflight_fail "Edge's vendor profile can still conflict with Ubuntu's msedge profile"
+    return
+  fi
+  profiles=$(sudo aa-status --json) || {
+    postflight_fail "cannot inspect loaded AppArmor profiles"
+    return
+  }
+  if jq -e '.profiles.msedge and (.profiles["microsoft-edge-stable"] | not)' \
+      <<< "$profiles" >/dev/null 2>&1; then
+    postflight_pass "Ubuntu's msedge profile is loaded without the conflicting vendor profile"
+  else
+    postflight_fail "Edge's effective AppArmor profile is not Ubuntu's msedge profile alone"
+  fi
+}
+
+postflight_legacy_tmux() {
+  if [[ "$PKGMGR" == brew ]]; then
+    if "$BREW_BIN" list --formula tmux >/dev/null 2>&1; then
+      postflight_fail "legacy tmux package is still installed"
+    else
+      postflight_pass "legacy tmux package is absent"
+    fi
+  elif dpkg --get-selections tmux 2>/dev/null \
+      | awk '$2 == "install" { found = 1 } END { exit !found }'; then
+    postflight_fail "legacy tmux package is still installed"
+  else
+    postflight_pass "legacy tmux package is absent"
+  fi
+}
+
+postflight_durable_ssh() {
+  local definition
+  definition=$(env -i HOME="$HOME" USER="${USER:-$(id -un)}" TERM=dumb \
+    PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+    /bin/bash --noprofile --rcfile "$HOME/.bashrc" -ic 'declare -f ds' 2>/dev/null) || definition=""
+  if grep -Eq 'zmx[[:space:]]+attach' <<< "$definition" \
+      && ! grep -Eq '(^|[^[:alnum:]_])tmux([[:space:]]|$)' <<< "$definition"; then
+    postflight_pass "bash ds attaches through zmx"
+  else
+    postflight_fail "bash ds does not attach through zmx"
+  fi
+  [[ "$OS_KIND" == macos ]] || return 0
+  # shellcheck disable=SC2016 # expanded by the child zsh process
+  definition=$(env -i HOME="$HOME" USER="${USER:-$(id -un)}" TERM=dumb \
+    PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+    /bin/zsh -dfc 'source "$HOME/.zshenv"; source "$HOME/.zshrc"; functions ds' 2>/dev/null) \
+    || definition=""
+  if grep -Eq 'zmx[[:space:]]+attach' <<< "$definition" \
+      && ! grep -Eq '(^|[^[:alnum:]_])tmux([[:space:]]|$)' <<< "$definition"; then
+    postflight_pass "zsh ds attaches through zmx"
+  else
+    postflight_fail "zsh ds does not attach through zmx"
+  fi
 }
 
 postflight_desktop_ssh_agent() {
@@ -171,7 +220,6 @@ postflight_configs() {
     "$HOME/.bash_profile"
     "$HOME/.profile"
     "$HOME/.inputrc"
-    "$HOME/.tmux.conf"
     "$HOME/.nanorc"
     "$HOME/.gitconfig"
     "$HOME/.npmrc"
@@ -781,7 +829,7 @@ postflight_upstream_tools() {
   fi
   if [[ "$OS_KIND" == linux ]]; then
     local linux_upstream_missing=() artifact name probe entry unrunnable=""
-    local upstream_names=(ruff yazi ya himalaya yq cosign)
+    local upstream_names=(zmx ruff yazi ya himalaya yq cosign)
     for entry in "${APT_UPSTREAM_FALLBACKS[@]}"; do
       [[ -e "$HOME/.local/bin/${entry#*:}" ]] && upstream_names+=("${entry#*:}")
     done
@@ -795,6 +843,7 @@ postflight_upstream_tools() {
       # cleanly and then fails every time it starts.
       probe=--version
       [[ "$name" == cosign ]] && probe=version
+      [[ "$name" == zmx ]] && probe=version
       "$artifact" "$probe" >/dev/null 2>&1 || unrunnable="$unrunnable $artifact"
     done
     if ((${#linux_upstream_missing[@]})); then
@@ -1067,6 +1116,9 @@ stage_postflight() {
   postflight_agent_skills
   postflight_packages
   postflight_apparmor_attachments
+  postflight_apparmor_edge
+  postflight_legacy_tmux
+  postflight_durable_ssh
   postflight_xterm_kitty_terminfo
   postflight_shell_paths
   postflight_shell_env

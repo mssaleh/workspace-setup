@@ -1,6 +1,6 @@
 # ~/.inputrc — readline (bash and any readline-based CLI). The bash twin of
 # the zsh `bindkey` block in ~/.zshrc: Home / End / forward-Delete / word jumps
-# work Linux-style in every terminal (kitty, Terminal.app, tmux, over ssh).
+# work Linux-style in every terminal (kitty, Terminal.app, over ssh).
 # Byte-identical on every machine (Mac + Linux).
 "\e[H":    beginning-of-line
 "\eOH":    beginning-of-line

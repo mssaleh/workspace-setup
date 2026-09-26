@@ -18,6 +18,7 @@
 # in $BREW_PREFIX/bin for a host where that link cannot be made.
 BREW_TAPS=(
   anomalyco/tap
+  neurosnap/tap
   ttscoff/thelab
 )
 
@@ -25,7 +26,7 @@ PACKAGES_BREW=(
   bash bash-completion@2 zsh-autosuggestions zsh-syntax-highlighting coreutils
   eza fd bat ripgrep zoxide yazi fzf chafa
   git git-delta lazygit git-filter-repo pre-commit gh shellcheck
-  tmux rsync rclone nmap curl wget
+  neurosnap/tap/zmx rsync rclone nmap curl wget
   jq yq pandoc sevenzip
   direnv
   cmake ninja
@@ -80,7 +81,7 @@ PACKAGES_APT=(
   fd-find bat ripgrep zoxide fzf
   git lazygit gh shellcheck
   git-filter-repo pre-commit git-delta
-  tmux rsync rclone nmap wget curl
+  rsync rclone nmap wget curl
   jq pandoc 7zip
   direnv
   cmake ninja-build
@@ -107,6 +108,7 @@ PACKAGES_APT=(
 # delimited rather than an associative array: macOS ships bash 3.2 as
 # /bin/bash, which is what a fresh Mac runs this with.
 UPSTREAM_RELEASE_PROJECTS=(
+  zmx:neurosnap/zmx
   ruff:astral-sh/ruff
   yazi:sxyazi/yazi
   himalaya:pimalaya/himalaya
@@ -191,7 +193,7 @@ PROVIDERS_MACOS_UPSTREAM=(apple-container-signed-pkg rosetta)
 # macOS gets: Ubuntu's `yq` is kislyuk's jq wrapper rather than the mikefarah
 # program, and its `cosign` is a major behind. Both come from the upstream
 # release instead — see YQ_RELEASE_BASE and COSIGN_RELEASE_BASE above.
-PROVIDERS_LINUX_UPSTREAM=(ruff yazi himalaya opencode yq cosign mgc git-credential-manager)
+PROVIDERS_LINUX_UPSTREAM=(zmx ruff yazi himalaya opencode yq cosign mgc git-credential-manager)
 # Capabilities the distribution either does not package or packages too far
 # behind to use, taken from the vendor's own signed archive instead.
 PROVIDERS_LINUX_OFFICIAL_REPO=(

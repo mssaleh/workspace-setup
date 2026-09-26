@@ -42,7 +42,7 @@ packages without their recommendations; each control still overrides it.
 |---|---|
 | **context** | On macOS, separately classifies the host as `workstation`/`headless` and the current run as `local`/`ssh`/`noninteractive`. Host role controls installation; session kind controls whether GUI activation is permitted. Neither the login shell nor the default terminal is changed. On Linux only the host role applies: `HOST_PROFILE=headless` drops the desktop stages, GUI applications and SSH key generation. |
 | **bootstrap** | On macOS, verifies that the selected Xcode Command Line Tools actually provide `xcrun clang` before touching Homebrew, then discovers Homebrew at its real prefix or installs it. It never launches the asynchronous CLT installer dialog. On Linux, ensures curl + git. |
-| **packages** | Installs the cross-platform CLI toolbox: `eza`, `fd`, `bat`, `ripgrep` (`rg`), `fzf`, `zoxide`, `yazi`, `git`, `git-delta` (`delta`), `lazygit`, `gh`, `tmux`, `rsync`, `rclone`, `nmap`, `jq`, `yq`, `pandoc`, `7zz` (`7z`), `cmake`, `ninja`, `node`, `uv`, `ruff`, `helm`, `kubectl`, `cosign`, `ffmpeg`, `poppler` (`poppler-utils`), `nano`, `himalaya`, `ncdu`, `shellcheck`, `pre-commit`, … It installs `xterm-kitty` terminfo as a non-GUI SSH capability on every host. Where a Linux release's apt has no `git-delta`, `eza` or `lazygit`, their upstream releases install into `~/.local/bin`. On Linux it registers **every** vendor archive before installing anything (see below), then installs the toolbox, the **Claude Desktop** app (skip with `SKIP_CLAUDE_DESKTOP=1`) and the **Codex app** (skip with `SKIP_CODEX_APP=1`). |
+| **packages** | Installs the cross-platform CLI toolbox: `eza`, `fd`, `bat`, `ripgrep` (`rg`), `fzf`, `zoxide`, `yazi`, `git`, `git-delta` (`delta`), `lazygit`, `gh`, `zmx`, `rsync`, `rclone`, `nmap`, `jq`, `yq`, `pandoc`, `7zz` (`7z`), `cmake`, `ninja`, `node`, `uv`, `ruff`, `helm`, `kubectl`, `cosign`, `ffmpeg`, `poppler` (`poppler-utils`), `nano`, `himalaya`, `ncdu`, `shellcheck`, `pre-commit`, … It installs `xterm-kitty` terminfo as a non-GUI SSH capability on every host. Where a Linux release's apt has no `git-delta`, `eza` or `lazygit`, their upstream releases install into `~/.local/bin`. On Linux it registers **every** vendor archive before installing anything (see below), then installs the toolbox, the **Claude Desktop** app (skip with `SKIP_CLAUDE_DESKTOP=1`) and the **Codex app** (skip with `SKIP_CODEX_APP=1`). |
 | **docker** | Linux only: installs the official **Docker Engine** + **Docker Compose v2** from download.docker.com. Docker's documented pre-clean of the distribution's `docker.io`, `containerd` and `runc` names every package apt would take with them before it runs, since those runtimes carry reverse dependencies of their own. A complete, responsive official installation is a no-op on rerun. |
 | **toolchains** | Installs upstream **rustup**, Astral's standalone **uv/uvx** (plus its receipt), native Claude Code and Codex CLIs, and upstream opencode on Linux. Linux also retains its existing upstream Microsoft Graph CLI (`mgc`) provider. The separate Homebrew `uv` formula remains an intentional backup. |
 | **configuration** | Converges ordinary files under `$HOME`; repairs old links into temporary checkouts, atomically upgrades exact known historical versions, semantically merges supported JSON/TOML/Git/ssh formats and repairs a shell startup file that has lost the host-local environment loader, preserves ambiguous user-owned content, installs the coding-agent skills into each agent home, and provisions the host-local environment directory `~/.config/shell/env.d/` that the supported shells source. |
@@ -138,24 +138,15 @@ app ships one as a conffile and manages its own `disable/` symlink. Both need
 one: Ubuntu 24.04+ sets `kernel.apparmor_restrict_unprivileged_userns=1`, and an
 Electron app cannot open its namespace sandbox without `userns` permitted.
 
-The failure is a second profile on an executable the distribution already
-confines. Microsoft Edge does this — its `postinst` writes
-`/etc/apparmor.d/microsoft-edge-stable` attaching `/opt/microsoft/msedge/msedge`,
-which Ubuntu's package-owned `msedge` profile already attaches, because the
-guard meant to prevent it compares the package name against
-`google-chrome-stable` and never matches. Both parse, `apparmor.service` starts
-clean, and load order decides which applies.
-
-Postflight compares attachments and names both claimants. Keep the one `dpkg -S`
-can name an owner for:
-
-```bash
-sudo apparmor_parser -R /etc/apparmor.d/<unowned> && sudo rm /etc/apparmor.d/<unowned>
-sudo apparmor_parser -r /etc/apparmor.d/<the one dpkg owns>
-```
-
-A vendor update reinstalls its profile, so this recurs on that vendor's
-schedule rather than once.
+Microsoft Edge's package copies a profile into `/etc/apparmor.d` on every
+upgrade. On Ubuntu releases with the package-owned `msedge` profile, the copy
+creates a second attachment for `/opt/microsoft/msedge/msedge`; the kernel then
+leaves Edge unconfined and denies the unprivileged user namespace its sandbox
+needs. Setup diverts Edge's packaged source profile, unloads and removes the
+copy, and loads Ubuntu's profile. The diversion prevents later Edge upgrades
+from recreating the conflict. Postflight verifies both the source files and
+the loaded profiles. On releases without Ubuntu's `msedge` profile, Edge's
+own profile remains in use.
 
 ## Environment variables
 
@@ -469,21 +460,24 @@ export TERM=xterm-256color
 bash setup.sh
 ```
 
-Kitty and tmux are configured as one clipboard path for coding agents: OSC 52
-writes work locally and through SSH and tmux, while clipboard reads always ask
-for confirmation. tmux uses `set-clipboard on` specifically so applications in
-a pane—not only tmux copy mode—can copy results to the desktop clipboard. tmux
-also forwards each pane's title, which the shell sets to `<host>: <dir>`, so the
-outer tab still names the remote machine inside `ds`. `ds <host>` runs plain
-`ssh` on its own connection into the tmux session `main` on the host: its shells
-survive a dropped connection, and running `ds <host>` again reattaches.
+Kitty owns tabs, splits, scrolling, keyboard, mouse, and clipboard access.
+OSC 52 writes work locally and through SSH; clipboard reads still ask for
+confirmation. `ds <host> [session]` uses OpenSSH on a separate connection to
+attach to a named `zmx` session on the host (`main` by default). Its shell and
+foreground process survive a dropped connection; running `ds` again restores
+the screen and reattaches. `zmx` does not provide tabs or splits. Setup removes
+the previous tmux package and its known managed config once `zmx` is installed;
+it preserves a user-edited config. If tmux still has live sessions, setup
+leaves its package installed until their owner exits them and reruns setup.
 
 A TUI killed by a signal never sends the disables for what it turned on, so a
 killed `claude` or `opencode` would leave the terminal on the alternate screen
 with mouse reporting, focus events and the kitty keyboard flags still set.
-`~/.bashrc` and `~/.zshrc` clear all of those at the next prompt. They act only
-on a signal death, and never on a stop signal, because a suspended program still
-owns the terminal and takes it back on `fg`.
+`~/.bashrc` and `~/.zshrc` clear all of those at the next prompt after a
+signal death. `ds` also clears mouse and keyboard modes on every SSH exit;
+a dropped connection does not exit with the signal status those prompt hooks
+recognize. The prompt hooks leave stopped programs alone because `fg` resumes
+their control of the terminal.
 
 ## Working on a Mac over SSH
 
@@ -722,7 +716,7 @@ The script detects the OS and adapts:
 | Kitty window decorations | native macOS title bar | `linux_display_server auto` follows the active desktop session, using native Wayland on Wayland and X11 on X11; Wayland title bars use system colors, and `Ctrl+Shift+P` is left to terminal applications. |
 | Dotfiles Homebrew paths | `/opt/homebrew/...` (via `$BREW_PREFIX`) | guarded by `command -v brew` / `$BREW_PREFIX`; no-op when brew is absent |
 | Shell integrations | zsh: zoxide, fzf, direnv, `zsh-autosuggestions`, `zsh-syntax-highlighting`; Bash receives the matching cross-platform hooks | Bash: zoxide, fzf, direnv + `/usr/share/bash-completion/`; **no zsh on Linux** — the test suite runs the Linux path and fails if it produces any zsh file, if a zsh package reaches `PACKAGES_APT`, or if postflight looks for zsh configuration there |
-| Shell config files | regular `bashrc`, `bash_profile`, `profile`, `zshenv`, `zprofile`, `zshrc`, `inputrc`, `nanorc`, `tmux.conf` | regular `bashrc`, `bash_profile`, `profile`, `inputrc`, `nanorc`, `tmux.conf` (no zsh files) |
+| Shell config files | regular `bashrc`, `bash_profile`, `profile`, `zshenv`, `zprofile`, `zshrc`, `inputrc`, `nanorc` | regular `bashrc`, `bash_profile`, `profile`, `inputrc`, `nanorc` (no zsh files) |
 | Host-local environment | ordinary, non-symlink `~/.config/shell/env.d/*.sh` files sourced by `~/.bashrc` (before its interactivity gate), `~/.zshenv` and `~/.profile` | same directory, same permissions; `~/.bashrc` and `~/.profile` only, there being no zsh |
 | Generated completions | Bash + Zsh for Codex, rustup, cargo, opencode, Container, and Container Compose; Homebrew external-command completions linked and zsh paths checked with `compaudit` | unchanged: the existing himalaya Bash lazy loader remains the only generated completion path |
 | himalaya completion | brew's generated completion files are unusable (himalaya ≥ 2.0 writes its scripts to files and prints a status line; the formula captures stdout, so every upgrade ships a one-line syntax error). `~/.bashrc` keeps the broken compat file from being sourced (`BASH_COMPLETION_COMPAT_IGNORE`), and lazy loaders — `~/.local/share/bash-completion/completions/himalaya` for bash, a `_himalaya` stub on fpath for zsh — regenerate the real script from the installed binary on first Tab | the upstream artifact ships no completion at all; the same bash lazy loader provides it |
@@ -808,7 +802,6 @@ workspace-setup/
 ├── dotfiles/
 │   ├── bashrc, bash_profile, profile, inputrc, nanorc # shell/editor — both platforms
 │   ├── zshenv, zprofile, zshrc                  # zsh — macOS only, enforced by tests
-│   ├── tmux.conf
 │   ├── ssh/config                 # example Host block + keepalive defaults
 │   ├── claude/settings.json       # permissions.deny denylist
 │   ├── codex/rules/default.rules  # Starlark prefix_rule() denylist

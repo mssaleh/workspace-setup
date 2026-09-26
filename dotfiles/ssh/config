@@ -11,11 +11,10 @@
 
 # `ks <host>` is the managed-host profile: kitty ships its terminfo and shell
 # integration. `s <host>` is the legacy profile and advertises xterm-256color.
-# `ds <host>` is the durable profile: plain ssh, on its own connection, into a
-# tmux session on the host.
+# `ds <host>` uses a separate ssh connection to attach to a zmx session.
 
 # Defaults for every host. Plain SSH fails a dead connection in about three
-# minutes; tmux on the host, rather than a three-hour keepalive grace period,
+# minutes; zmx on the host, rather than a three-hour keepalive grace period,
 # owns session durability. Multiplexing removes repeat-authentication latency
 # while keeping each master short-lived and its socket inside a private
 # directory.

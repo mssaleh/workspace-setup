@@ -39,6 +39,13 @@ if array_has container "${PACKAGES_BREW[@]}"; then
   exit 1
 fi
 array_has opencode "${PROVIDERS_LINUX_UPSTREAM[@]}"
+array_has neurosnap/tap/zmx "${PACKAGES_BREW[@]}"
+array_has zmx "${PROVIDERS_LINUX_UPSTREAM[@]}"
+upstream_has_project zmx
+if array_has tmux "${PACKAGES_APT[@]}" || array_has tmux "${PACKAGES_BREW[@]}"; then
+  printf 'tmux returned to the managed package inventory\n' >&2
+  exit 1
+fi
 
 # A Kitty client sends TERM=xterm-kitty over ordinary SSH regardless of
 # whether the target has a desktop. Both the database entry and the tool used
