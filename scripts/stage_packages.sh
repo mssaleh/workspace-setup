@@ -267,6 +267,7 @@ register_third_party_apt_repos() {
 
   # --- LibreOffice — the packaging team's PPA on Ubuntu. ---
   if [[ -z "${SKIP_LIBREOFFICE:-}" && "$DISTRO" == ubuntu ]] \
+     && ! libreoffice_installed \
      && ! find /etc/apt/sources.list.d -name 'libreoffice-ubuntu-ppa*' 2>/dev/null | grep -q .; then
     info "adding the LibreOffice PPA (ppa:libreoffice/ppa)…"
     sudo "${APT_ENV[@]}" "$PKGMGR" install -y software-properties-common >/dev/null 2>&1 || true
@@ -684,6 +685,8 @@ stage_packages() {
     # 6. GUI applications. Each is opt-out for a headless host.
     if [[ -n "${SKIP_LIBREOFFICE:-}" ]]; then
       info "skipping LibreOffice (SKIP_LIBREOFFICE=1)"
+    elif libreoffice_installed; then
+      ok "LibreOffice is already installed"
     else
       apt_install_candidate libreoffice LibreOffice || true
     fi

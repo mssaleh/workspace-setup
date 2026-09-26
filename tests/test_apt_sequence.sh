@@ -182,6 +182,38 @@ raw_installs=$(printf '%s\n' "$branch" \
     "$(function_body apt_install_candidate "$HELPERS")" \
   | grep -E '"\$PKGMGR" install' | grep -vE '^[[:space:]]*#' || true)
 [[ -z "$raw_installs" ]] || fail "a toolbox install bypasses apt_install_packages: $raw_installs"
+
+# An official DEB bundle names its package after the release.
+# A status check for Ubuntu's unversioned package alone would install a second,
+# older LibreOffice build on a host that already has the upstream bundle.
+(
+  dpkg-query() {
+    case "$3" in
+      libreoffice) printf '%s' "${LO_APT_STATUS:-}" ;;
+      'libreoffice[0-9]*') printf '%s' "${LO_VERSIONED_ROWS:-}" ;;
+    esac
+  }
+
+  LO_APT_STATUS='install ok installed'
+  libreoffice_installed || fail 'an installed distribution LibreOffice was missed'
+
+  LO_APT_STATUS=
+  LO_VERSIONED_ROWS=$'libreoffice99.9\tinstall ok installed\n'
+  libreoffice_installed || fail 'an installed official versioned LibreOffice was missed'
+
+  LO_VERSIONED_ROWS=$'libreoffice99.9-ar\tinstall ok installed\n'
+  if libreoffice_installed; then
+    fail 'a language pack alone counted as LibreOffice'
+  fi
+
+  LO_VERSIONED_ROWS=$'libreoffice99.9\tdeinstall ok config-files\n'
+  if libreoffice_installed; then
+    fail 'a removed official bundle counted as installed'
+  fi
+
+  LO_VERSIONED_ROWS=$'libreoffice88.8\tinstall ok installed\n'
+  libreoffice_installed || fail 'an installed official bundle without a launcher would trigger a second apt install'
+)
 (
   sudo() { printf '%s\n' "$*"; }
   # detect_pkgmgr always sets a non-empty APT_ENV for apt-get.

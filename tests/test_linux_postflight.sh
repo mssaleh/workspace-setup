@@ -30,6 +30,8 @@ mkdir -p \
 # shellcheck disable=SC1091
 . "$TEST_ROOT/lib/manifest.sh"
 # shellcheck disable=SC1091
+. "$TEST_ROOT/lib/apt.sh"
+# shellcheck disable=SC1091
 . "$TEST_ROOT/scripts/stage_postflight.sh"
 
 # GNU stat accepts `-f` with different semantics and exits successfully after
@@ -95,9 +97,22 @@ dpkg() {
 # Node's provenance is read from the package database and from what apt would
 # still offer, neither of which may come from the host running the suite.
 nodejs_pkg_version="${NODE_MAJOR}.0.0-1nodesource1"
+versioned_lo=0
 dpkg-query() {
-  [[ "$*" == *nodejs* ]] || return 1
-  printf '%s\n' "$nodejs_pkg_version"
+  case "${3:-}" in
+    libreoffice)
+      [[ " $installed_packages " == *' libreoffice '* ]] || return 1
+      printf 'install ok installed'
+      ;;
+    'libreoffice[0-9]*')
+      (( versioned_lo )) || return 1
+      printf 'libreoffice26.8\tinstall ok installed\n'
+      ;;
+    *)
+      [[ "$*" == *nodejs* ]] || return 1
+      printf '%s\n' "$nodejs_pkg_version"
+      ;;
+  esac
 }
 nodejs_extra_origin=''
 apt-cache() {
@@ -119,6 +134,15 @@ POSTFLIGHT_FAILURES=0
 postflight_upstream_tools
 [[ "$POSTFLIGHT_FAILURES" == 0 ]]
 [[ "$POSTFLIGHT_PASSES" == 15 ]]
+
+installed_packages='kubectl helm claude-desktop chatgpt'
+versioned_lo=1
+POSTFLIGHT_PASSES=0
+POSTFLIGHT_FAILURES=0
+postflight_upstream_tools >/dev/null
+[[ "$POSTFLIGHT_FAILURES" == 0 && "$POSTFLIGHT_PASSES" == 15 ]]
+installed_packages='kubectl helm libreoffice claude-desktop chatgpt'
+versioned_lo=0
 
 # Every GUI application is opt-out, and opting out must remove the check rather
 # than fail it — a headless host is a supported configuration.
@@ -326,6 +350,7 @@ postflight_apparmor_attachments "$TEST_TMP/nonexistent-apparmor.d" >/dev/null
   . "$TEST_ROOT/lib/os.sh"
   # shellcheck disable=SC1091
   . "$TEST_ROOT/lib/apt.sh"
+  # shellcheck disable=SC2030 # scoped to this subshell on purpose
   PKGMGR=apt
   PACKAGES_APT=(git-delta)
   # shellcheck disable=SC2030 # scoped to this subshell on purpose

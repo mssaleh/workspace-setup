@@ -144,6 +144,23 @@ apt_install_candidate() {
     || { warn "$label install failed (skipped)"; return 1; }
 }
 
+# Official LibreOffice DEB bundles use a versioned package name rather than
+# Ubuntu's unversioned package name.
+libreoffice_installed() {
+  if dpkg-query -W -f='${Status}' libreoffice 2>/dev/null \
+      | grep -Fxq 'install ok installed'; then
+    return 0
+  fi
+
+  local package status
+  while IFS=$'\t' read -r package status; do
+    [[ "$package" =~ ^libreoffice[0-9]+\.[0-9]+$ ]] || continue
+    [[ "$status" == 'install ok installed' ]] || continue
+    return 0
+  done < <(dpkg-query -W -f='${binary:Package}\t${Status}\n' 'libreoffice[0-9]*' 2>/dev/null)
+  return 1
+}
+
 # apt_report_removals <verb> <note> <package...> — name what this transaction
 # would take with it, before it runs. <note> prints only when there is something
 # to report; pass '' for none.
@@ -231,4 +248,3 @@ apt_upstream_fallback() {
   done
   return 1
 }
-

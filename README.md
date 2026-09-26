@@ -95,7 +95,7 @@ This is automation for a conventional hand-configured machine, not a settings ma
 | Capability | Owner |
 |---|---|
 | macOS CLI toolbox, selected casks, `container-compose`, backup `uv` | Homebrew |
-| Linux base toolbox | apt; official vendor repositories where the distribution build is too far behind to use; `ppa:libreoffice/ppa` and `ppa:git-core/ppa` on Ubuntu |
+| Linux base toolbox | apt; official vendor repositories where the distribution build is too far behind to use; `ppa:libreoffice/ppa` when LibreOffice is absent and `ppa:git-core/ppa` on Ubuntu |
 | Rust, PATH-winning `uv`, Claude, Codex, Kitty, Linux opencode | each project's upstream installer |
 | Apple Container | Apple-signed installer package |
 | Configuration | ordinary files at their native paths |
@@ -696,7 +696,7 @@ The script detects the OS and adapts:
 | SSH key passphrase | passphrase-less (Keychain + FileVault protect the on-disk key) | passphrase-protected by default (override with `SSH_KEY_PASSPHRASE=none` for disposable VMs) |
 | Nerd Font | brew cask (`JetBrainsMono Nerd Font`) | GitHub release → `~/.local/share/fonts` (`JetBrainsMono Nerd Font Mono` variant — single-width icons for TUI alignment) |
 | Maccy clipboard manager | brew cask | skipped (Linux has its own clipboard managers) |
-| LibreOffice | brew cask | Ubuntu: `ppa:libreoffice/ppa` (the packaging team's PPA — the distribution build lags upstream); Debian: distribution package. Skip either with `SKIP_LIBREOFFICE=1` |
+| LibreOffice | brew cask | Linux preserves an installed official versioned DEB bundle. Otherwise Ubuntu uses `ppa:libreoffice/ppa` and Debian uses the distribution package. Skip installation with `SKIP_LIBREOFFICE=1` |
 | Claude Desktop | optional Homebrew cask with `INSTALL_CLAUDE_DESKTOP=1`; an existing `/Applications/Claude.app` is preserved | official Anthropic apt repo, key fingerprint verified (skip with `SKIP_CLAUDE_DESKTOP=1`); beta, amd64/arm64 only |
 | ChatGPT/Codex desktop app | optional `chatgpt` cask with `INSTALL_CHATGPT_APP=1`; an existing `/Applications/ChatGPT.app` is preserved. OpenAI's current app combines ChatGPT, Work, and Codex ([migration guide](https://help.openai.com/en/articles/20001276-moving-to-the-new-chatgpt-desktop-app)) | OpenAI's own apt repo, registered by the package it publishes at `persistent.oaistatic.com` — they document no standalone signing key, so that package is the bootstrap and every later version arrives through apt. Fetched only while the repo is absent; the repo URI and keyring fingerprint are checked afterwards (skip with `SKIP_CODEX_APP=1`); amd64/arm64 only. Distinct from the Codex **CLI**, which stays upstream-owned on both platforms |
 | CMake | Homebrew `cmake` | Ubuntu LTS: Kitware's own archive (`apt.kitware.com`), key fingerprint verified, then handed to `kitware-archive-keyring` so the annual key rotation arrives through apt. Ubuntu releases Kitware does not publish for, and Debian, keep the distribution package |

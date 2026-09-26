@@ -944,7 +944,7 @@ postflight_upstream_tools() {
     fi
 
     if [[ -z "${SKIP_LIBREOFFICE:-}" ]]; then
-      if dpkg -s libreoffice >/dev/null 2>&1; then
+      if libreoffice_installed; then
         postflight_pass "LibreOffice is installed"
       else
         postflight_fail "LibreOffice is missing (set SKIP_LIBREOFFICE=1 on a headless host)"
