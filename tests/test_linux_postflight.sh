@@ -144,6 +144,26 @@ postflight_upstream_tools >/dev/null
 installed_packages='kubectl helm libreoffice claude-desktop chatgpt'
 versioned_lo=0
 
+# A user already in the docker group can verify the engine without sudo.
+(
+  # shellcheck disable=SC2032 # postflight_containers calls it directly; sudo is stubbed too
+  docker() { [[ "$*" == info || "$*" == 'compose version' ]]; }
+  sudo() { return 1; }
+  POSTFLIGHT_PASSES=0
+  POSTFLIGHT_FAILURES=0
+  postflight_containers >/dev/null
+  [[ "$POSTFLIGHT_PASSES" == 2 && "$POSTFLIGHT_FAILURES" == 0 ]]
+)
+(
+  # shellcheck disable=SC2032 # postflight_containers calls it directly; sudo is stubbed too
+  docker() { return 1; }
+  sudo() { [[ "$*" == 'docker info' || "$*" == 'docker compose version' ]]; }
+  POSTFLIGHT_PASSES=0
+  POSTFLIGHT_FAILURES=0
+  postflight_containers >/dev/null
+  [[ "$POSTFLIGHT_PASSES" == 2 && "$POSTFLIGHT_FAILURES" == 0 ]]
+)
+
 # Every GUI application is opt-out, and opting out must remove the check rather
 # than fail it — a headless host is a supported configuration.
 POSTFLIGHT_PASSES=0

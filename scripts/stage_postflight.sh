@@ -142,7 +142,7 @@ postflight_apparmor_edge() {
   [[ -f "$native" ]] || return 0
   dpkg-query -W -f='${Status}' microsoft-edge-stable 2>/dev/null \
     | grep -Fxq 'install ok installed' || return 0
-  local actual profiles
+  local actual profiles native_label vendor_error
   actual=$(dpkg-divert --truename "$source") || {
     postflight_fail "cannot inspect Edge's AppArmor source diversion"
     return
@@ -151,15 +151,33 @@ postflight_apparmor_edge() {
     postflight_fail "Edge's vendor profile can still conflict with Ubuntu's msedge profile"
     return
   fi
-  profiles=$(sudo aa-status --json) || {
+  if profiles=$(sudo -n aa-status --json 2>/dev/null); then
+    if jq -e '.profiles.msedge and (.profiles["microsoft-edge-stable"] | not)' \
+        <<< "$profiles" >/dev/null 2>&1; then
+      postflight_pass "Ubuntu's msedge profile is loaded without the conflicting vendor profile"
+    else
+      postflight_fail "Edge's effective AppArmor profile is not Ubuntu's msedge profile alone"
+    fi
+    return
+  fi
+
+  # aa-exec can probe named loaded profiles without reading the privileged
+  # profile list. Distinguish an absent vendor profile from a denied probe.
+  if ! command -v aa-exec >/dev/null 2>&1; then
     postflight_fail "cannot inspect loaded AppArmor profiles"
     return
-  }
-  if jq -e '.profiles.msedge and (.profiles["microsoft-edge-stable"] | not)' \
-      <<< "$profiles" >/dev/null 2>&1; then
+  fi
+  native_label=$(aa-exec -p msedge -- /bin/cat /proc/self/attr/current 2>/dev/null) || native_label=
+  if ! grep -Eq '(^|//&)msedge(//&|[[:space:]])' <<< "$native_label"; then
+    postflight_fail "Ubuntu's msedge profile is not active"
+    return
+  fi
+  if vendor_error=$(LC_ALL=C aa-exec -p microsoft-edge-stable -- /bin/true 2>&1); then
+    postflight_fail "Edge's conflicting vendor profile is still loaded"
+  elif [[ "$vendor_error" == *"profile 'microsoft-edge-stable' does not exist"* ]]; then
     postflight_pass "Ubuntu's msedge profile is loaded without the conflicting vendor profile"
   else
-    postflight_fail "Edge's effective AppArmor profile is not Ubuntu's msedge profile alone"
+    postflight_fail "cannot inspect the loaded Edge vendor profile: $vendor_error"
   fi
 }
 
@@ -1095,12 +1113,14 @@ postflight_containers() {
   [[ "$OS_KIND" == linux ]] || return 0
   [[ -n "${SKIP_DOCKER:-}" ]] && return 0
 
-  if command -v docker >/dev/null 2>&1 && sudo docker info >/dev/null 2>&1; then
+  if command -v docker >/dev/null 2>&1 \
+      && { docker info >/dev/null 2>&1 || sudo docker info >/dev/null 2>&1; }; then
     postflight_pass "Docker Engine responds"
   else
     postflight_fail "Docker Engine does not respond"
   fi
-  if sudo docker compose version >/dev/null 2>&1; then
+  if command -v docker >/dev/null 2>&1 \
+      && { docker compose version >/dev/null 2>&1 || sudo docker compose version >/dev/null 2>&1; }; then
     postflight_pass "Docker Compose v2 responds"
   else
     postflight_fail "Docker Compose v2 does not respond"

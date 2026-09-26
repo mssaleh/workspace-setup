@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # tests/test_apt_removals.sh — the argument vector each apt removal runs, what it
 # reports taking with it, and that a failure is surfaced rather than swallowed.
+# shellcheck disable=SC2329 # stubs are called through sourced stage functions
 set -euo pipefail
 
 TEST_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -185,6 +186,21 @@ sudo_exit=0
 (
   OS_KIND=linux DISTRO=ubuntu USER=test
   dpkg() { [[ "$1" == -s ]]; }
+  # shellcheck disable=SC2032 # stage_docker calls it directly; sudo is stubbed too
+  systemctl() { return 0; }
+  id() { printf 'docker\n'; }
+  # shellcheck disable=SC2032 # stage_docker calls it directly; sudo is stubbed too
+  docker() { [[ "$*" == info || "$*" == 'compose version' ]]; }
+  sudo() { printf '%s\n' "$*" >> "$CALLS"; return 1; }
+  reset_calls
+  output=$(stage_docker 2>&1)
+  [[ "$output" == *'already installed and responsive'* && -z "$(calls)" ]] \
+    || { printf 'FAIL: a working user-accessible Docker Engine required sudo\n' >&2; exit 1; }
+)
+(
+  OS_KIND=linux DISTRO=ubuntu USER=test
+  dpkg() { [[ "$1" == -s ]]; }
+  docker() { return 1; }
   # shellcheck disable=SC2032 # stage_docker calls it directly; sudo is stubbed too
   systemctl() { return 0; }
   sudo() {

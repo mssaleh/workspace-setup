@@ -59,8 +59,8 @@ stage_docker() {
     if ! systemctl is-active --quiet docker 2>/dev/null; then
       sudo systemctl enable --now docker 2>/dev/null || true
     fi
-    if sudo docker info >/dev/null 2>&1 \
-        && sudo docker compose version >/dev/null 2>&1; then
+    if { docker info >/dev/null 2>&1 || sudo docker info >/dev/null 2>&1; } \
+        && { docker compose version >/dev/null 2>&1 || sudo docker compose version >/dev/null 2>&1; }; then
       if id -nG "$USER" 2>/dev/null | grep -qw docker; then
         ok "$USER already in docker group"
       else

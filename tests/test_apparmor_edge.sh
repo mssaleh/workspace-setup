@@ -17,6 +17,7 @@ cp "$source" "$copied"
 printf '%s\n' 'if [ -f "/opt/microsoft/msedge/apparmor.d/microsoft-edge-stable" ]; then' > "$postinst"
 loaded_vendor=1
 loaded_native=1
+sudo_aa_status=1
 diversion_done=0
 calls="$TEST_TMP/calls"
 : > "$calls"
@@ -42,12 +43,14 @@ dpkg-divert() {
 }
 sudo() {
   printf '%s\n' "$*" >> "$calls"
+  [[ "$1" == -n ]] && shift
   case "$1" in
     dpkg-divert)
       mv "$source" "${source}.disabled"
       diversion_done=1
       ;;
     aa-status)
+      ((sudo_aa_status)) || return 1
       printf '{"profiles":{'
       if ((loaded_native)); then printf '"msedge":"unconfined"'; fi
       if ((loaded_vendor)); then
@@ -63,6 +66,20 @@ sudo() {
       fi
       ;;
     rm) command rm "$2" "$3" ;;
+    *) return 1 ;;
+  esac
+}
+aa-exec() {
+  case "$2" in
+    msedge)
+      ((loaded_native)) || return 1
+      printf 'msedge//&unconfined (unconfined)\n'
+      ;;
+    microsoft-edge-stable)
+      if ((loaded_vendor)); then return 0; fi
+      printf "aa-exec: ERROR: profile 'microsoft-edge-stable' does not exist\n" >&2
+      return 1
+      ;;
     *) return 1 ;;
   esac
 }
@@ -87,6 +104,22 @@ stage_apparmor "$native" "$copied" "$source" "$postinst" >/dev/null
 POSTFLIGHT_PASSES=0 POSTFLIGHT_FAILURES=0
 postflight_apparmor_edge "$native" "$copied" "$source" >/dev/null 2>&1
 [[ "$POSTFLIGHT_FAILURES" == 0 && "$POSTFLIGHT_PASSES" == 1 ]]
+
+sudo_aa_status=0
+POSTFLIGHT_PASSES=0 POSTFLIGHT_FAILURES=0
+postflight_apparmor_edge "$native" "$copied" "$source" >/dev/null 2>&1
+[[ "$POSTFLIGHT_FAILURES" == 0 && "$POSTFLIGHT_PASSES" == 1 ]]
+loaded_vendor=1
+POSTFLIGHT_PASSES=0 POSTFLIGHT_FAILURES=0
+postflight_apparmor_edge "$native" "$copied" "$source" >/dev/null 2>&1
+[[ "$POSTFLIGHT_FAILURES" == 1 ]]
+loaded_vendor=0
+loaded_native=0
+POSTFLIGHT_PASSES=0 POSTFLIGHT_FAILURES=0
+postflight_apparmor_edge "$native" "$copied" "$source" >/dev/null 2>&1
+[[ "$POSTFLIGHT_FAILURES" == 1 ]]
+loaded_native=1
+sudo_aa_status=1
 
 stage_apparmor "$native" "$copied" "$source" "$postinst" >/dev/null
 [[ "$(grep -c '^dpkg-divert ' "$calls")" == 1 ]]
