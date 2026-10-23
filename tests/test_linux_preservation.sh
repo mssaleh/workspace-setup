@@ -8,6 +8,9 @@ trap 'rm -rf "$TEST_TMP"' EXIT
 fixture="$TEST_TMP/fixture"
 calls="$TEST_TMP/calls"
 mkdir -p "$fixture/lib" "$fixture/scripts" "$TEST_TMP/home"
+mkdir -p "$fixture/lib/agents"
+cp "$TEST_ROOT/lib/agents/log.sh" "$TEST_ROOT/lib/agents/manifest.sh" "$fixture/lib/agents/"
+cp -R "$TEST_ROOT/manifests" "$fixture/"
 
 fail_test() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 
@@ -36,7 +39,7 @@ STUB
 : > "$fixture/lib/config.sh"
 
 for stage_name in bootstrap packages docker groups flatpak update dotfiles \
-    toolchains ssh fonts_terminal terminal_profile container apparmor postflight; do
+    toolchains ssh fonts_terminal terminal_profile container apparmor postflight agents; do
   function_name="stage_${stage_name}"
   printf '%s() { :; }\n' "$function_name" > "$fixture/scripts/$function_name.sh"
 done
@@ -69,6 +72,7 @@ stage_fonts_terminal
 stage_terminal_profile
 stage_apparmor
 stage_postflight
+stage_agents
 EXPECTED
 )
 
@@ -79,6 +83,20 @@ EXPECTED
   || fail_test "stages inherit the caller's umask $(cat "$calls.umask") instead of 0022"
 [[ "$(cat "$calls.recommends")" == 1 ]] \
   || fail_test 'a workstation installs apt packages without their recommendations' 
+
+cp -R "$fixture/manifests" "$TEST_TMP/bad-manifests"
+printf 'invalid\n' >> "$TEST_TMP/bad-manifests/mcp.tsv"
+if run_linux_setup MANIFEST_DIR="$TEST_TMP/bad-manifests" 2>/dev/null; then
+  fail_test 'invalid agent manifests were accepted before host provisioning'
+fi
+[[ ! -s "$calls" ]] || fail_test 'invalid manifests allowed host mutations'
+
+: > "$calls"
+env -i HOME="$TEST_TMP/home" USER=test PATH="/usr/bin:/bin" \
+  REPO_DIR="$fixture" LINUX_PRESERVATION_CALLS="$calls" \
+  /bin/bash "$TEST_ROOT/setup.sh" host >/dev/null
+[[ "$(cat "$calls")" == "$(grep -vx stage_agents <<< "$expected_default")" ]] \
+  || fail_test 'host-only provisioning entered agent synchronization'
 
 # The macOS session override and narrow graphical switches are inert on Linux.
 run_linux_setup SETUP_SESSION_KIND=local \
@@ -119,10 +137,10 @@ postflight_line=$(grep -n '^stage_postflight$' "$calls" | cut -d: -f1)
 . "$TEST_ROOT/lib/manifest.sh"
 [[ " ${PACKAGES_APT[*]} " == *' xsel '* ]] \
   || fail_test 'xsel disappeared from the Linux apt inventory'
-[[ " ${PROVIDERS_LINUX_UPSTREAM[*]} " == *' mgc '* ]] \
-  || fail_test 'mgc disappeared from the Linux upstream provider inventory'
-[[ " ${UPSTREAM_RELEASE_PROJECTS[*]} " == *' mgc:microsoftgraph/msgraph-cli '* ]] \
-  || fail_test 'the Linux mgc release source changed or disappeared'
+[[ " ${PROVIDERS_LINUX_UPSTREAM[*]} " == *' pwsh '* ]] \
+  || fail_test 'PowerShell is missing from the Linux upstream provider inventory'
+[[ " ${UPSTREAM_RELEASE_PROJECTS[*]} " == *' pwsh:PowerShell/PowerShell '* ]] \
+  || fail_test 'the PowerShell release source is missing'
 
 # The policy helper itself has an OS guard, so an accidental future direct call
 # cannot translate a macOS headless profile into Linux SKIP_* variables.

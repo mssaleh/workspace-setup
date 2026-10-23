@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# setup.sh — one-shot workspace setup for macOS and Linux.
+# setup.sh — provision the host and configure its coding agents.
 # Usage:
 #   curl -fsSL https://url/setup.sh | bash
 #   # or, on a Linux host that has wget but not curl:
 #   wget -qO- https://url/setup.sh | bash
 #   # or, from a clone:
 #   bash setup.sh
+#   bash setup.sh host
+#   bash setup.sh agents --dry-run
 #
 # This script is fully idempotent — safe to re-run. The downloaded payload is
 # temporary; the resulting machine contains ordinary packages, applications,
@@ -80,6 +82,34 @@
 
 set -euo pipefail
 
+setup_usage() {
+  cat <<'USAGE'
+Usage: bash setup.sh [host | agents [OPTIONS]]
+
+  (no command)  Provision the host, verify it, then synchronize coding agents.
+  host          Provision and verify the host only.
+  agents        Synchronize skills, MCP servers, and plugins without provisioning.
+  --help        Show this help without changing the host.
+
+Agent options: --dry-run, --update, --only skills|mcp|plugins|verify,
+               --prune-skills, --prune-plugin-cache, --prune-duplicate-mcp.
+Run bash setup.sh agents --help for details. Dry-run applies to agents only.
+USAGE
+}
+
+SETUP_SCOPE=all
+case "${1:-}" in
+  agents|host) SETUP_SCOPE=$1; shift ;;
+  -h|--help) setup_usage; exit 0 ;;
+  '') ;;
+  *) printf 'workspace-setup: unknown command: %s\n' "$1" >&2; setup_usage >&2; exit 2 ;;
+esac
+if [[ "$SETUP_SCOPE" != agents && $# != 0 ]]; then
+  printf 'workspace-setup: unexpected argument: %s\n' "$1" >&2
+  setup_usage >&2
+  exit 2
+fi
+
 # ── Resolve the repo directory ────────────────────────────────────────────
 # When run via curl|bash, this script is piped to bash on stdin, so $0 is
 # "bash" and BASH_SOURCE is empty. We need to fetch the temporary payload in
@@ -114,13 +144,13 @@ _setup_fetch() {
     return
   fi
   if command -v curl >/dev/null 2>&1; then
-    curl -fsSL "$url" -o "$dest"
+    curl -fsSL "$url" -o "$dest" < /dev/null
     return
   fi
   if command -v wget >/dev/null 2>&1; then
     # wget leaves an empty file behind when the transfer fails, which would
     # otherwise be unpacked as a truncated archive.
-    if wget -q -O "$dest" "$url"; then
+    if wget -q -O "$dest" "$url" < /dev/null; then
       return 0
     fi
     rm -f -- "$dest"
@@ -163,7 +193,7 @@ if [[ -z "${BASH_SOURCE[0]:-}" ]] || [[ ! -f "$(dirname "${BASH_SOURCE[0]:-$0}")
       exit 1
     fi
     printf 'workspace-setup: fetching temporary payload from %s\n' "${REPO_URL}" >&2
-    git clone --depth 1 "${REPO_URL}" "${REPO_DIR}" || {
+    git clone --depth 1 "${REPO_URL}" "${REPO_DIR}" < /dev/null || {
       printf 'workspace-setup: could not clone payload\n' >&2
       exit 1
     }
@@ -175,12 +205,19 @@ if [[ -z "${BASH_SOURCE[0]:-}" ]] || [[ ! -f "$(dirname "${BASH_SOURCE[0]:-$0}")
       printf 'workspace-setup: could not download payload\n' >&2
       exit 1
     }
-    tar -xzf "${_setup_archive}" -C "${REPO_DIR}" --strip-components=1 || {
+    tar -xzf "${_setup_archive}" -C "${REPO_DIR}" --strip-components=1 < /dev/null || {
       printf 'workspace-setup: could not unpack payload\n' >&2
       exit 1
     }
   fi
   cd "${REPO_DIR}"
+fi
+
+if [[ "$SETUP_SCOPE" == agents ]]; then
+  REPO_DIR=$(repo_dir)
+  export REPO_DIR
+  "$BASH" "$REPO_DIR/scripts/sync_agents.sh" "$@" < /dev/null
+  exit 0
 fi
 
 # ── Source library files ─────────────────────────────────────────────────
@@ -223,6 +260,7 @@ fi
 # shellcheck disable=SC1091
 . "$(repo_dir)/scripts/stage_postflight.sh"
 . "$(repo_dir)/scripts/stage_apparmor.sh"
+. "$(repo_dir)/scripts/stage_agents.sh"
 
 # Keep macOS-only definitions out of Linux processes entirely. Besides making
 # the current boundary explicit, this prevents a future top-level initializer
@@ -279,6 +317,15 @@ apply_linux_host_profile() {
 
 # ── Main ─────────────────────────────────────────────────────────────────
 main() {
+  if [[ "$SETUP_SCOPE" == all ]]; then
+    (
+      REPO_DIR=$(repo_dir)
+      MANIFEST_DIR=${MANIFEST_DIR:-$REPO_DIR/manifests}
+      . "$REPO_DIR/lib/agents/log.sh"
+      . "$REPO_DIR/lib/agents/manifest.sh"
+      manifest_validate
+    ) || fail "fix the agent manifests before provisioning the host"
+  fi
   # Directories this run creates hold one user's configuration. Ubuntu's
   # usergroups umask of 002 would make them group-writable, which postflight
   # and zsh's compaudit then reject.
@@ -366,6 +413,10 @@ main() {
     fi
   elif ! stage "postflight: verify the converged host" stage_postflight; then
     fail "postflight found an incomplete or conflicting setup; review the checks above"
+  fi
+
+  if [[ "$SETUP_SCOPE" == all ]]; then
+    stage "agents: skills, MCP servers, and plugins" stage_agents
   fi
 
   setup_color green; printf '\n✓ All stages complete.\n'; setup_color reset

@@ -79,7 +79,7 @@ fixture_tmux_installed=1 postflight_legacy_tmux >/dev/null
 POSTFLIGHT_PASSES=0 POSTFLIGHT_FAILURES=0
 postflight_legacy_tmux >/dev/null
 [[ "$POSTFLIGHT_PASSES" == 1 && "$POSTFLIGHT_FAILURES" == 0 ]]
-for command_name in uv uvx claude codex delta; do
+for command_name in uv uvx claude codex delta pwsh; do
   printf '%s\n' '#!/bin/sh' 'exit 0' > "$HOME/.local/bin/$command_name"
   chmod +x "$HOME/.local/bin/$command_name"
 done

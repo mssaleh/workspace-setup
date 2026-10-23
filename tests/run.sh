@@ -4,7 +4,7 @@
 set -uo pipefail
 
 TEST_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-tests=(
+host_tests=(
   test_config_convergence.sh
   test_linux_preservation.sh
   test_host_context.sh
@@ -14,12 +14,15 @@ tests=(
   test_package_aliases.sh
   test_apt_sequence.sh
   test_apt_removals.sh
+  test_apt_state.sh
   test_toolchain_providers.sh
   test_macos_cli.sh
   test_generated_completions.sh
   test_container_lifecycle.sh
   test_macos_update.sh
+  test_linux_update.sh
   test_upstream_currency.sh
+  test_upstream_downloads.sh
   test_dotfiles_stage.sh
   test_kitty_platform_layer.sh
   test_desktop_entry_idempotency.sh
@@ -39,9 +42,28 @@ tests=(
   test_streamed_bootstrap.sh
 )
 
+agent_tests=(
+  agents/test_manifest.sh
+  agents/test_parsers.sh
+  agents/test_skills_pass.sh
+  agents/test_mcp_pass.sh
+  agents/test_idempotence.sh
+  agents/test_cli.sh
+  agents/test_dirty_host.sh
+  agents/test_bootstrap.sh
+  agents/test_regressions.sh
+)
+
+case "$*" in
+  '') tests=("${host_tests[@]}" "${agent_tests[@]}") ;;
+  '--only host') tests=("${host_tests[@]}") ;;
+  '--only agents') tests=("${agent_tests[@]}") ;;
+  *) printf 'usage: bash tests/run.sh [--only host|agents]\n' >&2; exit 2 ;;
+esac
+
 # A fresh Mac runs setup.sh with Apple's /bin/bash 3.2 and Homebrew's bash runs
 # everything after it, so macOS runs the suite under both.
-interpreters=(/bin/bash)
+interpreters=("$BASH")
 test_path=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 if [[ "$(uname -s)" == Darwin ]]; then
   brew_prefix=$(brew --prefix 2>/dev/null) || {
@@ -52,7 +74,7 @@ if [[ "$(uname -s)" == Darwin ]]; then
     printf 'tests/run.sh: macOS needs Homebrew bash: brew install bash\n' >&2
     exit 1
   }
-  interpreters+=("$brew_prefix/bin/bash")
+  interpreters=(/bin/bash "$brew_prefix/bin/bash")
   test_path="$brew_prefix/bin:$brew_prefix/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 fi
 

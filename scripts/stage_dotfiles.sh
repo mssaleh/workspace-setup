@@ -6,6 +6,9 @@
 # formats with a safely expressible policy use narrow semantic merges.
 # shellcheck disable=SC2034,SC2016 # cross-file globals; child-shell expressions
 
+# shellcheck source=lib/agents/paths.sh
+. "$(dirname "${BASH_SOURCE[0]}")/../lib/agents/paths.sh"
+
 # True when sourcing <file> in a bare non-interactive <shell> exports a snippet
 # from ~/.config/shell/env.d. The probe HOME is a throwaway, so no real snippet
 # is read, and it is seeded with the startup files a candidate may deliver
@@ -241,9 +244,16 @@ merge_opencode_settings() {
   local src="$1" dst="$2" mode="$3" tmp
   command -v jq >/dev/null 2>&1 || return 1
   jq empty "$src" >/dev/null 2>&1 || return 1
-  jq empty "$dst" >/dev/null 2>&1 || return 1
   tmp=$(mktemp "${TMPDIR:-/tmp}/opencode-settings.XXXXXX") || return 1
-  if ! jq -s '
+  if ! jq -e '
+      (.permission // {} | type) == "object" and
+      (.permission.bash // {} | type) == "object"
+    ' "$dst" >/dev/null 2>&1; then
+    if ! config_jsonc merge "$dst" "$src" > "$tmp"; then
+      rm -f "$tmp"
+      return 1
+    fi
+  elif ! jq -s '
       .[0] as $old | .[1] as $new |
       $old |
       if has("$schema") then . else . + {"$schema": $new["$schema"]} end |
@@ -543,7 +553,7 @@ install_agent_skill() {
     warn "agent skill source does not exist: $src_root"
     return 1
   fi
-  for agent_dir in "$HOME/.claude/skills/$skill" "$HOME/.codex/skills/$skill"; do
+  for agent_dir in "$(agent_home claude-code)/skills/$skill" "$(agent_home codex)/skills/$skill"; do
     while IFS= read -r -d '' file; do
       relative=${file#"$src_root/"}
       mode=0644
@@ -702,8 +712,11 @@ stage_git_config() {
 }
 
 stage_dotfiles() {
-  local repo
+  local repo claude_home codex_home opencode_config
   repo=$(repo_dir)
+  claude_home=$(claude_config_home)
+  codex_home=$(agent_home codex)
+  opencode_config=$(opencode_config_path opencode.jsonc)
 
   remove_legacy_tmux_config
 
@@ -777,7 +790,7 @@ stage_dotfiles() {
   install_repo_config "$repo" dotfiles/config/gh/config.yml \
     "$HOME/.config/gh/config.yml"
   install_repo_config "$repo" dotfiles/config/opencode/opencode.jsonc \
-    "$HOME/.config/opencode/opencode.jsonc" 0644 merge_opencode_settings
+    "$opencode_config" 0644 merge_opencode_settings
   if [[ "$OS_KIND" == linux ]]; then
     install_repo_config "$repo" dotfiles/config/environment.d/10-ssh-agent.conf \
       "$HOME/.config/environment.d/10-ssh-agent.conf"
@@ -790,9 +803,9 @@ stage_dotfiles() {
   fi
 
   install_repo_config "$repo" dotfiles/claude/settings.json \
-    "$HOME/.claude/settings.json" 0644 merge_claude_settings
+    "$claude_home/settings.json" 0644 merge_claude_settings
   install_repo_config "$repo" dotfiles/codex/rules/default.rules \
-    "$HOME/.codex/rules/default.rules"
+    "$codex_home/rules/default.rules"
 
   # The Apple Container skill is only correct where Apple Container is the
   # runtime. A Linux host of this setup runs Docker Engine, and the skill

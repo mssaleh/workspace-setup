@@ -183,7 +183,7 @@ array_has zsh-syntax-highlighting "${PACKAGES_BREW[@]}"
 # this host. azure-cli has an apt repository only for Ubuntu LTS codenames, so
 # a non-LTS or newer release resolves nothing; markitdown is PyPI-only. Both
 # are therefore uv-owned, and must not drift into an apt or brew list.
-array_has markitdown "${UV_TOOLS_COMMON[@]}"
+array_has 'markitdown[all]' "${UV_TOOLS_COMMON[@]}"
 array_has azure-cli "${UV_TOOLS_LINUX[@]}"
 
 # Cross-platform uv tools must not also be packaged, or two launchers compete.
@@ -208,9 +208,9 @@ array_has azure-cli "${PACKAGES_BREW[@]}"
 
 # The Graph CLI ships as a GitHub release tarball, so it is upstream-owned and
 # must carry a project entry for the currency check to have anything to compare.
-array_has mgc "${PROVIDERS_LINUX_UPSTREAM[@]}"
-if ! upstream_has_project mgc; then
-  printf 'mgc must declare a project in UPSTREAM_RELEASE_PROJECTS\n' >&2
+array_has pwsh "${PROVIDERS_LINUX_UPSTREAM[@]}"
+if ! upstream_has_project pwsh; then
+  printf 'pwsh must declare a project in UPSTREAM_RELEASE_PROJECTS\n' >&2
   exit 1
 fi
 

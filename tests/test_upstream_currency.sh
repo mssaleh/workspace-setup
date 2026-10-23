@@ -65,6 +65,14 @@ fake_tool ruff 'ruff 1.2.3'
 STUB_PUBLISHED=v1.2.3
 [[ "$(decide ruff)" == skip ]] || fail_test 'a v-prefixed tag was read as a different version'
 
+STUB_PUBLISHED=1.2.3
+fake_tool ruff 'ruff 1.10.0'
+[[ "$(decide ruff)" == skip ]] || fail_test 'a newer installed release was scheduled for downgrade'
+STUB_PUBLISHED=1.11.0
+[[ "$(decide ruff)" == upgrade ]] || fail_test 'numeric version ordering was not respected'
+STUB_PUBLISHED=1.12.0-beta.1
+[[ "$(decide ruff)" == skip ]] || fail_test 'an unrecognized published version triggered replacement'
+
 # ── An unresolvable published version changes nothing ─────────────────────
 # Being unable to reach the publisher must not look like "you are behind", or
 # an offline run would replace working tools with nothing.

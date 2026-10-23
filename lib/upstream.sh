@@ -36,14 +36,32 @@ upstream_latest_version() {
   printf '%s\n' "${tag#v}"
 }
 
-# upstream_release_asset_sha256 <owner/repo> <tag> <asset> — the sha256 GitHub
-# recorded when the asset was uploaded. These publishers post no checksum file,
-# so the API is the only published digest; empty when it cannot be read.
+# Prefer a publisher's checksum sidecar; use GitHub's recorded digest when
+# there is none. Sidecars avoid GitHub's shared anonymous API quota.
 upstream_release_asset_sha256() {
-  local repo="$1" tag="$2" asset="$3"
-  curl -fsSL "https://api.github.com/repos/${repo}/releases/tags/${tag}" 2>/dev/null \
+  local repo="$1" tag="$2" asset="$3" checksum
+  checksum=$(curl -fsSL "https://github.com/${repo}/releases/download/${tag}/${asset}.sha256" 2>/dev/null \
+    | awk 'NR == 1 { print $1 }') || checksum=''
+  if [[ "$checksum" =~ ^[0-9a-fA-F]{64}$ ]]; then
+    printf '%s\n' "$checksum" | tr 'A-F' 'a-f'
+    return
+  fi
+  checksum=$(curl -fsSL "https://api.github.com/repos/${repo}/releases/tags/${tag}" 2>/dev/null \
     | jq -r --arg name "$asset" '.assets[] | select(.name == $name) | .digest // empty' 2>/dev/null \
-    | sed -n 's/^sha256://p'
+    | sed -n 's/^sha256:\([0-9a-f]\{64\}\)$/\1/p') || checksum=''
+  if [[ -n "$checksum" ]]; then
+    printf '%s\n' "$checksum"
+    return
+  fi
+  # GitHub's October 2026 release view exposes the same asset digest without
+  # API quota. Match its named copy control; a changed view fails closed.
+  checksum=$(curl -fsSL "https://github.com/${repo}/releases/expanded_assets/${tag}" \
+    | awk -v control="aria-label=\"Copy to clipboard digest for $asset\"" '
+      index($0, control) && match($0, /value="sha256:[0-9a-f]+"/) {
+        print substr($0, RSTART + 14, RLENGTH - 15)
+      }') || return 1
+  [[ "$checksum" =~ ^[0-9a-f]{64}$ ]] || return 1
+  printf '%s\n' "$checksum"
 }
 
 # upstream_fetch_verified_asset <owner/repo> <tag> <asset> <destination>
@@ -81,7 +99,8 @@ upstream_installed_version() {
 
 # upstream_artifact_state <label> <installed version> <published version>
 #   current   the installed artifact is the published release
-#   stale     both are known and they differ
+#   stale     the published release is newer
+#   newer     the installed release is newer
 #   unknown   one of them could not be determined
 upstream_artifact_state() {
   # A leading v is tag naming, not a version difference, and is normalised at
@@ -89,10 +108,17 @@ upstream_artifact_state() {
   local label="$1" installed="${2#v}" published="${3#v}"
   if [[ -z "$installed" || -z "$published" ]]; then
     printf 'unknown\n'
+  elif [[ ! "$installed" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ \
+       || ! "$published" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    printf 'unknown\n'
   elif [[ "$installed" == "$published" ]]; then
     printf 'current\n'
   else
-    printf 'stale\n'
+    jq -nr --arg installed "$installed" --arg published "$published" '
+      ($installed | split(".") | map(tonumber)) as $i |
+      ($published | split(".") | map(tonumber)) as $p |
+      if $i == $p then "current" elif $i < $p then "stale" else "newer" end' \
+      || printf 'unknown\n'
   fi
 }
 
@@ -104,19 +130,27 @@ upstream_report_state() {
   case "$state" in
     current) ok "$label $installed is the current upstream release" ;;
     stale)   info "$label $installed is behind the published $published — upgrading…" ;;
+    newer)   ok "$label $installed is newer than the published $published; keeping it" ;;
     unknown) ok "$label is installed; the published release could not be confirmed" ;;
   esac
 }
 
 # upstream_binary_is_current <path> <published sha256>
-# Where the release artifact IS the executable, the checksum settles it with
-# nothing to parse — which is how yq and cosign are compared, since neither
-# reports a version this can read.
+# Matching bytes provide a fast convergence check for single-binary releases.
 upstream_binary_is_current() {
   local path="$1" want="$2" got
   [[ -x "$path" && -n "$want" ]] || return 1
   got=$(upstream_sha256 "$path") || return 1
   [[ -n "$got" && "$got" == "$want" ]]
+}
+
+# Native publisher identifiers, observed in yq 4.53 and cosign 3.1 output.
+upstream_binary_identifies() {
+  case "$1" in
+    yq) "$2" --version 2>/dev/null | grep -F 'https://github.com/mikefarah/yq/' >/dev/null ;;
+    cosign) "$2" version 2>/dev/null | grep -F 'cosign: A tool for Container Signing' >/dev/null ;;
+    *) return 1 ;;
+  esac
 }
 
 # upstream_sha256 <file> — the digest, from whichever tool the host has.
@@ -187,7 +221,7 @@ upstream_project_repo() {
 UPSTREAM_ARTIFACT_ACTION=install
 
 # upstream_artifact_needed <command> <path> <version probe...>
-# True when the artifact is missing, or reports a version other than the one
+# True when the artifact is missing, or reports a version older than the one
 # its project publishes. False — leave it alone — when it is current, when the
 # published version cannot be resolved, or when the path holds something else.
 upstream_artifact_needed() {

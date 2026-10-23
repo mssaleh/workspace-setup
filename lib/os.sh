@@ -136,7 +136,7 @@ detect_pkgmgr() {
 pkg_installed() {
   case "$PKGMGR" in
     brew) "$BREW_BIN" list --formula "$1" >/dev/null 2>&1 ;;
-    apt|apt-get) dpkg -s "$1" >/dev/null 2>&1 ;;
+    apt|apt-get) apt_package_installed "$1" ;;
   esac
 }
 

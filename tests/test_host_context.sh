@@ -88,6 +88,38 @@ fi
   [[ "$SKIP_TERMINAL_PROFILE" == 1 ]]
 ) || fail_test 'macOS headless host policy did not set its exact graphical controls'
 
+# A sudo login retains the invoking identity in SUDO_USER.
+# shellcheck disable=SC2034 # stage_groups reads the context variables
+for identity in qa root; do
+  (
+    # shellcheck disable=SC1091
+    . "$TEST_ROOT/scripts/stage_groups.sh"
+    OS_KIND=linux
+    WORKSTATION_GROUPS=(dialout)
+    SUDO_USER=root
+    [[ "$identity" == root ]] && SUDO_USER=qa
+    state_dir=$(mktemp -d)
+    trap 'rm -rf "$state_dir"' EXIT
+    id() {
+      case "$*" in
+        -un) printf '%s\n' "$identity" ;;
+        '-nG qa') printf 'qa\n' ;;
+        *) return 1 ;;
+      esac
+    }
+    getent() {
+      [[ "$*" == 'group dialout' ]] || return 1
+      printf 'dialout:x:20:%s\n' "$(cat "$state_dir/member" 2>/dev/null || true)"
+    }
+    sudo() {
+      [[ "$*" == 'usermod -aG dialout qa' ]] || return 1
+      printf 'qa\n' > "$state_dir/member"
+    }
+    stage_groups
+    [[ "$(cat "$state_dir/member")" == qa ]]
+  ) || fail_test "device groups did not select qa from effective identity $identity"
+done
+
 # Selecting either the login shell or terminal emulator is outside setup's
 # authority. Keep the invariant executable rather than relying on comments.
 if grep -rEq '\bchsh\b|xdg-terminal-exec[[:space:]]+set|launchctl[[:space:]]+config[[:space:]]+user[[:space:]]+path|/gnubin' \

@@ -8,6 +8,9 @@ trap 'rm -rf "$TEST_TMP"' EXIT
 fixture="$TEST_TMP/fixture"
 calls="$TEST_TMP/calls"
 mkdir -p "$fixture/lib" "$fixture/scripts" "$TEST_TMP/home"
+mkdir -p "$fixture/lib/agents"
+cp "$TEST_ROOT/lib/agents/log.sh" "$TEST_ROOT/lib/agents/manifest.sh" "$fixture/lib/agents/"
+cp -R "$TEST_ROOT/manifests" "$fixture/"
 
 fail_test() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 
@@ -52,6 +55,7 @@ write_stage_stub stage_fonts_terminal.sh stage_fonts_terminal
 write_stage_stub stage_terminal_profile.sh stage_terminal_profile
 write_stage_stub stage_postflight.sh stage_postflight
 write_stage_stub stage_apparmor.sh stage_apparmor
+write_stage_stub stage_agents.sh stage_agents
 write_stage_stub stage_macos_bootstrap.sh stage_macos_bootstrap
 write_stage_stub stage_macos_cli.sh stage_macos_cli
 write_stage_stub stage_completions.sh stage_completions
@@ -96,6 +100,7 @@ stage_macos_fonts
 stage_macos_kitty
 stage_macos_terminal_profile
 stage_macos_postflight
+stage_agents
 EXPECTED
 )
 
@@ -115,6 +120,11 @@ postflight_line=$(grep -n '^stage_macos_postflight$' "$calls" | cut -d: -f1)
 run_macos_setup SKIP_CONTAINER=1 SKIP_COMPLETIONS=1 SKIP_SSH=1 SKIP_REMOTE_AUDIT=1
 if grep -Eq '^stage_(container|completions|ssh|macos_remote_audit)$' "$calls"; then
   fail_test 'a macOS stage ignored its established setup-level skip control'
+fi
+
+printf 'stage_agents() { return 7; }\n' > "$fixture/scripts/stage_agents.sh"
+if run_macos_setup; then
+  fail_test 'a failed agent synchronization was reported as a completed setup'
 fi
 
 printf 'macOS orchestration tests: ok\n'

@@ -7,6 +7,10 @@
 # Every one is guarded by the state it produces, so a host that is already
 # configured performs no download, no write, and no apt update.
 
+apt_package_installed() {
+  [[ "$(dpkg-query -W -f='${db:Status-Status}' "$1" 2>/dev/null)" == installed ]]
+}
+
 # apt_gpg <gpg arguments...> — gpg with a throwaway home directory. Reading or
 # dearmouring a downloaded key needs no keyring, and an unwritable ~/.gnupg
 # (one left by `sudo gpg`, for example) makes gpg print nothing at all.
@@ -128,7 +132,10 @@ apt_repo_is_configured() {
 # vendor repository is added, while keeping a converged host a no-op.
 apt_install_candidate() {
   local pkg="$1" label="${2:-$1}" installed candidate
-  installed=$(dpkg-query -W -f='${Version}' "$pkg" 2>/dev/null || true)
+  installed=''
+  if apt_package_installed "$pkg"; then
+    installed=$(dpkg-query -W -f='${Version}' "$pkg" 2>/dev/null || true)
+  fi
   candidate=$(apt-cache policy "$pkg" 2>/dev/null | awk '/Candidate:/{print $2}')
 
   if [[ -z "$candidate" || "$candidate" == '(none)' ]]; then
@@ -161,18 +168,22 @@ libreoffice_installed() {
   return 1
 }
 
-# apt_report_removals <verb> <note> <package...> — name what this transaction
-# would take with it, before it runs. <note> prints only when there is something
-# to report; pass '' for none.
-#
-# A transaction removes far more than the packages it is handed: NodeSource's
-# nodejs retires the distribution npm and everything built on it. The simulation
-# uses the caller's verb, since install and remove cascade differently.
+# Simulation uses the real verb: install and remove have different cascades.
+apt_simulated_removals() {
+  local verb="$1" simulation
+  shift
+  simulation=$(sudo "${APT_ENV[@]}" "$PKGMGR" "$verb" -s -y "$@") || {
+    warn "could not simulate $PKGMGR $verb $*"
+    return 1
+  }
+  printf '%s\n' "$simulation" | awk '/^(Remv|Purg) / { print $2 }' | sort -u
+}
+
+# apt_report_removals <verb> <note> <package...>; an empty note adds no detail.
 apt_report_removals() {
   local verb="$1" note="$2" removals count
   shift 2
-  removals=$(sudo "${APT_ENV[@]}" "$PKGMGR" "$verb" -s -y "$@" 2>/dev/null \
-    | awk '/^(Remv|Purg) / { print $2 }' | sort -u)
+  removals=$(apt_simulated_removals "$verb" "$@") || return 1
   count=$(printf '%s' "$removals" | grep -c . || true)
   ((count)) || return 0
   warn "$verb $* removes $count package(s):"
@@ -194,20 +205,30 @@ distro_codename() {
   printf '%s\n' "$codename"
 }
 
-# vendor_command_state <package> <command> — who owns this capability now.
+# vendor_command_state <package> <command> <archive uri> — current provider.
 #   managed  the vendor package is installed and its command resolves
 #   foreign  something else provides the command; leave it alone
 #   wanted   neither, so register the archive and install the package
 # Both phases consult this, so a command another provider owns never gets an
 # apt source added behind its back.
 vendor_command_state() {
-  local pkg="$1" cmd="$2"
-  if dpkg -s "$pkg" >/dev/null 2>&1 && command -v "$cmd" >/dev/null 2>&1; then
-    printf 'managed\n'
-  elif command -v "$cmd" >/dev/null 2>&1; then
-    printf 'foreign\n'
-  else
+  local pkg="$1" cmd="$2" uri="${3%/}" path version
+  path=$(command -v "$cmd" 2>/dev/null || true)
+  if [[ -z "$path" ]]; then
     printf 'wanted\n'
+    return
+  fi
+  path=$(readlink -f "$path")
+  version=$(dpkg-query -W -f='${Version}' "$pkg" 2>/dev/null || true)
+  if apt_package_installed "$pkg" \
+      && dpkg-query -L "$pkg" 2>/dev/null | grep -Fx "$path" >/dev/null \
+      && apt-cache madison "$pkg" | awk -F'|' -v version="$version" -v uri="$uri" '
+        { gsub(/^[ \t]+|[ \t]+$/, "", $2) }
+        $2 == version && index($3, uri) { found = 1 }
+        END { exit !found }'; then
+    printf 'managed\n'
+  else
+    printf 'foreign\n'
   fi
 }
 
@@ -217,7 +238,7 @@ vendor_command_state() {
 apt_gui_app_wanted() {
   local pkg="$1" skip="$2" arch
   [[ -z "$skip" ]] || return 1
-  dpkg -s "$pkg" >/dev/null 2>&1 && return 1
+  apt_package_installed "$pkg" && return 1
   arch=$(dpkg --print-architecture 2>/dev/null || true)
   [[ "$arch" == amd64 || "$arch" == arm64 ]]
 }

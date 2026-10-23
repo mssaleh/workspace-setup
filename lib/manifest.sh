@@ -113,12 +113,14 @@ UPSTREAM_RELEASE_PROJECTS=(
   yazi:sxyazi/yazi
   himalaya:pimalaya/himalaya
   opencode:anomalyco/opencode
-  mgc:microsoftgraph/msgraph-cli
+  pwsh:PowerShell/PowerShell
   git-credential-manager:git-ecosystem/git-credential-manager
   uv:astral-sh/uv
   delta:dandavison/delta
   eza:eza-community/eza
   lazygit:jesseduffield/lazygit
+  yq:mikefarah/yq
+  cosign:sigstore/cosign
 )
 
 # apt names a release may not carry, each with the command whose upstream
@@ -131,7 +133,7 @@ APT_UPSTREAM_FALLBACKS=(git-delta:delta eza:eza lazygit:lazygit)
 # virtualenv because uv is already a dependency of this setup.
 #
 # markitdown is PyPI-only and has no packaged form on either platform.
-UV_TOOLS_COMMON=(markitdown)
+UV_TOOLS_COMMON=('markitdown[all]')
 # azure-cli publishes an apt repository only for Ubuntu LTS codenames, so a
 # non-LTS or newer release resolves nothing and uv owns it. macOS has a
 # Homebrew formula, which owns it there — see PACKAGES_BREW. Installing both
@@ -193,7 +195,8 @@ PROVIDERS_MACOS_UPSTREAM=(apple-container-signed-pkg rosetta)
 # macOS gets: Ubuntu's `yq` is kislyuk's jq wrapper rather than the mikefarah
 # program, and its `cosign` is a major behind. Both come from the upstream
 # release instead — see YQ_RELEASE_BASE and COSIGN_RELEASE_BASE above.
-PROVIDERS_LINUX_UPSTREAM=(zmx ruff yazi himalaya opencode yq cosign mgc git-credential-manager)
+PROVIDERS_LINUX_UPSTREAM=(zmx ruff yazi himalaya opencode yq cosign pwsh git-credential-manager)
+TOOLCHAIN_BREW_CASKS=(powershell)
 # Capabilities the distribution either does not package or packages too far
 # behind to use, taken from the vendor's own signed archive instead.
 PROVIDERS_LINUX_OFFICIAL_REPO=(

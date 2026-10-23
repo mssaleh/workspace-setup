@@ -1,8 +1,8 @@
 # workspace-setup
 
-One-shot host provisioning for a productive terminal-first workspace on **macOS** and **Ubuntu/Debian Linux**. It converges packages, upstream toolchains, regular configuration files, SSH, fonts, terminals, and the platform-native container runtime.
+Provision a terminal-first workspace and configure its coding agents on **macOS** and **Ubuntu/Debian Linux**. One repository owns packages, toolchains, regular configuration files, SSH, terminals, containers, shared skills, MCP servers, and Claude Code plugins.
 
-The setup payload is disposable. `curl | bash` downloads it into a temporary directory, applies ordinary package/application installs and regular files, verifies the resulting host, then deletes the payload. Nothing on the configured machine points back to this repository and no setup receipt or managed-state directory is retained.
+The setup payload is disposable. `curl | bash` downloads it into a temporary directory, provisions and verifies the host, synchronizes agents, then deletes the payload. Installed files do not depend on the checkout. Providers retain their native state, including the skills CLI's lock file; setup retains no separate receipt or state directory.
 
 ## Quick start
 
@@ -17,6 +17,23 @@ wget -qO- https://raw.githubusercontent.com/mssaleh/workspace-setup/main/setup.s
 git clone https://github.com/mssaleh/workspace-setup.git
 cd workspace-setup
 bash setup.sh
+
+# Provision the host without synchronizing agents:
+bash setup.sh host
+
+# Configure agents on an existing host, without provisioning or sudo:
+bash setup.sh agents --dry-run
+bash setup.sh agents
+bash setup.sh agents --update
+```
+
+The default run completes host verification before synchronizing agents. An
+agent failure makes the complete run fail. Agent-only runs require the CLIs and
+Node.js to be installed already. `--dry-run`, `--update`, and pruning flags apply
+to the `agents` command; host updates retain the environment controls below.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mssaleh/workspace-setup/main/setup.sh | bash -s -- agents --dry-run
 ```
 
 Either tool works on Linux, including for the payload the script fetches for
@@ -44,7 +61,7 @@ packages without their recommendations; each control still overrides it.
 | **bootstrap** | On macOS, verifies that the selected Xcode Command Line Tools actually provide `xcrun clang` before touching Homebrew, then discovers Homebrew at its real prefix or installs it. It never launches the asynchronous CLT installer dialog. On Linux, ensures curl + git. |
 | **packages** | Installs the cross-platform CLI toolbox: `eza`, `fd`, `bat`, `ripgrep` (`rg`), `fzf`, `zoxide`, `yazi`, `git`, `git-delta` (`delta`), `lazygit`, `gh`, `zmx`, `rsync`, `rclone`, `nmap`, `jq`, `yq`, `pandoc`, `7zz` (`7z`), `cmake`, `ninja`, `node`, `uv`, `ruff`, `helm`, `kubectl`, `cosign`, `ffmpeg`, `poppler` (`poppler-utils`), `nano`, `himalaya`, `ncdu`, `shellcheck`, `pre-commit`, … It installs `xterm-kitty` terminfo as a non-GUI SSH capability on every host. Where a Linux release's apt has no `git-delta`, `eza` or `lazygit`, their upstream releases install into `~/.local/bin`. On Linux it registers **every** vendor archive before installing anything (see below), then installs the toolbox, the **Claude Desktop** app (skip with `SKIP_CLAUDE_DESKTOP=1`) and the **Codex app** (skip with `SKIP_CODEX_APP=1`). |
 | **docker** | Linux only: installs the official **Docker Engine** + **Docker Compose v2** from download.docker.com. Docker's documented pre-clean of the distribution's `docker.io`, `containerd` and `runc` names every package apt would take with them before it runs, since those runtimes carry reverse dependencies of their own. A complete, responsive official installation is a no-op on rerun. |
-| **toolchains** | Installs upstream **rustup**, Astral's standalone **uv/uvx** (plus its receipt), native Claude Code and Codex CLIs, and upstream opencode on Linux. Linux also retains its existing upstream Microsoft Graph CLI (`mgc`) provider. The separate Homebrew `uv` formula remains an intentional backup. |
+| **toolchains** | Installs upstream **rustup**, Astral's standalone **uv/uvx** (plus its receipt), native Claude Code and Codex CLIs, and upstream opencode on Linux. Installs PowerShell and the Microsoft Graph SDK for the current user, plus `markitdown[all]` for document conversion. The separate Homebrew `uv` formula remains an intentional backup. |
 | **configuration** | Converges ordinary files under `$HOME`; repairs old links into temporary checkouts, atomically upgrades exact known historical versions, semantically merges supported JSON/TOML/Git/ssh formats and repairs a shell startup file that has lost the host-local environment loader, preserves ambiguous user-owned content, installs the coding-agent skills into each agent home, and provisions the host-local environment directory `~/.config/shell/env.d/` that the supported shells source. |
 | **completions** | macOS only: runs `brew completions link` when Homebrew reports that external-command completions are not linked, then generates and syntax-checks Bash/Zsh completions from the installed Codex, rustup/cargo, opencode, Container, and Container Compose binaries. Existing files without this setup's ownership marker are preserved. Linux retains its existing himalaya loader only. |
 | **containers** | macOS only: installs Apple Container from Apple's signed package, ensures Rosetta, and writes only the stable build/registry defaults. The Container system remains stopped for on-demand laptop use unless `CONTAINER_START=1`; it is never stopped automatically. `container-compose` is supplied separately by Homebrew. |
@@ -54,6 +71,7 @@ packages without their recommendations; each control still overrides it.
 | **terminal profile** | macOS imports the scalar-only Clear Dark profile only with `CONFIGURE_APPLE_TERMINAL=1` in a local interactive session, and selects it only with the additional `SET_APPLE_TERMINAL_DEFAULT=1`. Linux converges only previously untouched Ptyxis behavior keys. User choices are preserved. |
 | **updates** | Off by default. Linux `UPDATE_SYSTEM=1` retains the existing full system update path. macOS `UPDATE_HOMEBREW=1` refreshes metadata and reports only repository-managed outdated items; `UPGRADE_HOMEBREW_FORMULAE=1` additionally upgrades only named managed formulae, never casks or cleanup. Apple Container updates have their own stopped-system opt-in. |
 | **postflight** | Retains the existing Linux checks. macOS additionally verifies the declared Node major, generated completion registration/security, Kitty's platform layer, Terminal's effective domain when requested, launchd/forwarded SSH-agent state, and Container's requested running/stopped state. |
+| **agents** | After host verification, installs missing declared skill collections, reconciles user-scope MCP servers using native agent commands, installs Claude plugins, and verifies the resulting configuration. A converged agent run makes no configuration changes; source refresh and pruning are explicit options. |
 
 Desktop features and headless access are independent. Linux desktop integration
 does not select a default terminal. Interactive and non-interactive SSH shells
@@ -99,6 +117,9 @@ This is automation for a conventional hand-configured machine, not a settings ma
 | Rust, PATH-winning `uv`, Claude, Codex, Kitty, Linux opencode | each project's upstream installer |
 | Apple Container | Apple-signed installer package |
 | Configuration | ordinary files at their native paths |
+| Shared skills and their lock file | `npx skills`, from `manifests/skills.tsv` |
+| MCP configuration | native agent commands, from `manifests/mcp.tsv` |
+| Claude plugins and marketplaces | `claude plugin`, from `manifests/plugins.tsv` |
 
 ### What happens to files you have edited
 
@@ -206,7 +227,7 @@ curl -fsSL https://raw.githubusercontent.com/mssaleh/workspace-setup/main/setup.
 - **Does not apply the optional files under `system/`.** Package managers and their installers necessarily write to their native locations (`/opt/homebrew`, `/Applications`, `/usr/local`, package receipts, and Linux package/systemd paths); those exact owners are listed above. The reviewed SSH/sysctl/Docker examples under `system/` remain manual because their host-wide policy cannot be inferred safely.
 - **Does not enable Remote Login, change its allow-list, grant Full Disk Access, change FileVault/firewall/power policy, change the login shell, or select Kitty as the default terminal.** The macOS remote stage reports effective state only.
 - **Does not upgrade Homebrew casks automatically.** A cask upgrade can quit a running application. Formula upgrades are also off by default and scoped to this repository's inventory when explicitly enabled.
-- **Does not install coding-agent plugins or marketplace configs.** The guardrails (denylists) are installed; the agent-specific plugins/marketplaces are left for the user to configure.
+- **Does not authenticate coding agents or MCP services.** Agent verification checks configuration and skill payloads; service authentication and reachability remain separate.
 - **Does not silently overwrite unknown user configuration.** Missing Git defaults, supported agent-policy keys, and the two `~/.ssh/config` security directives are merged without removing unrelated values. An ambiguous file is preserved and causes postflight to report a conflict.
 - **Does not set the Apple Terminal font or colors.** When explicitly requested locally, the "Clear Dark" profile carries only verified scalar settings: geometry, Option-as-Meta, bell, antialiasing, background blur, and shell-exit behavior. Font, colors, and unverified scrollback keys remain user choices.
 
@@ -467,7 +488,10 @@ attach to a named `zmx` session on the host (`main` by default). Its shell and
 foreground process survive a dropped connection; running `ds` again restores
 the screen and reattaches. `zmx` does not provide tabs or splits. Setup removes
 the previous tmux package and its known managed config once `zmx` is installed;
-it preserves a user-edited config. If tmux still has live sessions, setup
+it preserves a user-edited config. Linux keeps the package when its removal
+would also remove reverse dependencies such as `ubuntu-server`, or when the
+package is explicitly held. `ds` is still verified to use `zmx`.
+If tmux still has live sessions, setup
 leaves its package installed until their owner exits them and reruns setup.
 
 A TUI killed by a signal never sends the disables for what it turned on, so a
@@ -646,6 +670,118 @@ ssh <this host> 'printenv HF_TOKEN'
 `~/.config/shell/README` is installed alongside the directory and says the same
 thing where it is needed.
 
+## Coding-agent synchronization
+
+`bash setup.sh agents` synchronizes the manifests without running host stages.
+It preserves additional skills, MCP servers, plugins, and project-scoped choices.
+Missing or unreadable manifests stop the run before configuration changes.
+
+| Manifest | Fields | Writer |
+|---|---|---|
+| `manifests/skills.tsv` | source, skills, mode | `npx skills` |
+| `manifests/mcp.tsv` | name, transport, target, agents | `claude mcp`, `codex mcp`, `opencode mcp`, optional `copilot mcp` |
+| `manifests/plugins.tsv` | agent, marketplace, marketplace source, plugin | `claude plugin` |
+
+### Skills
+
+Skill sources use `owner/repo` or `owner/repo/path/to/skills`. `whole` mode with
+`*` follows a complete collection; `select` mode lists comma-separated skill
+names from their `SKILL.md` frontmatter. Discover names with
+`npx skills add <source> -l`. The shipped collections cover Vercel, Next.js,
+shadcn, Pydantic, LlamaIndex, CopilotKit, Temporal, Qdrant, LiveKit, TypeSafe,
+and assistant-ui.
+
+The skills CLI owns the shared payloads and lock. An ordinary run installs
+missing sources or payloads; `--update` refreshes declared collections and
+discovers newly added upstream skills. It does not refresh unrelated sources.
+`--prune-skills` removes only fetched skills outside declared selections and
+source paths. Skills without lock entries and unrelated files are preserved.
+
+| Agent | Skills | MCP configuration |
+|---|---|---|
+| Claude Code | `$CLAUDE_HOME/skills`, default `~/.claude/skills` | `$CLAUDE_CONFIG_DIR/.claude.json` when set, otherwise `~/.claude.json` |
+| Codex | `~/.agents/skills` and a `$CODEX_HOME/skills` mirror | `$CODEX_HOME/config.toml` |
+| OpenCode | shared skills and native skill directories | `$XDG_CONFIG_HOME/opencode/opencode.json` or `.jsonc` |
+| GitHub Copilot CLI | `$COPILOT_HOME/skills` | `$COPILOT_HOME/mcp-config.json` |
+
+Claude needs a mirror; Codex also reads the shared store and retains its legacy
+mirror; OpenCode reads the shared store directly. Every mirror is checked with
+`-ef` against its own payload. A whole agent skills directory may link to the
+shared store.
+
+### MCP servers and plugins
+
+MCP transports are `stdio`, `http`, or `sse`. Stdio targets are npm package
+specifications; remote targets are complete URLs. Agent lists contain
+`claude-code`, `codex`, `opencode`, and optional `github-copilot`. Codex does not
+support SSE, so such a declaration fails validation.
+
+A server satisfies its declaration only when its name, target, kind, and
+enabled state agree. Stdio comparison ignores the runner and installation
+directory, and accepts a resolved version unless the manifest requests a
+specific version. Existing matching command arguments are carried to agents
+missing that server, including spaces and empty arguments.
+
+Claude uses native user scope. Replacing an existing Claude or Copilot name
+requires native removal first; Copilot also uses native enable. Codex and
+OpenCode named adds replace entries. OpenCode V2 uses `--global`; V1 named adds
+already write global configuration. Failed native writes return nonzero, and
+a later run can repair an incomplete replacement.
+
+Inspection uses native Codex JSON output, Claude plugin and marketplace JSON
+listings, Copilot's effective enabled state, and OpenCode's effective config.
+OpenCode V2 inspection uses `opencode api --standalone config.get`; V1 uses
+`opencode --pure debug config`. Configuration is inspected outside projects,
+and MCP health checks are not run. V2 documents are applied in precedence
+order. See the [OpenCode MCP reference](https://opencode.ai/v2/docs/mcp-servers),
+[Claude MCP reference](https://code.claude.com/docs/en/mcp), and
+[Copilot MCP reference](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-mcp-servers).
+
+Plugin declarations currently support Claude Code user scope. Project-only
+plugin installations do not satisfy a declaration. Additional plugins,
+desktop-managed MCP entries, project-scoped servers, and directory-specific
+disabled choices are reported and preserved.
+
+### Agent options and paths
+
+| Option after `agents` | Effect |
+|---|---|
+| `--dry-run` | Report proposed changes and what the plan would leave unresolved; leave configuration unchanged |
+| `--only skills\|mcp\|plugins\|verify` | Run one pass and verify its result; `verify` applies no configuration changes |
+| `--update` | Refresh declared skill collections, marketplaces, and plugins |
+| `--prune-skills` | Remove fetched skills outside the manifest's selections and whole sources |
+| `--prune-plugin-cache` | Delete cache directories with no registered marketplace or installed plugin reference |
+| `--prune-duplicate-mcp` | Remove exact-name duplicates for declared endpoints using native removal |
+
+OpenCode has no native MCP removal command. Duplicate pruning reports that
+entry as unresolved and exits nonzero; its configuration needs separate editing.
+
+| Variable | Default or behavior |
+|---|---|
+| `AGENTS_HOME` | `~/.agents`, shared skill root |
+| `AGENTS_STORE` | `$AGENTS_HOME/skills` |
+| `AGENTS_LOCK` | `$XDG_STATE_HOME/skills/.skill-lock.json` when set, otherwise `$AGENTS_HOME/.skill-lock.json` |
+| `CLAUDE_CONFIG_DIR` | Native Claude configuration root, including policy and credentials |
+| `CLAUDE_HOME` | Skill and plugin root; defaults to `$CLAUDE_CONFIG_DIR` or `~/.claude` |
+| `CODEX_HOME` | `~/.codex`, shared by provisioning and native Codex commands |
+| `COPILOT_HOME` | `~/.copilot`, also honored by native Copilot commands |
+| `XDG_CONFIG_HOME` | Defaults to `~/.config` for OpenCode |
+| `OPENCODE_CONFIG` | Explicit OpenCode config file; otherwise prefer an existing `.json`, then `.jsonc` |
+| `SKILLS_CLI_VERSION` | `latest`, skills CLI release selector |
+
+Provisioning and synchronization resolve agent locations through
+`lib/agents/paths.sh`. The skills CLI writes its native store and lock paths;
+when another path is selected, synchronization creates aliases. Existing native
+state moves only to an absent destination. Distinct populated locations report
+a conflict without merging or deleting content. Dry runs report these operations.
+
+Agent-only dependencies are Bash 3.2+, coreutils, POSIX `awk`, `sed`, `npx`,
+Claude Code, Codex, and OpenCode. The skills CLI requires
+[Node.js 22.20+](https://github.com/vercel-labs/skills#install-a-skill), which the
+declared Node 24 line satisfies. Copilot is used when installed. Native commands
+run with stdin closed. Verification establishes configuration, not remote
+service availability or authentication.
+
 ## Coding-agent guardrails
 
 The script installs or narrowly merges denylists for all three coding agents so they **cannot** install/remove/upgrade user-level packages via `brew` (macOS) or `apt`/`apt-get`/`snap` (Linux):
@@ -658,7 +794,7 @@ The script installs or narrowly merges denylists for all three coding agents so 
 
 Read-only commands (`brew list`, `apt show`, `snap list`, etc.) are not blocked.
 
-## Coding-agent skills
+## Apple Container agent skill
 
 Claude Code and Codex both discover skills at `<agent-home>/skills/<name>/`, so the setup converges one source tree into both agent homes:
 
@@ -707,12 +843,12 @@ The script detects the OS and adapts:
 | Ninja | Homebrew `ninja` | `ninja-build` from the distribution — Ubuntu ships the current upstream release, and Ninja publishes no apt repository |
 | Git | Homebrew `git` | Ubuntu: `ppa:git-core/ppa`, the PPA git-scm.com names for the current stable Git; Debian: distribution package |
 | GitHub CLI | Homebrew `gh` | GitHub's own archive (`cli.github.com`), every key in the downloaded keyring checked against the declared fingerprints. The distribution build trails upstream by tens of minor releases |
-| Tools not in default apt repo (helm, kubectl, himalaya, ruff, yazi, opencode) | Homebrew formula | official apt repo (helm, kubectl) / official installers (himalaya, opencode) / GitHub release → `~/.local/bin` (ruff, yazi). Each run compares what is installed against what the project publishes and upgrades when they differ — see below |
+| Tools not in default apt repo (helm, kubectl, himalaya, ruff, yazi, opencode) | Homebrew formula | official apt repo (helm, kubectl) / official installers (himalaya, opencode) / GitHub release → `~/.local/bin` (ruff, yazi). Each run compares what is installed against what the project publishes and upgrades when the published version is newer — see below |
 | `yq` and `cosign` | Homebrew `yq` (mikefarah) and `cosign` | upstream release → `~/.local/bin`, checksum verified against the publisher's own list. **Not** the distribution packages: Ubuntu's `yq` is kislyuk's jq wrapper — a different program with a different command language — and its `cosign` is a whole major behind. A setup for parity between a Mac and a Linux box cannot give the same command name to two different programs. A distribution build left installed alongside is preserved; `~/.local/bin` wins on PATH and postflight names the ambiguity |
 | Node.js | Homebrew owns both the unversioned formula and `node@24`, each with a job: `node@24` is the declared major and macOS creates `~/.local/bin/{node,npm,npx,corepack}` links to that keg wherever a destination is free, while the unversioned formula stays keg-linked in `$BREW_PREFIX/bin` as the fallback for a host where a link cannot be made. Postflight verifies the resolved executable and major from a bare SSH-style PATH | **NodeSource** apt repo (`deb.nodesource.com`), major set by `NODE_MAJOR` in `lib/manifest.sh`; signing key fingerprint verified. Ubuntu's own `nodejs` trails upstream by several majors and its separately versioned `npm` package drags an older nodejs in with it, so neither name stays in `PACKAGES_APT`, and `/etc/apt/preferences.d/nodesource.pref` puts the distribution's `nodejs`, `npm`, `nodejs-doc` and `libnode-dev` below zero so apt cannot select them at all. The pin is written alongside the repository and never without it. The repo and keyring are written only when their content differs, so a re-run performs no apt work at all |
 | VS Code CLI | `/Applications/Visual Studio Code.app/.../bin/{code,code-tunnel}` → `~/.local/bin`, but only when each destination is free; no launchd/global PATH mutation | official `code` package owns its launchers |
 | Clipboard CLI | `xsel` is absent from `PACKAGES_BREW`; native GUI/terminal clipboard paths are used | `xsel` is declared in `PACKAGES_APT` for supported X11 sessions |
-| Microsoft Graph CLI | not added to the macOS inventory | existing upstream `mgc` installer and provider inventory retained unchanged; its eventual retirement is a separate Linux migration ([announcement](https://devblogs.microsoft.com/microsoft365dev/microsoft-graph-cli-retirement/)) |
+| Microsoft Graph PowerShell | Homebrew `powershell` cask, including on headless hosts | current stable universal PowerShell DEB on amd64, verified release archive on arm64. Both platforms install `Microsoft.Graph` from PSGallery in `CurrentUser` scope and verify its manifest and commands without signing in ([SDK installation](https://learn.microsoft.com/en-us/powershell/microsoftgraph/installation)). Existing `mgc` copies are preserved; new installs use the SDK because Microsoft [retired the CLI](https://devblogs.microsoft.com/microsoft365dev/microsoft-graph-cli-retirement/) |
 | npm global prefix | `~/.npm/packages` via `~/.npmrc` (`prefix` + `cache`) — set on both platforms so `npm i -g` never needs sudo | same |
 | Kitty | upstream app installer → `/Applications/kitty.app` | upstream app installer → `~/.local/kitty.app`, plus desktop integration the installer omits: absolute-path `.desktop` entries, `StartupWMClass`, a "New Window" action, and the scalable icon in the hicolor theme; terminal preference remains owned by the desktop or user |
 | `xterm-kitty` terminfo | default database or Kitty's official definition compiled into `~/.terminfo` | `kitty-terminfo` apt package, with the same per-user fallback when unavailable; independent of Kitty, X11, Wayland, and `SKIP_FONT` |
@@ -745,9 +881,13 @@ distribution and replaced afterwards. One index refresh covers them all.
 **Publisher-installed tools** — `ruff`, `yazi`, `himalaya`, `opencode`, `yq`,
 `cosign`, standalone `uv`, and `delta`, `eza` and `lazygit` where apt lacks them —
 have no package manager carrying them forward, so each run compares what is
-installed against what the project publishes and upgrades when they differ.
-Archives downloaded from GitHub releases are checked against the sha256 GitHub
-records for each asset, and uv upgrades itself with `uv self update`. Nothing is replaced unless it identifies itself: an unreachable
+installed against what the project publishes and upgrades when the published version is newer.
+GitHub release archives use the publisher's SHA-256 sidecar when available,
+otherwise GitHub's recorded asset digest. If anonymous API quota is exhausted,
+the exact named asset's digest is read from GitHub's release view. Missing or
+malformed digests prevent installation. Requested archive upgrades propagate
+download failures. Newer installed releases are preserved, and uv upgrades
+itself with `uv self update`. Nothing is replaced unless it identifies itself: an unreachable
 publisher, an unparseable version, or a file this project did not place all
 mean it is left alone and reported.
 
@@ -772,7 +912,10 @@ packages built on it; the run names them before it proceeds.
 ```
 workspace-setup/
 ├── setup.sh                      # entry point (curl | bash friendly)
+├── AGENTS.md                     # canonical project guidance; CLAUDE.md includes it
+├── manifests/                    # shared skills, MCP servers, and Claude plugins
 ├── lib/
+│   ├── agents/                   # native agent paths, reconciliation, and verification
 │   ├── log.sh                     # logging + stage runner
 │   ├── os.sh                      # OS detection + package manager abstraction
 │   ├── apt.sh                     # apt repository/package primitives (keys, sources, candidates, removals)
@@ -782,13 +925,17 @@ workspace-setup/
 │   ├── config.sh                  # atomic, state-aware regular-file convergence
 │   └── known-config-hashes.tsv    # historical source hashes (never installed)
 ├── tools/
-│   └── record-known-hashes.sh     # maintainer: refresh the hash inventory
+│   ├── record-known-hashes.sh     # maintainer: refresh the hash inventory
+│   └── jsonc/                    # locked Microsoft JSONC parser + comment-preserving edits
 ├── scripts/
 │   ├── stage_bootstrap.sh         # established Linux bootstrap path
 │   ├── stage_macos_bootstrap.sh   # CLT readiness + Homebrew bootstrap
 │   ├── stage_packages.sh          # brew formulae / apt + official installers
 │   ├── stage_docker.sh            # official Docker Engine + Compose v2 (Linux only)
-│   ├── stage_toolchains.sh        # rustup + uv + agent CLIs
+│   ├── stage_toolchains.sh        # rustup + uv + agent CLIs + PowerShell
+│   ├── graph.ps1                  # current-user Microsoft Graph SDK install/readback
+│   ├── stage_agents.sh            # synchronize agents after host verification
+│   ├── sync_agents.sh             # agent worker used by setup.sh
 │   ├── stage_macos_cli.sh         # macOS-only Node keg command exposure
 │   ├── stage_completions.sh       # macOS-only Homebrew link + generated completions
 │   ├── stage_dotfiles.sh          # converge ordinary config files into $HOME
@@ -818,7 +965,14 @@ workspace-setup/
 │       ├── kitty/platform-macos.conf  # → ~/.config/kitty/platform.conf on macOS
 │       ├── kitty/platform-linux.conf  # → ~/.config/kitty/platform.conf on Linux
 │       └── container/config.toml # stable build/registry defaults; no resource override
-├── tests/                          # convergence + clean-shell PATH regression tests
+├── tests/                          # common runner and host regression tests
+│   ├── agents/                    # agent reconciliation regressions
+│   ├── integration.sh             # isolated native agent CLI runner
+│   ├── integration/               # toolchain image and native integration checks
+│   ├── host-integration.sh        # real Linux packages in disposable Docker state
+│   ├── host-integration/          # fresh install, rerun, functional and failure cases
+│   ├── vm-integration.sh          # booted Ubuntu systemd/Docker/SSH qualification
+│   └── vm-integration/            # guest checks
 ├── system/                         # reviewed /etc files, installed by hand
 │   ├── profile.d/                  # undo STM32CubeCLT's PATH prepend
 │   ├── sysctl.d/                   # inotify watch/instance limits, templated on RAM
@@ -831,6 +985,26 @@ workspace-setup/
 
 ```bash
 bash tests/run.sh
+
+# Focused suites:
+bash tests/run.sh --only host
+bash tests/run.sh --only agents
+
+# Agent synchronization under Bash 3.2 and an Alpine userland:
+docker run --rm -v "$PWD":/repo:ro bash:3.2 sh -c \
+  'apk add --no-cache gawk >/dev/null; cp -R /repo /w && cd /w && bash tests/run.sh --only agents'
+
+# Real agent CLIs, temporary homes, and shipped manifests:
+bash tests/integration.sh
+bash tests/integration.sh --image workspace-setup-integration:latest
+
+# Real headless host provisioning, with no host credentials or Docker socket:
+bash tests/host-integration.sh
+bash tests/host-integration.sh --base ubuntu:22.04
+bash tests/host-integration.sh --base debian:13-slim
+
+# Real systemd, SSH and Docker Engine in a disposable Ubuntu VM:
+bash tests/vm-integration.sh
 ```
 
 `tests/run.sh` runs every test file, then names each one that failed and exits
@@ -842,3 +1016,55 @@ that starts the suite cannot change a result.
 
 The suite runs against temporary `HOME` directories and never touches the real one. It covers convergence decisions (install / no-op / legacy-link repair / known-version upgrade / merge / preserved conflict), the `~/.ssh/config` baseline merge and the opt-out and unparseable cases it must refuse, the exact Linux and macOS setup-stage routing contracts, Darwin-module isolation from Linux, host-role/session separation, Command Line Tools gating before Homebrew, generated-completion ownership/syntax/registration, the directory modes
 Linux apt sequencing/removal reporting, AppArmor attachment collisions, native-platform postflight, the host-local environment directory and every way a loader can be present in a file and still reach no shell, and the streamed `curl | bash` payload bootstrap.
+
+Agent tests cover convergence, source collections, native MCP target repair,
+enabled state, OpenCode V1/V2, Copilot, plugin scope and updates, pruning,
+directory aliases, store relocation, argument preservation, failure recovery,
+and streamed execution. They use stubs and require no network.
+
+The integration runner builds the Node major declared in `lib/manifest.sh` and
+checks agent synchronization with real CLIs. Reused images must match that major. Its source
+snapshot contains only the entry point, agent worker and libraries, manifests,
+baseline agent policies, README, and agent tests. A non-root container has read-only source and root
+filesystem, disposable scratch and home, and no host credentials or Docker
+socket. Downloads reach public skill and plugin sources; remote MCP discovery
+is blocked to avoid authentication prompts during registration. It does not
+qualify host provisioning, desktop behavior, or remote service authentication.
+
+Results under the system temporary directory include image identity, CLI
+versions, isolation settings, logs, and configuration snapshots. Checks cover
+dry runs, native readback, reruns, updates, damaged state, preservation of user
+additions, host policy preservation, pruning, aliases, and relocation. Cleanup removes the test container,
+home volume, and source snapshot; the toolchain image remains available for
+repeat runs. The integration job invokes the same
+`tests/run.sh --only agents` regression entry point used locally.
+
+The host container runner installs actual distribution packages and publisher
+artifacts as an ordinary user with sudo inside the container. It mounts only a
+read-only source snapshot. Docker Engine, desktop applications, and SSH key
+generation are explicitly excluded from this container profile. Checks cover
+fresh provisioning, reruns, login-shell commands, Word conversion, Graph SDK
+loading and repair, missing Rust compiler recovery, JSONC comment preservation, malformed configuration, retained dpkg
+configuration, download failure, checksum mismatch, and edited shell files.
+It also qualifies streamed host execution and combined host/agent setup with
+native CLIs, blocking remote MCP discovery during registration to prevent login
+prompts. The same `tests/run.sh` regression entry point runs inside the installed host.
+Logs, image identity, isolation settings, and the exact source archive remain
+under the printed temporary results directory; containers and images are removed.
+
+The VM runner requires x86_64 Linux KVM access, QEMU, `qemu-img`, `xorriso`, curl, and
+8 GiB of available memory. It verifies Ubuntu's published cloud-image checksum
+and uses a disposable 24 GiB virtual disk. The guest receives a read-only source
+snapshot, user-mode networking, no forwarded ports, and no host credentials.
+It qualifies real Docker Engine startup and container execution, device-group
+membership after a sudo login, the systemd user SSH agent, localhost SSH commands and forwarding, reruns, opt-in system updates, and the host
+functional scenarios. The guest powers off after its checks; disk images and
+source mounts are removed while the serial log and source archive remain.
+
+These Linux environments do not qualify macOS, arm64 binaries, desktop sessions,
+real remote authentication, firmware updates, or hardware-specific settings.
+Those require the corresponding native environment. JSONC parsing uses the
+Node runtime already installed by provisioning and the locked `jsonc-parser`
+dependency under `tools/jsonc`; npm installs it into disposable temporary state
+only when a configuration contains comments or trailing commas. Microsoft
+Graph authentication remains an explicit `Connect-MgGraph` operation.

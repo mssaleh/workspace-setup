@@ -24,6 +24,30 @@ CONFIG_LAST_ACTION=none
 # printing from inside it would land the detail above its own heading.
 CONFIG_MERGE_REASON=${CONFIG_MERGE_REASON:-}
 
+# JSONC edits use Microsoft's parser, preserving comments and trailing commas.
+config_jsonc() {
+  local tools_dir tmp status=0
+  tools_dir="$(dirname "${BASH_SOURCE[0]}")/../tools/jsonc"
+  tmp=$(mktemp -d "${TMPDIR:-/tmp}/setup-jsonc.XXXXXX") || return 1
+  cp "$tools_dir/package.json" "$tools_dir/package-lock.json" "$tmp/" || status=1
+  if ((status == 0)); then
+    npm ci --prefix "$tmp" --cache "$tmp/cache" --ignore-scripts --no-audit --no-fund >&2 || status=1
+  fi
+  if ((status == 0)); then
+    NODE_PATH="$tmp/node_modules" node "$tools_dir/config.cjs" "$@" || status=1
+  fi
+  rm -rf "$tmp"
+  return "$status"
+}
+
+config_json_read() {
+  if jq empty "$1" >/dev/null 2>&1; then
+    cat "$1"
+  else
+    config_jsonc read "$1"
+  fi
+}
+
 config_sha256() {
   if command -v shasum >/dev/null 2>&1; then
     shasum -a 256 "$1" | awk '{print $1}'

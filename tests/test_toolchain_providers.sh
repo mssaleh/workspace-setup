@@ -17,6 +17,15 @@ fake_command() {
   chmod +x "$path"
 }
 fake_command "$HOME/.cargo/bin/rustup"
+touch "$TEST_TMP/rust-toolchain"
+cat > "$HOME/.cargo/bin/rustup" <<EOF
+#!/bin/sh
+case "\$1 \$2" in
+  'which rustc') test -f "$TEST_TMP/rust-toolchain" ;;
+  'default stable') touch "$TEST_TMP/rust-toolchain" ;;
+  *) printf 'rustup 1.0.0\\n' ;;
+esac
+EOF
 fake_command "$HOME/.local/bin/uv"
 fake_command "$HOME/.local/bin/uvx"
 fake_command "$HOME/.local/bin/claude"
@@ -49,6 +58,7 @@ chmod +x "$HOME/.local/bin/uv"
 # Publisher-installed artifacts stay fixed and nothing reaches the network; the
 # published uv release is supplied directly.
 upstream_artifact_needed() { return 1; }
+install_graph_powershell() { return 0; }
 STUB_UV_RELEASE=0.1.0
 upstream_latest_version() { printf '%s\n' "$STUB_UV_RELEASE"; }
 
@@ -61,5 +71,9 @@ stage_toolchains
 STUB_UV_RELEASE=0.2.0
 stage_toolchains >/dev/null
 [[ -e "$TEST_TMP/uv-self-update" ]] || { printf 'FAIL: a uv behind its release was not updated\n' >&2; exit 1; }
+
+rm "$TEST_TMP/rust-toolchain"
+stage_toolchains >/dev/null
+[[ -f "$TEST_TMP/rust-toolchain" ]] || { printf 'FAIL: rustup without a compiler was not repaired\n' >&2; exit 1; }
 
 printf 'toolchain provider tests: ok\n'

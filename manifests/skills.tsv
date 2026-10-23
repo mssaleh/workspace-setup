@@ -1,0 +1,28 @@
+# manifests/skills.tsv — the global skill store, one row per source repository.
+#
+# source	skills	mode
+#
+#   source  A spec `skills add` accepts: owner/repo, or owner/repo/path/to/skill.
+#   skills  Comma-separated skill names, or * to follow a source collection.
+#   mode    select — install the named skills.
+#           whole  — install every skill the source exposes, including new ones
+#                    on --update. Source paths can limit discovery to a subfolder.
+#
+# Additional installed skills are preserved unless --prune-skills is requested.
+#
+# Skill names are the `name:` in each SKILL.md, which is what `--skill` matches.
+# They are not always the repo's directory name (react-best-practices installs as
+# vercel-react-best-practices), so take them from `skills add <source> -l`.
+
+vercel-labs/agent-skills	*	whole
+vercel-labs/skills	*	whole
+vercel/next.js	*	whole
+shadcn/ui	*	whole
+pydantic/skills	*	whole
+run-llama/llamaparse-agent-skills	*	whole
+CopilotKit/CopilotKit	*	whole
+temporalio/skill-temporal-developer	*	whole
+qdrant/skills/meta/qdrant-advisor	*	whole
+livekit/agent-skills	*	whole
+typesafe-ai/skills	*	whole
+assistant-ui/skills	*	whole

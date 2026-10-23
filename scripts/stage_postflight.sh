@@ -2,6 +2,9 @@
 # scripts/stage_postflight.sh — one cross-stage verification pass.
 # shellcheck disable=SC2153 # NODE_MAJOR and friends come from lib/manifest.sh
 
+# shellcheck source=lib/agents/paths.sh
+. "$(dirname "${BASH_SOURCE[0]}")/../lib/agents/paths.sh"
+
 POSTFLIGHT_PASSES=0
 POSTFLIGHT_FAILURES=0
 
@@ -64,16 +67,18 @@ postflight_nodejs_is_nodesource_only() {
 
 # postflight_parity_command <name> <expected artifact path>
 # The command resolves, and it resolves to the upstream artifact this setup
-# installs rather than to a same-named different program. Comparing the
-# resolved path rather than a version string keeps this true across upstream
-# releases: the question is which file answers to the name, not what it prints.
+# installs rather than a same-named program: check both path and publisher.
 postflight_parity_command() {
   local name="$1" expected="$2" resolved
   resolved=$(command -v "$name" 2>/dev/null || true)
   if [[ -z "$resolved" ]]; then
     postflight_fail "$name is not on PATH"
   elif [[ -e "$expected" && "$resolved" -ef "$expected" ]]; then
-    postflight_pass "$name resolves to the upstream artifact macOS also gets"
+    if upstream_binary_identifies "$name" "$expected"; then
+      postflight_pass "$name resolves to the upstream artifact macOS also gets"
+    else
+      postflight_fail "$name at $expected does not identify itself as the declared publisher's tool"
+    fi
   else
     postflight_fail "$name resolves to ${resolved}, not the upstream artifact at $expected"
   fi
@@ -188,9 +193,19 @@ postflight_legacy_tmux() {
     else
       postflight_pass "legacy tmux package is absent"
     fi
-  elif dpkg --get-selections tmux 2>/dev/null \
-      | awk '$2 == "install" { found = 1 } END { exit !found }'; then
-    postflight_fail "legacy tmux package is still installed"
+  elif apt_package_installed tmux; then
+    if dpkg --get-selections tmux 2>/dev/null | awk '$2 == "hold" { found = 1 } END { exit !found }'; then
+      postflight_pass "tmux is retained by an explicit package hold"
+      return
+    fi
+    local removals
+    if ! removals=$(apt_simulated_removals remove tmux); then
+      postflight_fail "could not inspect the retained tmux package's dependencies"
+    elif [[ -n "$removals" && "$removals" != tmux ]]; then
+      postflight_pass "tmux is retained to preserve its reverse dependencies"
+    else
+      postflight_fail "legacy tmux package is still installed"
+    fi
   else
     postflight_pass "legacy tmux package is absent"
   fi
@@ -233,6 +248,10 @@ postflight_desktop_ssh_agent() {
 }
 
 postflight_configs() {
+  local claude_home codex_home opencode_config opencode_json
+  claude_home=$(claude_config_home)
+  codex_home=$(agent_home codex)
+  opencode_config=$(opencode_config_path opencode.jsonc)
   local files=(
     "$HOME/.bashrc"
     "$HOME/.bash_profile"
@@ -252,12 +271,12 @@ postflight_configs() {
     "$HOME/.config/yazi/yazi.toml"
     "$HOME/.config/yazi/keymap.toml"
     "$HOME/.config/gh/config.yml"
-    "$HOME/.config/opencode/opencode.jsonc"
+    "$opencode_config"
     "$HOME/.config/direnv/direnvrc"
     "$HOME/.config/shell/README"
     "$HOME/.config/uv/uv.toml"
-    "$HOME/.claude/settings.json"
-    "$HOME/.codex/rules/default.rules"
+    "$claude_home/settings.json"
+    "$codex_home/rules/default.rules"
     "$HOME/.local/share/bash-completion/completions/himalaya"
   )
   if [[ "$OS_KIND" == macos ]]; then
@@ -289,8 +308,8 @@ postflight_configs() {
   else
     postflight_fail "$HOME/.gitconfig does not parse"
   fi
-  if jq empty "$HOME/.claude/settings.json" >/dev/null 2>&1 \
-      && jq empty "$HOME/.config/opencode/opencode.jsonc" >/dev/null 2>&1; then
+  if opencode_json=$(config_json_read "$opencode_config") \
+      && jq empty "$claude_home/settings.json" >/dev/null 2>&1; then
     postflight_pass "agent JSON configuration parses"
   else
     postflight_fail "one or more agent JSON configs do not parse"
@@ -298,13 +317,13 @@ postflight_configs() {
   if jq -e '
       (.permissions.deny | index("Bash(brew install *)")) != null and
       (.permissions.deny | index("Bash(apt-get install *)")) != null
-    ' "$HOME/.claude/settings.json" >/dev/null 2>&1 \
+    ' "$claude_home/settings.json" >/dev/null 2>&1 \
       && jq -e '
         .permission.bash["brew install *"] == "deny" and
         .permission.bash["apt-get install *"] == "deny"
-      ' "$HOME/.config/opencode/opencode.jsonc" >/dev/null 2>&1 \
-      && grep -Fq 'pattern = ["brew", "install"]' "$HOME/.codex/rules/default.rules" \
-      && grep -Fq 'pattern = ["apt-get", "install"]' "$HOME/.codex/rules/default.rules"; then
+      ' <<< "$opencode_json" >/dev/null 2>&1 \
+      && grep -Fq 'pattern = ["brew", "install"]' "$codex_home/rules/default.rules" \
+      && grep -Fq 'pattern = ["apt-get", "install"]' "$codex_home/rules/default.rules"; then
     postflight_pass "agent package-mutation guardrails are present"
   else
     postflight_fail "one or more agent package-mutation guardrails are missing"
@@ -413,7 +432,7 @@ postflight_agent_skills() {
   [[ "$OS_KIND" == macos && -z "${SKIP_CONTAINER:-}" ]] || return 0
 
   local bad=() agent_home skill_md skill_script
-  for agent_home in "$HOME/.claude" "$HOME/.codex"; do
+  for agent_home in "$(agent_home claude-code)" "$(agent_home codex)"; do
     skill_md="$agent_home/skills/apple-container-amd64/SKILL.md"
     skill_script="$agent_home/skills/apple-container-amd64/scripts/optimize-builder.sh"
     if [[ ! -f "$skill_md" ]] || ! grep -Fq 'name: apple-container-amd64' "$skill_md"; then
@@ -824,10 +843,11 @@ postflight_vendor_toolchain_paths() {
 }
 
 postflight_upstream_tools() {
-  if [[ -x "$HOME/.cargo/bin/rustup" && -f "$HOME/.cargo/env" ]]; then
-    postflight_pass "rustup upstream artifact and environment file exist"
+  if [[ -x "$HOME/.cargo/bin/rustup" && -f "$HOME/.cargo/env" ]] \
+      && "$HOME/.cargo/bin/rustup" which rustc >/dev/null 2>&1; then
+    postflight_pass "rustup upstream artifact, environment, and active compiler exist"
   else
-    postflight_fail "missing ~/.cargo/bin/rustup"
+    postflight_fail "rustup or its active compiler is unavailable"
   fi
   if [[ -x "$HOME/.local/bin/uv" && -x "$HOME/.local/bin/uvx" \
         && -f "$HOME/.config/uv/uv-receipt.json" ]]; then
@@ -844,6 +864,11 @@ postflight_upstream_tools() {
     postflight_pass "Codex native artifact exists"
   else
     postflight_fail "missing native Codex CLI at ~/.local/bin/codex"
+  fi
+  if pwsh -NoLogo -NoProfile -NonInteractive -File "$(repo_dir)/scripts/graph.ps1" -VerifyOnly; then
+    postflight_pass "Microsoft Graph PowerShell SDK loads without authentication"
+  else
+    postflight_fail "Microsoft Graph PowerShell SDK is unavailable or incomplete"
   fi
   if [[ "$OS_KIND" == linux ]]; then
     local linux_upstream_missing=() artifact name probe entry unrunnable=""
@@ -866,24 +891,28 @@ postflight_upstream_tools() {
     done
     if ((${#linux_upstream_missing[@]})); then
       postflight_fail "missing Linux upstream toolbox artifacts: ${linux_upstream_missing[*]}"
-    elif [[ -n "$unrunnable" ]]; then
+    fi
+    if [[ -n "$unrunnable" ]]; then
       postflight_fail "Linux upstream toolbox artifacts that do not run on this host:$unrunnable"
       postflight_note "  remove them and re-run setup to install a build this host can run"
-    else
+    elif ((${#linux_upstream_missing[@]} == 0)); then
       postflight_pass "Linux upstream toolbox artifacts exist at their declared paths and run"
     fi
 
-    local repo_tool_missing=() repo_tool
+    local repo_tool_missing=() repo_tool repo_uri
     for repo_tool in kubectl helm; do
-      if ! dpkg -s "$repo_tool" >/dev/null 2>&1 \
-          || ! command -v "$repo_tool" >/dev/null 2>&1; then
+      case "$repo_tool" in
+        kubectl) repo_uri=$KUBERNETES_APT_URI ;;
+        helm) repo_uri=$HELM_APT_URI ;;
+      esac
+      if [[ "$(vendor_command_state "$repo_tool" "$repo_tool" "$repo_uri")" != managed ]]; then
         repo_tool_missing+=("$repo_tool")
       fi
     done
     if ((${#repo_tool_missing[@]} == 0)); then
       postflight_pass "official kubectl and helm apt packages are usable"
     else
-      postflight_fail "missing official-repository tools: ${repo_tool_missing[*]}"
+      postflight_fail "missing or unrecognized official-repository tools: ${repo_tool_missing[*]}"
     fi
 
     # Node.js must be the NodeSource build of the declared major, not whatever
@@ -928,7 +957,7 @@ postflight_upstream_tools() {
     # that calls /usr/bin/yq by absolute path gets the other program.
     local shadowed=() shadowed_pkg
     for shadowed_pkg in yq cosign; do
-      if dpkg -s "$shadowed_pkg" >/dev/null 2>&1; then
+      if apt_package_installed "$shadowed_pkg"; then
         shadowed+=("$shadowed_pkg")
       fi
     done
@@ -952,7 +981,7 @@ postflight_upstream_tools() {
     # only a failure when this host was expected to install it.
     if [[ -n "${SKIP_CODEX_APP:-}" ]]; then
       :
-    elif dpkg -s "$CODEX_APP_PACKAGE" >/dev/null 2>&1; then
+    elif apt_package_installed "$CODEX_APP_PACKAGE"; then
       postflight_pass "Codex app official apt package is installed"
     else
       case "$(dpkg --print-architecture 2>/dev/null || true)" in
@@ -973,7 +1002,7 @@ postflight_upstream_tools() {
     # absence is only a failure when this host was expected to install it.
     if [[ -n "${SKIP_CLAUDE_DESKTOP:-}" ]]; then
       :
-    elif dpkg -s claude-desktop >/dev/null 2>&1; then
+    elif apt_package_installed claude-desktop; then
       postflight_pass "Claude Desktop official apt package is installed"
     else
       case "$(dpkg --print-architecture 2>/dev/null || true)" in
@@ -1099,10 +1128,13 @@ postflight_headless_credentials() {
   # Claude Code prefers its file store when present and falls back to the
   # Keychain otherwise. A login performed at the desk writes only the Keychain.
   if [[ -x "$HOME/.local/bin/claude" ]]; then
-    if [[ -s "$HOME/.claude/.credentials.json" ]]; then
+    local credentials_file credentials_argument
+    credentials_file="$(claude_config_home)/.credentials.json"
+    if [[ -s "$credentials_file" ]]; then
       postflight_pass "Claude Code credentials are in its file store"
     else
-      postflight_fail "Claude Code credentials are Keychain-only — unusable over ssh; from a desktop terminal run: security find-generic-password -a \"\$USER\" -s 'Claude Code-credentials' -w > ~/.claude/.credentials.json && chmod 600 ~/.claude/.credentials.json"
+      printf -v credentials_argument '%q' "$credentials_file"
+      postflight_fail "Claude Code credentials are Keychain-only — unusable over ssh; from a desktop terminal run: security find-generic-password -a \"\$USER\" -s 'Claude Code-credentials' -w > $credentials_argument && chmod 600 $credentials_argument"
     fi
   fi
 }

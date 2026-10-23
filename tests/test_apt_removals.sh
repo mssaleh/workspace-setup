@@ -74,10 +74,7 @@ remove_legacy_tmux >/dev/null
 legacy_installed=1
 removal_target=other-package
 reset_calls
-if remove_legacy_tmux >/dev/null 2>&1; then
-  printf 'tmux migration removed a dependent package\n' >&2
-  exit 1
-fi
+remove_legacy_tmux >/dev/null 2>&1
 [[ "$(cat "$CALLS")" != *"remove -y tmux"* ]]
 unset removal_target
 legacy_sessions=1
@@ -137,6 +134,13 @@ reset_calls
 report=$(apt_report_removals remove 'unused note' containerd 2>&1)
 [[ -z "$report" ]]
 
+sudo() { printf 'E: simulated resolver failure\n' >&2; return 100; }
+if apt_report_removals install '' broken > "$TEST_TMP/simulation.log" 2>&1; then
+  printf 'FAIL: failed apt simulation was reported as an empty successful transaction\n' >&2
+  exit 1
+fi
+grep -q 'simulated resolver failure' "$TEST_TMP/simulation.log"
+
 # ── the Docker pre-clean ───────────────────────────────────────────────────
 sudo() {
   printf '%s\n' "$*" >> "$CALLS"
@@ -185,7 +189,7 @@ sudo_exit=0
 # stage reports the problem and runs no apt transaction.
 (
   OS_KIND=linux DISTRO=ubuntu USER=test
-  dpkg() { [[ "$1" == -s ]]; }
+  dpkg-query() { printf installed; }
   # shellcheck disable=SC2032 # stage_docker calls it directly; sudo is stubbed too
   systemctl() { return 0; }
   id() { printf 'docker\n'; }
@@ -199,7 +203,7 @@ sudo_exit=0
 )
 (
   OS_KIND=linux DISTRO=ubuntu USER=test
-  dpkg() { [[ "$1" == -s ]]; }
+  dpkg-query() { printf installed; }
   docker() { return 1; }
   # shellcheck disable=SC2032 # stage_docker calls it directly; sudo is stubbed too
   systemctl() { return 0; }

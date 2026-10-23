@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # scripts/stage_toolchains.sh — install rustup + uv + coding-agent CLIs,
-# the uv-managed Python applications, and the Microsoft Graph CLI.
+# the uv-managed Python applications, and Microsoft Graph PowerShell.
 # These are deliberately owned by their upstream installers, not inferred from
 # whichever same-named executable happens to be on PATH.
 
@@ -10,7 +10,12 @@ stage_toolchains() {
 
   # --- rustup ---
   if [[ -x "$HOME/.cargo/bin/rustup" && -f "$HOME/.cargo/env" ]]; then
-    ok "rustup upstream install already present"
+    if "$HOME/.cargo/bin/rustup" which rustc >/dev/null 2>&1; then
+      ok "rustup upstream install and active compiler already present"
+    else
+      info "rustup is present without an active compiler; installing stable…"
+      "$HOME/.cargo/bin/rustup" default stable || return 1
+    fi
   else
     info "installing rustup…"
     # --no-modify-path matches the uv and opencode installers above/below: the
@@ -47,6 +52,7 @@ stage_toolchains() {
         ok "uv $(upstream_installed_version "$HOME/.local/bin/uv" --version) → ~/.local/bin/uv"
       else
         warn "uv self update failed; still on $uv_installed"
+        return 1
       fi
     fi
   else
@@ -72,47 +78,20 @@ stage_toolchains() {
   local uv_tools=("${UV_TOOLS_COMMON[@]}")
   [[ "$OS_KIND" == linux ]] && uv_tools+=("${UV_TOOLS_LINUX[@]}")
 
-  local tool
+  local tool tool_name
   for tool in "${uv_tools[@]}"; do
-    if grep -x "$tool" >/dev/null <<<"$uv_installed"; then
+    tool_name=${tool%%\[*}
+    if [[ "$tool" == "$tool_name" ]] && grep -Fx "$tool_name" >/dev/null <<<"$uv_installed"; then
       ok "$tool already installed by uv"
     else
       info "installing $tool (uv tool)…"
       "$HOME/.local/bin/uv" tool install "$tool" \
-        || warn "uv tool install $tool failed"
+        || { warn "uv tool install $tool failed"; return 1; }
     fi
   done
 
-  # --- Microsoft Graph CLI (mgc) — GitHub release tarball ---
-  # Linux only: the publisher ships osx-x64 too, but a Mac gets this from
-  # Homebrew. The release tag carries a leading v that the asset name does not,
-  # so the version is taken from the tag and the v stripped for the filename.
-  # The archive holds the binary and its .pdb debug symbols; only the binary is
-  # extracted, so nothing but an executable lands on PATH.
-  if [[ "$OS_KIND" == linux ]] && [[ "$(uname -m)" == x86_64 ]]; then
-    local mgc_bin="$HOME/.local/bin/mgc"
-    if upstream_artifact_needed mgc "$mgc_bin" "$mgc_bin" --version; then
-      local mgc_tag mgc_ver mgc_tmp
-      # upstream_latest_version strips the leading v, so it yields the version
-      # the asset filename uses; the release path needs the tag it came from.
-      mgc_ver=$(upstream_latest_version microsoftgraph/msgraph-cli 2>/dev/null || true)
-      mgc_tag="v${mgc_ver}"
-      if [[ -z "$mgc_ver" ]]; then
-        warn "could not determine the published msgraph-cli version"
-      else
-        mgc_tmp=$(mktemp -d)
-        if curl -fsSL -o "$mgc_tmp/mgc.tar.gz" \
-             "https://github.com/microsoftgraph/msgraph-cli/releases/download/${mgc_tag}/msgraph-cli-linux-x64-${mgc_ver}.tar.gz" \
-           && tar -xzf "$mgc_tmp/mgc.tar.gz" -C "$mgc_tmp" mgc; then
-          install -m 0755 "$mgc_tmp/mgc" "$mgc_bin"
-          ok "mgc installed → $mgc_bin ($("$mgc_bin" --version 2>/dev/null || echo "$mgc_ver"))"
-        else
-          warn "msgraph-cli ${mgc_ver} download or extraction failed"
-        fi
-        rm -rf "$mgc_tmp"
-      fi
-    fi
-  fi
+  # --- PowerShell and Microsoft Graph SDK ---
+  install_graph_powershell || return 1
 
   # --- Git Credential Manager — GitHub release tarball ---
   # Linux only; a Mac gets its keychain helper from git itself. The archive is a
@@ -230,4 +209,56 @@ stage_toolchains() {
       info "linked $opencode_link → $opencode_bin"
     fi
   fi
+}
+
+# Microsoft documents the universal DEB for hosts without a matching PMC feed:
+# https://learn.microsoft.com/powershell/scripting/install/install-ubuntu
+install_graph_powershell() {
+  if ! command -v pwsh >/dev/null 2>&1; then
+    if [[ "$OS_KIND" == macos ]]; then
+      "$BREW_BIN" install --cask "${TOOLCHAIN_BREW_CASKS[@]}" || return 1
+    else
+      local tag version arch asset checksum tmp status=0
+      tag=$(upstream_latest_tag PowerShell/PowerShell) || return 1
+      version=${tag#v}
+      arch=$(dpkg --print-architecture)
+      tmp=$(mktemp -d) || return 1
+      case "$arch" in
+        amd64) asset="powershell_${version}-1.deb_amd64.deb" ;;
+        arm64) asset="powershell-${version}-linux-arm64.tar.gz" ;;
+        *) warn "PowerShell is unsupported on $arch"; rm -rf "$tmp"; return 1 ;;
+      esac
+      if [[ "$arch" == arm64 && ( -e "$HOME/.local/share/powershell" || -L "$HOME/.local/share/powershell" ) ]]; then
+        warn "preserving existing PowerShell directory without a usable pwsh command"
+        rm -rf "$tmp"
+        return 1
+      fi
+      checksum=$(curl -fsSL "https://github.com/PowerShell/PowerShell/releases/download/$tag/hashes.sha256" \
+        | iconv -f UTF-16 -t UTF-8 \
+        | awk -v asset="$asset" '{ sub(/^\*/, "", $2); sub(/\r$/, "", $2) } $2 == asset { print tolower($1) }') || status=1
+      if ((status == 0)) && install_verified_binary pwsh \
+          "https://github.com/PowerShell/PowerShell/releases/download/$tag/$asset" \
+          "$checksum" "$tmp/$asset"; then
+        if [[ "$arch" == amd64 ]]; then
+          apt_install_packages "$tmp/$asset" || status=1
+        else
+          apt_install_packages libicu-dev libssl-dev libunwind8 || status=1
+          if ((status == 0)); then
+            mkdir -p "$tmp/extracted" "$HOME/.local/share"
+            tar -xzf "$tmp/$asset" -C "$tmp/extracted" || status=1
+            chmod +x "$tmp/extracted/pwsh" || status=1
+            if ((status == 0)); then
+              mv "$tmp/extracted" "$HOME/.local/share/powershell" || status=1
+              ln -s "$HOME/.local/share/powershell/pwsh" "$HOME/.local/bin/pwsh" || status=1
+            fi
+          fi
+        fi
+      else
+        status=1
+      fi
+      rm -rf "$tmp"
+      ((status == 0)) || return 1
+    fi
+  fi
+  pwsh -NoLogo -NoProfile -NonInteractive -File "$(repo_dir)/scripts/graph.ps1"
 }

@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -euo pipefail
+mkdir -p "$HOME/results"
+exec > >(tee "$HOME/results/check.log") 2>&1
+export HOST_PROFILE=headless SKIP_DOCKER=1
+export GIT_NAME='Container QA' GIT_EMAIL=qa@example.invalid
+
+cat /etc/os-release
+id
+printf '\n== Fresh headless host, real packages and upstream installers ==\n'
+bash /repo/setup.sh host
+
+printf '\n== Functional and failure scenarios ==\n'
+bash /repo/tests/host-integration/scenarios.sh
+
+printf '\n== Repeated host run ==\n'
+bash /repo/setup.sh host
+
+printf '\n== Streamed host entry point and payload cleanup ==\n'
+tar -czf "$HOME/payload.tar.gz" --transform='s,^,workspace-setup/,' -C /repo .
+mkdir "$HOME/stream-tmp"
+TMPDIR="$HOME/stream-tmp" REPO_ARCHIVE_URL="file://$HOME/payload.tar.gz" \
+  bash -s -- host < /repo/setup.sh
+# GCM keeps a native System.CommandLine cache in TMPDIR; setup owns its payload.
+find "$HOME/stream-tmp" -mindepth 1 -maxdepth 2 -print > "$HOME/results/stream-scratch.txt"
+[[ -z "$(find "$HOME/stream-tmp" -mindepth 1 -maxdepth 1 -name 'workspace-setup.*' -print)" ]]
+rm "$HOME/payload.tar.gz"
+
+printf '\n== Combined host and agent setup with native CLIs ==\n'
+HTTPS_PROXY=http://127.0.0.1:1 HTTP_PROXY=http://127.0.0.1:1 ALL_PROXY=http://127.0.0.1:1 \
+  NO_PROXY=localhost,127.0.0.1,::1,github.com,.github.com,.githubusercontent.com,registry.npmjs.org,skills.sh,.skills.sh,models.dev,.models.dev,pypi.org,.pypi.org,files.pythonhosted.org \
+  bash /repo/setup.sh
+
+printf '\n== Installed commands in a fresh login shell ==\n'
+bash -lic 'command -v uv rustup claude codex opencode fd bat 7zz; uv --version; rustc --version; claude --version; codex --version; opencode --version'
+
+printf '\n== Full unit suite on the installed distribution ==\n'
+bash /repo/tests/run.sh

@@ -71,6 +71,9 @@ for relative in "${sourced[@]}"; do
   esac
 done
 
+mkdir -p "$fixture/lib/agents"
+cp "$TEST_ROOT/lib/agents/log.sh" "$TEST_ROOT/lib/agents/manifest.sh" "$fixture/lib/agents/"
+cp -R "$TEST_ROOT/manifests" "$fixture/"
 tar -czf "$TEST_TMP/payload.tar.gz" -C "$TEST_TMP/fixture" workspace-setup-main
 
 # The one-liner is normally written with curl, but curl is not a given: on

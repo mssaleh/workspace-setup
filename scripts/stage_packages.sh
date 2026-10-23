@@ -75,7 +75,7 @@ install_verified_binary() {
 # {version} in <asset> and <member> stands for the release without a leading v.
 install_upstream_archive_tool() {
   local label="$1" asset_pattern="$2" member_pattern="$3" dst="$HOME/.local/bin/$1"
-  local repo tag version asset member tmp probe=--version
+  local repo tag version asset member tmp probe=--version status=0
   [[ "$label" == zmx ]] && probe=version
   upstream_artifact_needed "$label" "$dst" "$dst" "$probe" || return 0
   if [[ "$label" == zmx && -x "$dst" && -n "$("$dst" list --short 2>/dev/null)" ]]; then
@@ -97,8 +97,10 @@ install_upstream_archive_tool() {
     ok "$label $version → ~/.local/bin/$label"
   else
     warn "$label download or installation failed (skipped)"
+    status=1
   fi
   rm -rf "$tmp"
+  return "$status"
 }
 
 remove_legacy_tmux() {
@@ -118,19 +120,19 @@ remove_legacy_tmux() {
       return 1
     fi
     local removals
-    removals=$(sudo "${APT_ENV[@]}" "$PKGMGR" remove -s -y tmux 2>/dev/null \
-      | awk '/^(Remv|Purg) / { print $2 }') || return 1
-    [[ "$removals" == tmux ]] || { warn "tmux removal would affect other packages: $removals"; return 1; }
+    removals=$(apt_simulated_removals remove tmux) || return 1
+    if [[ -n "$removals" && "$removals" != tmux ]]; then
+      warn "preserving tmux because its removal would affect other packages: $removals"
+      return 0
+    fi
+    [[ "$removals" == tmux ]] || { warn "could not confirm the tmux removal transaction"; return 1; }
     sudo "${APT_ENV[@]}" "$PKGMGR" remove -y tmux || return 1
   fi
   ok "removed the legacy tmux package"
 }
 
 # install_or_upgrade_verified_binary <label> <url> <expected sha256> <dest>
-# Installs the artifact when it is missing and replaces it when the published
-# checksum says the one on disk is a different release. A checksum that could
-# not be fetched leaves an existing artifact exactly where it is: not knowing
-# what upstream publishes is never a reason to disturb a working tool.
+# Replace only an identified older release; retain foreign or newer binaries.
 install_or_upgrade_verified_binary() {
   local label="$1" url="$2" want="$3" dst="$4"
 
@@ -143,7 +145,13 @@ install_or_upgrade_verified_binary() {
     return 0
   fi
   if [[ -x "$dst" ]]; then
-    info "$label differs from the published release — upgrading…"
+    if ! upstream_binary_identifies "$label" "$dst"; then
+      warn "preserving an unrecognized $label executable at $dst"
+      return 0
+    fi
+    local probe=--version
+    [[ "$label" == cosign ]] && probe=version
+    upstream_artifact_needed "$label" "$dst" "$dst" "$probe" || return 0
     install_verified_binary "$label" "$url" "$want" "$dst" upgrade \
       && ok "$label upgraded → $dst"
     return
@@ -250,14 +258,14 @@ register_third_party_apt_repos() {
   # Downloading and verifying a key needs these; ask for them once rather than
   # ahead of every archive below.
   sudo "${APT_ENV[@]}" "$PKGMGR" install -y \
-    curl gnupg ca-certificates apt-transport-https >/dev/null 2>&1 || true
+    curl gnupg ca-certificates apt-transport-https || return 1
 
   # --- git — ppa:git-core/ppa, the PPA git-scm.com names for Ubuntu. ---
   # Launchpad PPAs are Ubuntu-only; Debian keeps the distribution package.
   if [[ "$DISTRO" == ubuntu ]] \
      && ! find /etc/apt/sources.list.d -name 'git-core-ubuntu-ppa*' 2>/dev/null | grep -q .; then
     info "adding the Git maintainers' PPA (ppa:git-core/ppa)…"
-    sudo "${APT_ENV[@]}" "$PKGMGR" install -y software-properties-common >/dev/null 2>&1 || true
+    sudo "${APT_ENV[@]}" "$PKGMGR" install -y software-properties-common || return 1
     if sudo "${APT_ENV[@]}" add-apt-repository -y --no-update ppa:git-core/ppa >/dev/null 2>&1; then
       changed=1
     else
@@ -270,7 +278,7 @@ register_third_party_apt_repos() {
      && ! libreoffice_installed \
      && ! find /etc/apt/sources.list.d -name 'libreoffice-ubuntu-ppa*' 2>/dev/null | grep -q .; then
     info "adding the LibreOffice PPA (ppa:libreoffice/ppa)…"
-    sudo "${APT_ENV[@]}" "$PKGMGR" install -y software-properties-common >/dev/null 2>&1 || true
+    sudo "${APT_ENV[@]}" "$PKGMGR" install -y software-properties-common || return 1
     if sudo "${APT_ENV[@]}" add-apt-repository -y --no-update ppa:libreoffice/ppa >/dev/null 2>&1; then
       changed=1
     else
@@ -290,7 +298,7 @@ register_third_party_apt_repos() {
   fi
 
   # --- kubectl — the Kubernetes project's archive (pkgs.k8s.io). ---
-  if [[ "$(vendor_command_state kubectl kubectl)" == wanted ]] \
+  if [[ "$(vendor_command_state kubectl kubectl "$KUBERNETES_APT_URI")" == wanted ]] \
      && apt_trust_repo_key kubectl "$KUBERNETES_KEY_URL" \
         "$KUBERNETES_KEYRING" "$KUBERNETES_KEY_FINGERPRINT"; then
     if [[ -n $(apt_write_sources /etc/apt/sources.list.d/kubernetes.list \
@@ -301,7 +309,7 @@ register_third_party_apt_repos() {
   fi
 
   # --- helm — helm.sh's current official archive (packages.buildkite.com). ---
-  if [[ "$(vendor_command_state helm helm)" == wanted ]] \
+  if [[ "$(vendor_command_state helm helm "$HELM_APT_URI")" == wanted ]] \
      && apt_trust_repo_key helm "$HELM_KEY_URL" \
         "$HELM_KEYRING" "$HELM_KEY_FINGERPRINT"; then
     if [[ -n $(apt_write_sources /etc/apt/sources.list.d/helm-stable-debian.list \
@@ -322,7 +330,7 @@ register_third_party_apt_repos() {
         changed=1
       fi
     fi
-  elif [[ -z "${SKIP_CLAUDE_DESKTOP:-}" ]] && ! dpkg -s claude-desktop >/dev/null 2>&1; then
+  elif [[ -z "${SKIP_CLAUDE_DESKTOP:-}" ]] && ! apt_package_installed claude-desktop; then
     warn "Claude Desktop: no packages published for architecture '$arch' — skipping"
   fi
 
@@ -350,7 +358,7 @@ register_third_party_apt_repos() {
     # alongside it: pinning the distribution build out while no NodeSource
     # archive is configured would leave the host with no installable Node at
     # all. It is written first so the two can never be out of step.
-    install_nodesource_pin || true
+    install_nodesource_pin || return 1
     if [[ -n $(apt_write_sources "$NODESOURCE_SOURCES" \
         "$(printf 'Types: deb\nURIs: %s\nSuites: nodistro\nComponents: main\nArchitectures: %s\nSigned-By: %s\n' \
           "$NODESOURCE_APT_URI" "$arch" "$NODESOURCE_KEYRING")") ]]; then
@@ -364,7 +372,7 @@ register_third_party_apt_repos() {
   # it publishes for this release rather than assuming from the codename.
   local kitware_registered=''
   if [[ "$DISTRO" == ubuntu && -n "$codename" ]]; then
-    if dpkg -s kitware-archive-keyring >/dev/null 2>&1 \
+    if apt_package_installed kitware-archive-keyring \
        && [[ -f /etc/apt/sources.list.d/kitware.list ]]; then
       kitware_registered=1  # its own keyring package owns the key and rotation
     elif ! curl -fsI "${KITWARE_APT_URI}dists/${codename}/Release" >/dev/null 2>&1; then
@@ -383,7 +391,7 @@ register_third_party_apt_repos() {
 
   # One index refresh for every archive above, rather than one per archive.
   if [[ -n "$changed" ]]; then
-    sudo "${APT_ENV[@]}" "$PKGMGR" update >/dev/null 2>&1 \
+    sudo "${APT_ENV[@]}" "$PKGMGR" update \
       || warn "apt update failed after adding vendor repositories (installs may use a stale index)"
   fi
 
@@ -394,11 +402,11 @@ register_third_party_apt_repos() {
   # removing the verified key and then failing to replace it would leave the
   # repository untrusted.
   if [[ -n "$kitware_registered" ]] \
-     && ! dpkg -s kitware-archive-keyring >/dev/null 2>&1 \
+     && ! apt_package_installed kitware-archive-keyring \
      && [[ -n "$(apt-cache policy kitware-archive-keyring 2>/dev/null \
           | awk '/Candidate:/ && $2 != "(none)" {print $2}')" ]]; then
     sudo rm -f "$KITWARE_KEYRING"
-    if ! sudo "${APT_ENV[@]}" "$PKGMGR" install -y kitware-archive-keyring >/dev/null 2>&1; then
+    if ! sudo "${APT_ENV[@]}" "$PKGMGR" install -y kitware-archive-keyring; then
       warn "kitware-archive-keyring did not install — restoring the pinned key"
       apt_trust_repo_key CMake "$KITWARE_KEY_URL" \
         "$KITWARE_KEYRING" "$KITWARE_KEY_FINGERPRINT" \
@@ -461,7 +469,7 @@ install_nodesource_package() {
 # archive that is meant to supply it.
 install_vendor_package() {
   local pkg="$1" cmd="$2" uri="$3" docs="$4"
-  case "$(vendor_command_state "$pkg" "$cmd")" in
+  case "$(vendor_command_state "$pkg" "$cmd" "$uri")" in
     managed)
       ok "$pkg official apt package already installed"
       ;;
@@ -521,7 +529,7 @@ install_codex_app() {
     return 1
   fi
   if apt_install_packages "$deb"; then
-    sudo "${APT_ENV[@]}" "$PKGMGR" update >/dev/null 2>&1 || true
+    sudo "${APT_ENV[@]}" "$PKGMGR" update || rc=1
     codex_app_verify_repository || rc=1
   else
     warn "Codex app install failed — see https://learn.chatgpt.com/codex/linux/linux-app"
@@ -567,7 +575,7 @@ stage_packages() {
     # First refresh the package index (apt update doesn't take -y; that's only
     # for apt install). Best-effort — if offline, we still try the installs.
     # APT_ENV makes this non-interactive (no debconf/needrestart prompts).
-    sudo "${APT_ENV[@]}" "$PKGMGR" update >/dev/null 2>&1 || warn "apt update failed (continuing; installs may use a stale index)"
+    sudo "${APT_ENV[@]}" "$PKGMGR" update || warn "apt update failed (continuing; installs may use a stale index)"
 
     # 0. Ensure en_US.UTF-8 locale is generated. The dotfiles LANG guard
     #    exports it, and perl warns on every start when LANG names a locale
@@ -578,7 +586,7 @@ stage_packages() {
     if ! locale -a 2>/dev/null | grep -qi '^en_US\.utf8$\|^en_US\.UTF-8$'; then
       info "generating en_US.UTF-8 locale (needed by the dotfiles LANG guard)…"
       # Install the `locales` package first (absent on minimal images).
-      if ! dpkg -s locales >/dev/null 2>&1; then
+      if ! apt_package_installed locales; then
         sudo "${APT_ENV[@]}" "$PKGMGR" install -y locales
       fi
       # Uncomment the en_US.UTF-8 line in /etc/locale.gen if present + commented.
@@ -624,7 +632,7 @@ stage_packages() {
     #    across; on a converged host every one of them is a no-op.
     local repo_pkg
     for repo_pkg in "${APT_REPO_UPGRADED_PACKAGES[@]}"; do
-      apt_install_candidate "$repo_pkg" || true
+      apt_install_candidate "$repo_pkg" || return 1
     done
 
     # 4. Packages that exist only in a vendor archive. Each re-checks that its
@@ -693,7 +701,7 @@ stage_packages() {
 
     if [[ -n "${SKIP_CLAUDE_DESKTOP:-}" ]]; then
       info "skipping Claude Desktop (SKIP_CLAUDE_DESKTOP=1)"
-    elif dpkg -s claude-desktop >/dev/null 2>&1; then
+    elif apt_package_installed claude-desktop; then
       ok "Claude Desktop official apt package already installed"
     elif apt_repo_is_configured "$CLAUDE_DESKTOP_APT_URI"; then
       apt_install_candidate claude-desktop 'Claude Desktop' \
@@ -706,7 +714,7 @@ stage_packages() {
     #    repository is absent; afterwards it is an ordinary apt package.
     if [[ -n "${SKIP_CODEX_APP:-}" ]]; then
       info "skipping the Codex app (SKIP_CODEX_APP=1)"
-    elif dpkg -s "$CODEX_APP_PACKAGE" >/dev/null 2>&1; then
+    elif apt_package_installed "$CODEX_APP_PACKAGE"; then
       ok "Codex app official apt package already installed"
       codex_app_verify_repository
     else
@@ -755,6 +763,8 @@ stage_packages() {
           ok "yazi → ~/.local/bin/yazi"
         else
           warn "yazi download or installation failed (skipped)"
+          rm -rf "$tmp"
+          return 1
         fi
         rm -rf "$tmp"
       fi
@@ -817,6 +827,7 @@ stage_packages() {
         ok "himalaya $("$HOME/.local/bin/himalaya" --version 2>/dev/null | awk '{print $2}') → ~/.local/bin/himalaya"
       else
         warn "himalaya install script failed (skipped)"
+        return 1
       fi
     fi
 

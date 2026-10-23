@@ -21,6 +21,7 @@ OS_KIND=linux
 SKIP_FONT=1
 PATH="$HOME/.local/bin:$TEST_TMP/system:/usr/bin:/bin"
 export HOME OS_KIND SKIP_FONT PATH
+repo_dir() { printf '%s\n' "$TEST_ROOT"; }
 mkdir -p \
   "$HOME/.local/bin" "$HOME/.cargo/bin" "$HOME/.config/uv" \
   "$HOME/.opencode/bin" "$TEST_TMP/system"
@@ -31,6 +32,7 @@ mkdir -p \
 . "$TEST_ROOT/lib/manifest.sh"
 # shellcheck disable=SC1091
 . "$TEST_ROOT/lib/apt.sh"
+. "$TEST_ROOT/lib/upstream.sh"
 # shellcheck disable=SC1091
 . "$TEST_ROOT/scripts/stage_postflight.sh"
 
@@ -60,9 +62,11 @@ make_executable() {
   chmod +x "$1"
 }
 
-for tool in uv uvx claude codex zmx ruff yazi ya himalaya yq cosign; do
+for tool in uv uvx claude codex zmx ruff yazi ya himalaya yq cosign pwsh; do
   make_executable "$HOME/.local/bin/$tool"
 done
+printf '#!/bin/sh\nprintf "yq (https://github.com/mikefarah/yq/) version v4.0.0\\n"\n' > "$HOME/.local/bin/yq"
+printf '#!/bin/sh\nprintf "cosign: A tool for Container Signing\\nGitVersion: v3.0.0\\n"\n' > "$HOME/.local/bin/cosign"
 make_executable "$HOME/.cargo/bin/rustup"
 # shellcheck disable=SC2016 # literal content for the fixture's future shell
 printf '%s\n' 'export PATH="$HOME/.cargo/bin:$PATH"' > "$HOME/.cargo/env"
@@ -99,6 +103,15 @@ dpkg() {
 nodejs_pkg_version="${NODE_MAJOR}.0.0-1nodesource1"
 versioned_lo=0
 dpkg-query() {
+  if [[ "$2" == '-f=${db:Status-Status}' ]]; then
+    [[ " $installed_packages " == *" $3 "* ]] || return 1
+    printf installed
+    return
+  fi
+  if [[ "$1" == -L ]]; then
+    printf '%s\n' "$TEST_TMP/system/$2"
+    return
+  fi
   case "${3:-}" in
     libreoffice)
       [[ " $installed_packages " == *' libreoffice '* ]] || return 1
@@ -108,6 +121,7 @@ dpkg-query() {
       (( versioned_lo )) || return 1
       printf 'libreoffice26.8\tinstall ok installed\n'
       ;;
+    kubectl|helm) printf '1.0\n' ;;
     *)
       [[ "$*" == *nodejs* ]] || return 1
       printf '%s\n' "$nodejs_pkg_version"
@@ -116,6 +130,14 @@ dpkg-query() {
 }
 nodejs_extra_origin=''
 apt-cache() {
+  if [[ "$1" == madison ]]; then
+    case "$2" in
+      kubectl) printf 'kubectl | 1.0 | %s Packages\n' "$KUBERNETES_APT_URI" ;;
+      helm) printf 'helm | 1.0 | %s Packages\n' "$HELM_APT_URI" ;;
+      *) return 1 ;;
+    esac
+    return
+  fi
   [[ "$1" == policy && "$2" == nodejs ]] || return 1
   printf '%s\n' 'nodejs:' \
     "  Installed: $nodejs_pkg_version" \
@@ -133,14 +155,14 @@ POSTFLIGHT_PASSES=0
 POSTFLIGHT_FAILURES=0
 postflight_upstream_tools
 [[ "$POSTFLIGHT_FAILURES" == 0 ]]
-[[ "$POSTFLIGHT_PASSES" == 15 ]]
+[[ "$POSTFLIGHT_PASSES" == 16 ]]
 
 installed_packages='kubectl helm claude-desktop chatgpt'
 versioned_lo=1
 POSTFLIGHT_PASSES=0
 POSTFLIGHT_FAILURES=0
 postflight_upstream_tools >/dev/null
-[[ "$POSTFLIGHT_FAILURES" == 0 && "$POSTFLIGHT_PASSES" == 15 ]]
+[[ "$POSTFLIGHT_FAILURES" == 0 && "$POSTFLIGHT_PASSES" == 16 ]]
 installed_packages='kubectl helm libreoffice claude-desktop chatgpt'
 versioned_lo=0
 
@@ -170,7 +192,7 @@ POSTFLIGHT_PASSES=0
 POSTFLIGHT_FAILURES=0
 SKIP_LIBREOFFICE=1 SKIP_CLAUDE_DESKTOP=1 SKIP_CODEX_APP=1 postflight_upstream_tools
 [[ "$POSTFLIGHT_FAILURES" == 0 ]]
-[[ "$POSTFLIGHT_PASSES" == 12 ]]
+[[ "$POSTFLIGHT_PASSES" == 13 ]]
 
 # A missing GUI application on a host that expects it is a real failure.
 installed_packages='kubectl helm'

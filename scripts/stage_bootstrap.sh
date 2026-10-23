@@ -45,7 +45,7 @@ stage_bootstrap() {
     fi
     if ! command -v curl >/dev/null 2>&1; then
       info "installing curl…"
-      sudo "${APT_ENV[@]}" "$PKGMGR" update >/dev/null 2>&1 || true
+      sudo "${APT_ENV[@]}" "$PKGMGR" update || warn "apt update failed; trying the cached package index"
       sudo "${APT_ENV[@]}" "$PKGMGR" install -y curl
     fi
     if ! command -v git >/dev/null 2>&1; then

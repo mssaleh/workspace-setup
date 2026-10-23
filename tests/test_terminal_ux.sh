@@ -20,7 +20,9 @@ fi
 # Ubuntu's /etc/ssh/ssh_config enables GSSAPI and ssh reads it after the user's
 # file, first value winning; the shipped Host * has to decide it first.
 if command -v ssh >/dev/null 2>&1; then
-  printf '%s\n' "Include \"$TEST_ROOT/dotfiles/ssh/config\"" 'Host *' \
+  cp "$TEST_ROOT/dotfiles/ssh/config" "$TEST_TMP/shipped-ssh-config"
+  chmod 0600 "$TEST_TMP/shipped-ssh-config"
+  printf '%s\n' "Include \"$TEST_TMP/shipped-ssh-config\"" 'Host *' \
     '    GSSAPIAuthentication yes' > "$TEST_TMP/ssh-with-ubuntu-default"
   [[ "$(ssh -G -F "$TEST_TMP/ssh-with-ubuntu-default" example.invalid 2>/dev/null \
         | awk '$1 == "gssapiauthentication" { print $2 }')" == no ]] \

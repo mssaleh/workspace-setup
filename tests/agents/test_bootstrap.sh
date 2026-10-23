@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# The piped one-liner fetches its own payload and behaves like a clone. The
+# archive is served over file://, so nothing here reaches the network.
+set -uo pipefail
+# shellcheck disable=SC2034  # read by helpers.sh
+TEST_NAME=test_bootstrap
+# shellcheck source=tests/agents/helpers.sh
+. "$(dirname "${BASH_SOURCE[0]}")/helpers.sh"
+
+root=$(sandbox_new); sandbox_env "$root"
+trap 'sandbox_rm "$root"' EXIT
+
+# One top-level directory, as GitHub's archive tarball has.
+src="$root/payload-src/workspace-setup"; mkdir -p "$src/scripts"
+cp "$REPO_DIR/setup.sh" "$src/"
+cp -R "$REPO_DIR/lib" "$REPO_DIR/manifests" "$src/"
+cp "$REPO_DIR/scripts/sync_agents.sh" "$src/scripts/"
+cp "$REPO_DIR/scripts/stage_agents.sh" "$src/scripts/"
+tar -czf "$root/payload.tar.gz" -C "$(dirname "$src")" workspace-setup
+export REPO_ARCHIVE_URL="file://$root/payload.tar.gz"
+
+export TMPDIR="$root/tmp"; mkdir -p "$TMPDIR"
+
+export MANIFEST_DIR="$root/manifests"; mkdir -p "$MANIFEST_DIR"
+printf 'acme/pack\talpha,beta\tselect\n' > "$MANIFEST_DIR/skills.tsv"
+printf 'devtools\tstdio\tdevtools-mcp@latest\tclaude-code,codex\n' > "$MANIFEST_DIR/mcp.tsv"
+printf 'claude-code\twidgets\tacme/widgets\twidget\n' > "$MANIFEST_DIR/plugins.tsv"
+
+. "$REPO_DIR/lib/agents/log.sh"; . "$REPO_DIR/lib/agents/manifest.sh"
+. "$REPO_DIR/lib/agents/agentcfg.sh"; . "$REPO_DIR/lib/agents/skills.sh"
+
+piped() { bash -s -- agents "$@" < "$REPO_DIR/setup.sh" 2>&1; }
+
+# --- the help text comes from the payload, not from BASH_SOURCE ---
+out=$(piped --help); status=$?
+assert_eq       "piped --help exits zero"      "$status" "0"
+assert_contains "piped --help lists the flags" "$out" "--prune-plugin-cache"
+assert_contains "piped --help shows the one-liner" "$out" "| bash"
+
+# --- a piped run converges the host the same way a clone does ---
+out=$(piped); status=$?
+assert_contains "the payload is announced" "$out" "fetching temporary payload from file://"
+assert_eq       "piped run exits clean"    "$status" "0"
+# A child that read the script's stdin would take the rest of it with it.
+assert_contains "skills pass ran"  "$out" "skills: store and mirrors"
+assert_contains "mcp pass ran"     "$out" "mcp: servers into every agent"
+assert_contains "plugins pass ran" "$out" "plugins: declared installs"
+assert_contains "verify pass ran"  "$out" "verify: read back"
+assert_eq "the store is filled" "$(store_skill_names | tr '\n' ' ')" "alpha beta "
+agent_mcp_invalidate
+assert_eq "the servers are installed" "$(agent_mcp_names codex | tr '\n' ' ')" "devtools "
+
+# --- and it is idempotent through the pipe too ---
+out=$(piped)
+assert_contains "a second piped run converges" "$out" "converged — nothing to change"
+assert_eq "a second piped run applies no deltas" "$(grep -c '^~' <<< "$out")" "0"
+
+# --- the refresh is the one child not inside a redirected loop ---
+# Everywhere else stdin is the loop's input; here it is the streamed script.
+out=$(piped --only skills --update)
+assert_contains "--update through the pipe reaches the refresh" "$out" "refreshing skills from acme/pack"
+assert_contains "--update through the pipe runs to the end"     "$out" "── summary ──"
+
+# --- the payload is temporary ---
+assert_eq "no payload survives the run" \
+  "$(find "$TMPDIR" -maxdepth 1 -name 'workspace-setup.*' 2>/dev/null | wc -l | tr -d ' ')" "0"
+
+# --- an unreachable payload fails loudly ---
+out=$(REPO_ARCHIVE_URL="file://$root/absent.tar.gz" piped --only verify); status=$?
+assert_eq       "a missing payload exits non-zero" "$status" "1"
+assert_contains "a missing payload says so"        "$out" "could not download payload"
+
+# --- run from the checkout, nothing is fetched ---
+out=$("$REPO_DIR/setup.sh" agents --only verify 2>&1)
+assert_absent "a checkout run fetches no payload" "$out" "fetching temporary payload"
+
+test_summary

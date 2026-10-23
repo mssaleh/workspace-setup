@@ -1,0 +1,228 @@
+#!/usr/bin/env bash
+# The config readers depend on structure, not on how a file happens to be laid
+# out. Every fixture here is the same document written differently; each must
+# produce the same table.
+set -uo pipefail
+# shellcheck disable=SC2034  # read by helpers.sh
+TEST_NAME=test_parsers
+# shellcheck source=tests/agents/helpers.sh
+. "$(dirname "${BASH_SOURCE[0]}")/helpers.sh"
+# shellcheck source=lib/agents/log.sh
+. "$REPO_DIR/lib/agents/log.sh"
+# shellcheck source=lib/agents/agentcfg.sh
+. "$REPO_DIR/lib/agents/agentcfg.sh"
+
+work=$(mktemp -d "${TMPDIR:-/tmp}/workspace-agent-parsers.XXXXXX")
+trap 'rm -rf "$work"' EXIT
+
+cat > "$work/2space.json" <<'EOF'
+{
+  "other": {},
+  "mcp": {
+    "docs": {
+      "type": "remote",
+      "url": "https://docs.example/mcp",
+      "enabled": true
+    },
+    "tools": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "tools-mcp@latest"
+      ],
+      "enabled": false
+    }
+  }
+}
+EOF
+
+# Same document, four-space indent, with the comments JSONC allows.
+cat > "$work/4space.json" <<'EOF'
+/* hand reformatted */
+{
+    "other": {},
+    // the servers
+    "mcp": {
+        "docs": {
+            "type": "remote",
+            "url": "https://docs.example/mcp",
+            "enabled": true
+        },
+        "tools": {
+            "type": "local",
+            "command": [
+                "npx",
+                "-y",
+                "tools-mcp@latest"
+            ],
+            "enabled": false
+        }
+    }
+}
+EOF
+
+printf '{"other":{},"mcp":{"docs":{"type":"remote","url":"https://docs.example/mcp","enabled":true},"tools":{"type":"local","command":["npx","-y","tools-mcp@latest"],"enabled":false}}}\n' \
+  > "$work/minified.json"
+sed 's/^  */\t/' "$work/2space.json" > "$work/tabs.json"
+
+expected=$(printf 'docs\tremote\thttps://docs.example/mcp\ttrue\ntools\tstdio\ttools-mcp@latest\tfalse')
+for f in 2space 4space minified tabs; do
+  assert_eq "$f parses to the same table" "$(json_mcp_block "$work/$f.json" mcp)" "$expected"
+done
+
+cat > "$work/v2.json" <<'EOF'
+[
+  {"type":"document","info":{"mcp":{"servers":{
+    "docs":{"type":"remote","url":"https://docs.example/mcp"},
+    "tools":{"type":"local","command":["npx","-y","tools-mcp@latest"],"disabled":true}
+  }}}},
+  {"type":"directory","path":"/config/opencode"},
+  {"type":"document","info":{"mcp":{"servers":{
+    "docs":{"type":"remote","url":"https://override.example/mcp"}
+  }}}}
+]
+EOF
+got=$(json_mcp_block "$work/v2.json" info.mcp.servers)
+assert_eq "V2 source documents retain native precedence order" "$got" \
+  "$(printf '%s\ndocs\tremote\thttps://override.example/mcp\ttrue' "$expected")"
+sed '1s|.*|/* "mcp": { "ignored": {} } */|' "$work/4space.json" > "$work/comment.json"
+assert_eq "quoted fields in block comments are ignored" "$(json_mcp_block "$work/comment.json" mcp)" "$expected"
+
+# Claude Code's shape: scalar "command" plus a separate "args".
+cat > "$work/claude.json" <<'EOF'
+{
+  "mcpServers": {
+    "tools": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "tools-mcp@latest"
+      ]
+    }
+  }
+}
+EOF
+assert_eq "scalar command + args normalises past npx" \
+  "$(json_mcp_block "$work/claude.json" mcpServers)" "$(printf 'tools\tstdio\ttools-mcp@latest\ttrue')"
+
+# A URL containing braces or an escaped quote must not disturb the depth count.
+cat > "$work/tricky.json" <<'EOF'
+{
+  "mcp": {
+    "weird": {
+      "type": "remote",
+      "url": "https://x.example/{tenant}/mcp?q=a\"b"
+    }
+  }
+}
+EOF
+assert_contains "braces inside a string do not shift depth" \
+  "$(json_mcp_block "$work/tricky.json" mcp)" 'https://x.example/{tenant}/mcp'
+
+# The wanted key must be the top-level one, not a same-named key nested deeper.
+cat > "$work/nested.json" <<'EOF'
+{
+  "projects": {
+    "/somewhere": {
+      "mcpServers": {
+        "project-only": {
+          "type": "http",
+          "url": "https://project.example/mcp"
+        }
+      }
+    }
+  },
+  "mcpServers": {
+    "user-scope": {
+      "type": "http",
+      "url": "https://user.example/mcp"
+    }
+  }
+}
+EOF
+assert_eq "a nested block of the same name is not user scope" \
+  "$(json_mcp_block "$work/nested.json" mcpServers)" \
+  "$(printf 'user-scope\tremote\thttps://user.example/mcp\ttrue')"
+
+# …and the project reader must not claim the user-scope block, which sits after
+# it in the file. An empty mcpServers must not leak its key to the next object.
+CLAUDE_CONFIG="$work/nested.json"
+assert_eq "project reader finds only the project server" \
+  "$(claude_project_mcp)" "$(printf 'project-only\t/somewhere')"
+
+cat > "$work/empty-proj.json" <<'EOF'
+{
+  "projects": {
+    "/a": {
+      "mcpServers": {}
+    },
+    "/b": {
+      "metrics": {
+        "p99": {
+          "value": 1
+        }
+      }
+    }
+  },
+  "mcpServers": {
+    "user-scope": {
+      "type": "http",
+      "url": "https://user.example/mcp"
+    }
+  }
+}
+EOF
+CLAUDE_CONFIG="$work/empty-proj.json"
+assert_eq "an empty project block leaks nothing into the next" "$(claude_project_mcp)" ""
+
+# Codex supplies parsed TOML through native JSON readback.
+cat > "$work/codex.json" <<'EOF'
+[
+  {"name":"off","enabled":false,"transport":{"url":"https://off.example/mcp"}},
+  {"name":"has.dots","enabled":true,"transport":{"command":"npx","args":["-y","dotted@1"],"env":{"FOO":"bar"}}},
+  {"name":"node_repl","enabled":true,"transport":{"command":"/opt/node_repl","args":[]}}
+]
+EOF
+got=$(json_mcp_block "$work/codex.json" codex)
+assert_contains "Codex reads enabled = false" "$got" "$(printf 'off\tremote\thttps://off.example/mcp\tfalse')"
+assert_contains "Codex reads a dotted name" "$got" "$(printf 'has.dots\tstdio\tdotted@1\ttrue')"
+assert_contains "Codex keeps a non-npx command" "$got" "$(printf 'node_repl\tstdio\t/opt/node_repl\ttrue')"
+assert_eq "an env sub-table is not a server" "$(printf '%s\n' "$got" | wc -l | tr -d ' ')" 3
+
+# Claude Code switches a server off per directory under disabledMcpServers —
+# a different key from disabledMcpjsonServers, and one a user-scope check misses.
+cat > "$work/disabled.json" <<'EOF'
+{
+  "projects": {
+    "/home/me/one": {
+      "disabledMcpjsonServers": [],
+      "disabledMcpServers": [
+        "docs",
+        "tools"
+      ]
+    },
+    "/home/me/two": {
+      "disabledMcpServers": [
+        "other"
+      ]
+    }
+  },
+  "mcpServers": {}
+}
+EOF
+CLAUDE_CONFIG="$work/disabled.json"
+assert_eq "reads the disabled list for one directory" \
+  "$(claude_disabled_in /home/me/one | tr '\n' ' ')" "docs tools "
+assert_eq "and not another directory's"  "$(claude_disabled_in /home/me/two | tr '\n' ' ')" "other "
+assert_eq "an unknown directory disables nothing" "$(claude_disabled_in /home/me/three)" ""
+
+# A missing file is empty, not an error.
+assert_eq "a missing json file yields nothing" "$(json_mcp_block "$work/nope.json" mcp)" ""
+
+printf '[{"name":"registered","source":"directory","path":"/fixture","installLocation":"/fixture"}]\n' \
+  > "$work/marketplaces.json"
+assert_eq "native marketplace readback keeps names" \
+  "$(json_mcp_block "$work/marketplaces.json" marketplaces)" registered
+
+test_summary

@@ -1,0 +1,18 @@
+# manifests/mcp.tsv — MCP servers, installed with each agent's native CLI.
+#
+# name	transport	target	agents
+#
+#   name       The server name in every agent's config. Set here, never on the
+#              command line: three `codex mcp add copilotkit …` calls with three
+#              different URLs left Codex holding only the last one.
+#   transport  stdio — target is an npm package run under `npx -y`.
+#              http / sse — target is a URL. Codex has no SSE client and POSTs
+#              to the URL regardless, so an `sse` row naming it is refused.
+#   agents     Native CLI targets. OpenCode reads the shared skill store but
+#              needs its own MCP configuration. GitHub Copilot CLI is optional.
+
+next-devtools	stdio	next-devtools-mcp@latest	claude-code,codex,opencode,github-copilot
+temporal-docs	http	https://temporal.mcp.kapa.ai	claude-code,codex,opencode
+llamaindex-docs	http	https://developers.llamaindex.ai/mcp	claude-code,codex,opencode
+copilotkit	http	https://mcp.copilotkit.ai/mcp	claude-code,codex,opencode
+livekit-docs	http	https://docs.livekit.io/mcp/	claude-code,codex,opencode

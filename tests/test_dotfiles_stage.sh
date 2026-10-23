@@ -266,6 +266,33 @@ stage_dotfiles
   fi
 ) || exit 1
 
+(
+  HOME="$TEST_TMP/native-agent-homes"
+  CLAUDE_CONFIG_DIR="$HOME/claude"
+  CODEX_HOME="$HOME/codex"
+  XDG_CONFIG_HOME="$HOME/config"
+  OPENCODE_CONFIG="$XDG_CONFIG_HOME/opencode/opencode.json"
+  SKIP_SSH=1
+  CLAUDE_HOME="$HOME/plugin-and-skill-home"
+  export HOME CLAUDE_CONFIG_DIR CLAUDE_HOME CODEX_HOME XDG_CONFIG_HOME OPENCODE_CONFIG SKIP_SSH
+  mkdir -p "$(dirname "$OPENCODE_CONFIG")"
+  printf '{"user_setting":true}\n' > "$OPENCODE_CONFIG"
+  CONFIG_CONFLICT_COUNT=0
+  stage_dotfiles >/dev/null
+  [[ "$CONFIG_CONFLICT_COUNT" == 0 ]]
+  [[ -f "$CLAUDE_CONFIG_DIR/settings.json" && -f "$CODEX_HOME/rules/default.rules" ]]
+  [[ ! -e "$HOME/.claude/settings.json" && ! -e "$HOME/.codex/rules/default.rules" ]]
+  [[ ! -e "$CLAUDE_HOME/settings.json" ]]
+  [[ ! -e "$HOME/.config/opencode/opencode.jsonc" ]]
+  jq -e '.user_setting == true and .permission.bash["apt-get install *"] == "deny"' \
+    "$OPENCODE_CONFIG" >/dev/null
+  configs_report=$(postflight_configs 2>&1)
+  grep -Fq 'agent package-mutation guardrails are present' <<< "$configs_report"
+  if [[ "$OS_KIND" == macos ]]; then
+    postflight_agent_skills
+  fi
+) || exit 1
+
 # A host that shares one skill store between agents through its own directory
 # links keeps that layout: the copies converge onto the shared file instead of
 # replacing the links or reporting a conflict. Skills ship on macOS only.

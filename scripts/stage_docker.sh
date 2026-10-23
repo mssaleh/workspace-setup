@@ -53,7 +53,7 @@ stage_docker() {
   # sources/keys or running package transactions on every setup rerun.
   local official_ready=1 docker_pkg
   for docker_pkg in docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin; do
-    dpkg -s "$docker_pkg" >/dev/null 2>&1 || official_ready=0
+    apt_package_installed "$docker_pkg" || official_ready=0
   done
   if ((official_ready)); then
     if ! systemctl is-active --quiet docker 2>/dev/null; then
@@ -102,7 +102,7 @@ stage_docker() {
   # apt_trust_repo_key verifies the fingerprint before trusting the download
   # and leaves an already-correct keyring alone, so this is a no-op on a host
   # that is only here because one Docker package went missing.
-  sudo "${APT_ENV[@]}" "$PKGMGR" install -y ca-certificates curl gnupg >/dev/null 2>&1 || true
+  sudo "${APT_ENV[@]}" "$PKGMGR" install -y ca-certificates curl gnupg || return 1
   if ! apt_trust_repo_key Docker "${DOCKER_APT_URI_BASE}/${docker_repo_os}/gpg" \
       "$DOCKER_KEYRING" "$DOCKER_KEY_FINGERPRINT"; then
     warn "could not establish Docker's signing key — skipping Docker Engine"

@@ -1,0 +1,8 @@
+# manifests/plugins.tsv — plugins installed through each agent's native CLI.
+#
+# agent	marketplace	marketplace_source	plugin
+#
+# The sync installs declared plugins and refreshes them on --update.
+# Additional installed plugins are preserved.
+
+claude-code	zephyr-ai	mssaleh/zephyr-ai	zephyr-ai

@@ -7,7 +7,9 @@
 stage_groups() {
   [[ "$OS_KIND" == linux ]] || { ok "group membership is a Linux concern"; return 0; }
 
-  local target="${SUDO_USER:-$USER}"
+  local target
+  target=$(id -un) || return 1
+  [[ "$target" == root ]] && target="${SUDO_USER:-$target}"
   [[ -n "$target" && "$target" != root ]] || {
     warn "no unprivileged user to add to device groups"
     return 0
