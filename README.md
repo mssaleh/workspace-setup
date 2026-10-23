@@ -474,9 +474,13 @@ A TUI killed by a signal never sends the disables for what it turned on, so a
 killed `claude` or `opencode` would leave the terminal on the alternate screen
 with mouse reporting, focus events and the kitty keyboard flags still set.
 `~/.bashrc` and `~/.zshrc` clear all of those at the next prompt after a
-signal death. `ds` also clears mouse and keyboard modes on every SSH exit;
-a dropped connection does not exit with the signal status those prompt hooks
-recognize. The prompt hooks leave stopped programs alone because `fg` resumes
+signal death. `ds`, `ks` and `s` also clear mouse and keyboard modes on every
+SSH exit and leave the alternate screen when SSH exits 255; a dropped
+connection does not exit with the signal status those prompt hooks recognize,
+and a window left on the alternate screen has no scrollback and sends the wheel
+to the program as arrow keys. Plain `ssh` is not wrapped: after it drops under
+a full-screen program, `printf '\e[?1049l'` returns the window to the normal
+screen. The prompt hooks leave stopped programs alone because `fg` resumes
 their control of the terminal.
 
 ## Working on a Mac over SSH

@@ -330,6 +330,17 @@ function y() {
 	command rm -f -- "$tmp"
 }
 
+# A dropped link exits 255 with the remote program's terminal modes still set.
+# The alternate screen has no scrollback and turns the wheel into arrow keys, so
+# leave it then; clear mouse and keyboard modes whenever ssh returns.
+__ssh_restore_term() {
+  if [[ -t 1 ]]; then
+    if (($1 == 255)); then printf '\e[?1049l'; fi
+    printf '\e[?1000l\e[?1002l\e[?1003l\e[?1004l\e[?1006l\e[?25h\e[<u\e[>4m'
+  fi
+  return "$1"
+}
+
 # ds: attach to a persistent remote shell. Kitty owns tabs, splits, and input.
 # Plain ssh: the ssh kitten types its setup data into this shell when the
 # connection fails. -S none: a shared connection whose link died hangs the
@@ -340,22 +351,17 @@ function ds() {
     echo "usage: ds <host> [session]" >&2
     return 2
   fi
-  local session=${2:-main} status
+  local session=${2:-main}
   case "$session" in
     *[!a-zA-Z0-9._-]*|''|-*) echo "invalid session name: $session" >&2; return 2 ;;
   esac
   command ssh -S none -t -- "$1" zmx attach "$session"
-  status=$?
-  if [[ -t 1 ]]; then
-    if ((status == 255)); then printf '\e[?1049l'; fi
-    printf '\e[?1000l\e[?1002l\e[?1003l\e[?1004l\e[?1006l\e[?25h\e[<u\e[>4m'
-  fi
-  return "$status"
+  __ssh_restore_term $?
 }
 
 # Managed hosts install xterm-kitty terminfo without a GUI dependency, so plain
 # `ssh` preserves TERM. `s` advertises xterm-256color to unmanaged hosts.
-function s() { TERM=xterm-256color command ssh "$@"; }
+function s() { TERM=xterm-256color command ssh "$@"; __ssh_restore_term $?; }
 
 # ks: opt in to Kitty's ssh kitten for hosts where you want Kitty integration.
 # The kitten refuses to run outside a kitty window ("Error: The SSH kitten is
@@ -370,6 +376,7 @@ function ks() {
   else
     command ssh "$@"
   fi
+  __ssh_restore_term $?
 }
 
 # fzf: fuzzy finder. Ctrl-R fuzzy history · Ctrl-T insert file paths · Alt-C cd

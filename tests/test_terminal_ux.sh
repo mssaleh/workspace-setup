@@ -155,13 +155,15 @@ if [[ -x /bin/zsh ]]; then
   cp "$TEST_ROOT/dotfiles/zshrc" "$TEST_TMP/home/.zshrc"
   printf '#!/bin/sh\nexit 255\n' > "$stub_bin/ssh"
   chmod +x "$stub_bin/ssh"
-  zsh_ds_status=0
-  env -i HOME="$TEST_TMP/home" USER=test TERM=dumb \
-      PATH="$stub_bin:/usr/bin:/bin:/usr/sbin:/sbin" \
-      /bin/zsh -dfc 'source "$HOME/.zshenv"; source "$HOME/.zshrc"; ds devhost' \
-      >"$TEST_TMP/zsh-ds.log" 2>&1 || zsh_ds_status=$?
-  [[ "$zsh_ds_status" == 255 ]] \
-    || fail_test 'zsh ds did not preserve the SSH exit status'
+  for helper in ds ks s; do
+    zsh_status=0
+    env -i HOME="$TEST_TMP/home" USER=test TERM=dumb \
+        PATH="$stub_bin:/usr/bin:/bin:/usr/sbin:/sbin" \
+        /bin/zsh -dfc 'source "$HOME/.zshenv"; source "$HOME/.zshrc"; "$1" devhost' \
+        zsh "$helper" >"$TEST_TMP/zsh-$helper.log" 2>&1 || zsh_status=$?
+    [[ "$zsh_status" == 255 ]] \
+      || fail_test "zsh $helper did not preserve the SSH exit status"
+  done
 fi
 
 # Postflight must reject an old helper retained by a customized shell file.
@@ -185,8 +187,9 @@ postflight_durable_ssh >/dev/null 2>&1
 mv "$TEST_TMP/current-bashrc" "$TEST_TMP/home/.bashrc"
 HOME=$original_home
 
-# A broken SSH link exits 255 rather than with a signal. The wrapper must
-# disable remote mouse reporting before the local prompt accepts input again.
+# A broken SSH link exits 255 rather than with a signal. Every helper must
+# leave the alternate screen and disable remote mouse reporting before the
+# local prompt accepts input again.
 if command -v script >/dev/null 2>&1 \
     && script --version 2>/dev/null | grep -q util-linux; then
   cat > "$stub_bin/ssh" <<'STUB'
@@ -195,14 +198,16 @@ printf '\033[?1049h\033[?1000h\033[?1006h'
 exit 255
 STUB
   chmod +x "$stub_bin/ssh"
-  script -qfec "env -i HOME='$TEST_TMP/home' USER=test TERM=xterm-256color PATH='$stub_bin:/usr/bin:/bin' /bin/bash --noprofile --rcfile '$TEST_TMP/home/.bashrc' -ic 'ds devhost'" \
-    "$TEST_TMP/ds-drop.log" >/dev/null 2>&1 || true
-  LC_ALL=C grep -aFq $'\e[?1049l' "$TEST_TMP/ds-drop.log" \
-    || fail_test 'ds did not leave the alternate screen after a dropped connection'
-  LC_ALL=C grep -aFq $'\e[?1000l' "$TEST_TMP/ds-drop.log" \
-    || fail_test 'ds left mouse reporting enabled after a dropped connection'
-  LC_ALL=C grep -aFq $'\e[<u' "$TEST_TMP/ds-drop.log" \
-    || fail_test 'ds left the Kitty keyboard mode enabled after a dropped connection'
+  for helper in ds ks s; do
+    script -qfec "env -i HOME='$TEST_TMP/home' USER=test TERM=xterm-256color PATH='$stub_bin:/usr/bin:/bin' /bin/bash --noprofile --rcfile '$TEST_TMP/home/.bashrc' -ic '$helper devhost'" \
+      "$TEST_TMP/$helper-drop.log" >/dev/null 2>&1 || true
+    LC_ALL=C grep -aFq $'\e[?1049l' "$TEST_TMP/$helper-drop.log" \
+      || fail_test "$helper did not leave the alternate screen after a dropped connection"
+    LC_ALL=C grep -aFq $'\e[?1000l' "$TEST_TMP/$helper-drop.log" \
+      || fail_test "$helper left mouse reporting enabled after a dropped connection"
+    LC_ALL=C grep -aFq $'\e[<u' "$TEST_TMP/$helper-drop.log" \
+      || fail_test "$helper left the Kitty keyboard mode enabled after a dropped connection"
+  done
 fi
 
 # ── GNOME terminal: share behaviour, never appearance ──────────────────────
