@@ -34,7 +34,7 @@ PACKAGES_BREW=(
   helm kubernetes-cli cosign container-compose
   ffmpeg poppler nano
   himalaya ncdu smartmontools pkgconf
-  azure-cli
+  awscli azure-cli
   anomalyco/tap/opencode ttscoff/thelab/apex
 )
 
@@ -73,8 +73,11 @@ PACKAGES_BREW_CASK=(
   libreoffice
 )
 
-# Ubuntu/Debian packages requested from the distribution repository. A release
-# that does not advertise a name skips it safely; non-apt providers are listed
+# CLI casks also install on headless Macs.
+PACKAGES_BREW_CLI_CASK=(gcloud-cli)
+
+# Ubuntu packages requested from the distribution repository. Unavailable
+# package names are skipped; non-apt providers are listed
 # explicitly below instead of being smuggled into this array.
 PACKAGES_APT=(
   bash-completion coreutils
@@ -94,6 +97,8 @@ PACKAGES_APT=(
   # C toolchain, git pages through less and fetches over openssh-client, and
   # rclone mounts through fuse3.
   build-essential less openssh-client patch bzip2 fuse3
+  # AWS CLI formats its help pages with groff.
+  groff
   flatpak
   # Remote shells inherit TERM=xterm-kitty even when this host has no GUI.
   # This package is only terminal capability metadata; it does not install
@@ -121,11 +126,14 @@ UPSTREAM_RELEASE_PROJECTS=(
   lazygit:jesseduffield/lazygit
   yq:mikefarah/yq
   cosign:sigstore/cosign
+  openai:openai/openai-cli
+  ant:anthropics/anthropic-cli
+  gddy:godaddy/cli
+  apex:ApexMarkdown/apex
 )
 
-# apt names a release may not carry, each with the command whose upstream
-# release installs into ~/.local/bin in its place. Ubuntu 22.04 has none of the
-# three and 24.04 has no lazygit, while ~/.gitconfig pages through delta.
+# Packages with upstream providers when the configured apt archive lacks them.
+# Each entry maps the package to the command installed into ~/.local/bin.
 APT_UPSTREAM_FALLBACKS=(git-delta:delta eza:eza lazygit:lazygit)
 
 # Python applications installed with `uv tool install`, which gives each its own
@@ -134,11 +142,15 @@ APT_UPSTREAM_FALLBACKS=(git-delta:delta eza:eza lazygit:lazygit)
 #
 # markitdown is PyPI-only and has no packaged form on either platform.
 UV_TOOLS_COMMON=('markitdown[all]')
-# azure-cli publishes an apt repository only for Ubuntu LTS codenames, so a
-# non-LTS or newer release resolves nothing and uv owns it. macOS has a
-# Homebrew formula, which owns it there — see PACKAGES_BREW. Installing both
-# would put uv's launcher ahead of Homebrew's on PATH.
+# Azure uses uv only when Microsoft publishes no apt suite for this host.
+# macOS uses the Homebrew formula.
 UV_TOOLS_LINUX=(azure-cli)
+
+NPM_TOOLS_COMMON=(cf)
+AWS_CLI_INSTALL_URL=https://awscli.amazonaws.com/v2/install.sh
+CODEX_INSTALL_URL=https://releases.openai.com/codex/install.sh
+GODADDY_INSTALL_URL=https://github.com/godaddy/cli/releases/latest/download/install.sh
+ANTIGRAVITY_INSTALL_URL=https://antigravity.google/cli/install.sh
 
 # Git Credential Manager ships no default store on Linux, so an unconfigured
 # install silently persists nothing. secretservice keeps the secret encrypted in
@@ -183,25 +195,24 @@ KITTY_TERMINFO_APP_SOURCES=(
 )
 
 # Official source used only when the host's package database has no
-# xterm-kitty entry. This covers headless macOS and older Debian-family
-# releases without making Kitty itself or a graphical session a prerequisite.
+# xterm-kitty entry, without requiring Kitty or a graphical session.
 KITTY_TERMINFO_SOURCE_URL=https://raw.githubusercontent.com/kovidgoyal/kitty/master/terminfo/kitty.terminfo
 
 # Documentation/inventory for non-default-repository providers. These names
 # are intentionally not fed to brew or apt.
-PROVIDERS_COMMON_UPSTREAM=(rustup uv-standalone claude codex kitty)
+PROVIDERS_COMMON_UPSTREAM=(rustup uv-standalone claude codex kitty openai ant gddy agy)
 PROVIDERS_MACOS_UPSTREAM=(apple-container-signed-pkg rosetta)
 # yq and cosign are packaged by the distribution, but not as the same software
 # macOS gets: Ubuntu's `yq` is kislyuk's jq wrapper rather than the mikefarah
 # program, and its `cosign` is a major behind. Both come from the upstream
 # release instead — see YQ_RELEASE_BASE and COSIGN_RELEASE_BASE above.
-PROVIDERS_LINUX_UPSTREAM=(zmx ruff yazi himalaya opencode yq cosign pwsh git-credential-manager)
+PROVIDERS_LINUX_UPSTREAM=(zmx ruff yazi himalaya opencode yq cosign pwsh git-credential-manager aws-cli apex)
 TOOLCHAIN_BREW_CASKS=(powershell)
 # Capabilities the distribution either does not package or packages too far
 # behind to use, taken from the vendor's own signed archive instead.
 PROVIDERS_LINUX_OFFICIAL_REPO=(
   kubectl helm docker-engine docker-compose-v2 claude-desktop nodejs
-  cmake gh chatgpt code
+  cmake gh chatgpt code google-cloud-cli azure-cli
 )
 
 # Desktop applications that only make sense where GNOME Shell is installed.
@@ -221,7 +232,7 @@ NODE_MAJOR=24
 NODESOURCE_PREFERENCES_FILE=/etc/apt/preferences.d/nodesource.pref
 NODESOURCE_PINNED_PACKAGES=(nodejs npm nodejs-doc libnode-dev)
 
-# Ubuntu-only Launchpad PPAs. Debian falls back to the distribution package.
+# Ubuntu Launchpad PPAs.
 # git-scm.com names ppa:git-core/ppa as the way to get the current stable Git
 # on Ubuntu; the distribution trails it by two minor releases.
 PROVIDERS_UBUNTU_PPA=(libreoffice git)
@@ -245,10 +256,10 @@ KUBERNETES_KEY_URL="https://pkgs.k8s.io/core:/stable:/${KUBERNETES_MINOR}/deb/Re
 KUBERNETES_KEYRING=/etc/apt/keyrings/kubernetes-apt-keyring.gpg
 KUBERNETES_KEY_FINGERPRINT=DE15B14486CD377B9E876E1A234654DA9A296436
 
-# helm. No Debian or Ubuntu release publishes a binary package by this name;
+# helm. Ubuntu does not publish a binary package by this name;
 # the Emacs framework owns `helm` as a source package and ships it as
 # elpa-helm. The Buildkite-hosted archive is helm.sh's current official path;
-# its generic "any/ any" suite works on every Debian-family release.
+# its "any/ any" suite supplies Ubuntu.
 HELM_APT_URI=https://packages.buildkite.com/helm-linux/helm-debian/any/
 HELM_KEY_URL=https://packages.buildkite.com/helm-linux/helm-debian/gpgkey
 HELM_KEYRING=/usr/share/keyrings/helm.gpg
@@ -292,9 +303,8 @@ DOCKER_CONFLICTING_PACKAGES=(
 )
 
 # CMake from Kitware's own archive. Ubuntu 26.04 ships 4.2.x while Kitware
-# publishes 4.4.x for the same release. The archive covers Ubuntu LTS releases
-# only and has no Debian suite, so a host it does not publish for keeps the
-# distribution package. Kitware rotate the signing key annually and ship
+# publishes 4.4.x. The distribution package is used until Kitware publishes
+# a matching suite. Kitware rotate the signing key annually and ship
 # `kitware-archive-keyring` to carry the replacement, which is installed once
 # the repository is trusted.
 KITWARE_APT_URI=https://apt.kitware.com/ubuntu/
@@ -313,6 +323,19 @@ GITHUB_CLI_KEY_FINGERPRINTS=(
   2C6106201985B60E6C7AC87323F3D4EA75716059
   7F38BBB59D064DBCB3D84D725612B36462313325
 )
+
+# https://docs.cloud.google.com/sdk/docs/install-sdk#deb
+GOOGLE_CLOUD_APT_URI=https://packages.cloud.google.com/apt
+GOOGLE_CLOUD_KEY_URL=https://packages.cloud.google.com/apt/doc/apt-key.gpg
+GOOGLE_CLOUD_KEYRING=/usr/share/keyrings/cloud.google.gpg
+GOOGLE_CLOUD_KEY_FINGERPRINT=35BAA0B33E9EB396F59CA838C0BA5CE6DC6315A3
+GOOGLE_CLOUD_KUBECTL_PREFERENCES_FILE=/etc/apt/preferences.d/google-cloud-kubectl.pref
+
+# https://learn.microsoft.com/cli/azure/install-azure-cli-linux?pivots=apt
+AZURE_CLI_APT_URI=https://packages.microsoft.com/repos/azure-cli
+AZURE_CLI_KEY_URL=https://packages.microsoft.com/keys/microsoft.asc
+AZURE_CLI_KEYRING=/etc/apt/keyrings/azure-cli.gpg
+AZURE_CLI_KEY_FINGERPRINT=BC528686B50D79E339D3721CEB3E94ADBE1229CF
 
 # The Codex desktop app, published by OpenAI as the `chatgpt` package. OpenAI
 # document no standalone key URL: the downloaded package's maintainer script is

@@ -200,6 +200,7 @@ for function_name in \
     postflight_shell_env \
     postflight_completions \
     postflight_upstream_tools \
+    postflight_cloud_clis \
     postflight_headless_credentials \
     postflight_containers; do
   eval "$function_name() { printf '%s\\n' '$function_name' >> '$calls'; }"
@@ -228,6 +229,7 @@ postflight_shell_paths
 postflight_shell_env
 postflight_completions
 postflight_upstream_tools
+postflight_cloud_clis
 postflight_headless_credentials
 postflight_containers
 EXPECTED

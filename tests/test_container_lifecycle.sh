@@ -45,7 +45,7 @@ chmod +x "$container_stub"
 apple_container_bin() { printf '%s\n' "$container_stub"; }
 pkgutil() { return 0; }
 uname() { [[ "${1:-}" == -m ]] && printf 'arm64\n' || printf 'Darwin\n'; }
-sw_vers() { printf '26.6\n'; }
+sw_vers() { printf '27.0.1\n'; }
 rosetta_installed() { return 0; }
 install_apple_container_pkg() { printf 'install-package\n' >> "$calls"; }
 

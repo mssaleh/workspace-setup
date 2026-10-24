@@ -34,6 +34,8 @@ SKIP_COMPLETIONS=1
 export REPO_DIR HOME USER OS_KIND DISTRO PKGMGR BREW_BIN BREW_PREFIX
 export SKIP_FONT SKIP_CONTAINER SKIP_DOCKER SKIP_SSH SKIP_COMPLETIONS
 mkdir -p "$HOME/.local/bin" "$HOME/.cargo/bin" "$HOME/.config/uv"
+PATH="$HOME/.local/bin:$HOME/.npm/packages/bin:$PATH"
+export PATH
 
 repo_dir() { printf '%s\n' "$REPO_DIR"; }
 # shellcheck disable=SC1091
@@ -65,6 +67,7 @@ repo_dir() { printf '%s\n' "$REPO_DIR"; }
 # so every command a check resolves comes from this fixture: delta is the pager
 # and diff filter ~/.gitconfig names.
 PACKAGES_BREW=()
+PACKAGES_BREW_CLI_CASK=()
 fixture_tmux_installed=0
 pkg_installed() {
   if [[ "$1" == tmux ]]; then
@@ -83,6 +86,14 @@ for command_name in uv uvx claude codex delta pwsh; do
   printf '%s\n' '#!/bin/sh' 'exit 0' > "$HOME/.local/bin/$command_name"
   chmod +x "$HOME/.local/bin/$command_name"
 done
+for command_name in gh gcloud az kubectl gddy openai ant agy; do
+  printf '%s\n' '#!/bin/sh' 'printf "cli 1.0.0\n"' > "$HOME/.local/bin/$command_name"
+  chmod +x "$HOME/.local/bin/$command_name"
+done
+printf '%s\n' '#!/bin/sh' 'printf "aws-cli/2.0.0\n"' > "$HOME/.local/bin/aws"
+chmod +x "$HOME/.local/bin/aws"
+mkdir -p "$HOME/.npm/packages/bin"
+cp "$HOME/.local/bin/gddy" "$HOME/.npm/packages/bin/cf"
 printf '%s\n' '#!/bin/sh' 'exit 0' > "$HOME/.cargo/bin/rustup"
 chmod +x "$HOME/.cargo/bin/rustup"
 # shellcheck disable=SC2016 # literal content for the fixture's future shell

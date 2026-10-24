@@ -129,7 +129,7 @@ repo_dir() {
 
 # _setup_fetch <url> <destination> — retrieve the payload archive.
 #
-# curl is not a given: on Debian and Ubuntu it is Priority: optional while wget
+# curl is not a given: on Ubuntu it is Priority: optional while wget
 # is Priority: standard, and this runs before the stage that installs curl.
 # Either tool works. macOS uses curl, which it ships; wget arrives only with
 # Homebrew, which this script is here to install.
@@ -164,7 +164,7 @@ _setup_fetch() {
 # ── Bootstrap from a piped one-liner ─────────────────────────────────────
 # If BASH_SOURCE is empty (the script was piped in), fetch a source archive
 # into a temporary directory. This deliberately does not require git: a
-# download tool and tar are present on supported macOS and Ubuntu/Debian
+# download tool and tar are present on supported macOS and Ubuntu
 # hosts. The payload is removed on every exit; configuration is copied out as
 # regular files.
 if [[ -z "${BASH_SOURCE[0]:-}" ]] || [[ ! -f "$(dirname "${BASH_SOURCE[0]:-$0}")/lib/log.sh" ]]; then
@@ -213,6 +213,13 @@ if [[ -z "${BASH_SOURCE[0]:-}" ]] || [[ ! -f "$(dirname "${BASH_SOURCE[0]:-$0}")
   cd "${REPO_DIR}"
 fi
 
+# Reject unsupported hosts before loading provisioning stages or agent workers.
+# shellcheck disable=SC1091
+. "$(repo_dir)/lib/log.sh"
+# shellcheck disable=SC1091
+. "$(repo_dir)/lib/os.sh"
+detect_os
+
 if [[ "$SETUP_SCOPE" == agents ]]; then
   REPO_DIR=$(repo_dir)
   export REPO_DIR
@@ -221,10 +228,6 @@ if [[ "$SETUP_SCOPE" == agents ]]; then
 fi
 
 # ── Source library files ─────────────────────────────────────────────────
-# shellcheck disable=SC1091
-. "$(repo_dir)/lib/log.sh"
-# shellcheck disable=SC1091
-. "$(repo_dir)/lib/os.sh"
 # shellcheck disable=SC1091
 . "$(repo_dir)/lib/apt.sh"
 # shellcheck disable=SC1091
@@ -335,7 +338,6 @@ main() {
   setup_color bold; printf '║  workspace-setup — one-shot host provisioning (macOS/Linux) ║\n'; setup_color reset
   setup_color bold; printf '╚══════════════════════════════════════════════════════════════╝\n'; setup_color reset
 
-  detect_os
   detect_pkgmgr
   if [[ "$OS_KIND" == macos ]]; then
     source_macos_stages

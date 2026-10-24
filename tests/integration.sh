@@ -5,6 +5,7 @@ set -uo pipefail
 repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # shellcheck source=lib/manifest.sh
 . "$repo/lib/manifest.sh"
+. "$repo/lib/os.sh"
 image=""
 case "${1:-}" in
   "") ;;
@@ -53,7 +54,7 @@ mkdir -p "$source_dir/lib/agents" "$source_dir/manifests" "$source_dir/tests/int
   "$source_dir/dotfiles/config/opencode" \
   "$result_dir/build-context" || exit
 cp "$repo/setup.sh" "$repo/README.md" "$source_dir/" || exit
-cp "$repo/lib/log.sh" "$source_dir/lib/" || exit
+cp "$repo/lib/log.sh" "$repo/lib/os.sh" "$source_dir/lib/" || exit
 cp "$repo/lib/agents/"*.sh "$source_dir/lib/agents/" || exit
 cp "$repo/scripts/sync_agents.sh" "$repo/scripts/stage_agents.sh" "$source_dir/scripts/" || exit
 cp "$repo/dotfiles/claude/settings.json" "$source_dir/dotfiles/claude/" || exit
@@ -70,12 +71,19 @@ if [[ -z "$image" ]]; then
   cp "$repo/tests/integration/Dockerfile" "$result_dir/build-context/" || exit
   printf 'Building current CLI releases; build log: %s/build.log\n' "$result_dir"
   if ! docker build --pull --no-cache --build-arg "NODE_MAJOR=$NODE_MAJOR" \
+      --build-arg "BASE=ubuntu:$SUPPORTED_UBUNTU_VERSION" \
       --tag "$image" "$result_dir/build-context" \
       > "$result_dir/build.log" 2>&1; then
     tail -40 "$result_dir/build.log"
     exit 1
   fi
 fi
+docker run --rm --entrypoint bash "$image" -c \
+  '. /etc/os-release; [[ "$ID" == ubuntu && "$VERSION_ID" == "$1" ]]' \
+  bash "$SUPPORTED_UBUNTU_VERSION" || {
+    printf 'Integration image must use Ubuntu %s; rebuild with bash tests/integration.sh\n' "$SUPPORTED_UBUNTU_VERSION" >&2
+    exit 1
+  }
 image_id=$(docker image inspect --format '{{.Id}}' "$image") || exit
 printf '%s\n' "$image_id" > "$result_dir/image-id"
 printf 'Results: %s\n' "$result_dir"

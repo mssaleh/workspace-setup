@@ -2,26 +2,35 @@
 # lib/os.sh — OS detection and package manager abstraction.
 # Sourced by setup.sh and stage scripts. Sets globals:
 #   OS_KIND   — "macos" or "linux"
-#   DISTRO    — "ubuntu" / "debian" / "macos" (best-effort)
+#   DISTRO    — "ubuntu" / "macos"
 #   PKGMGR    — "brew" / "apt" / "apt-get"
 #   BREW_BIN    — absolute path to brew
 #   BREW_PREFIX — prefix reported by that brew installation
 #   APT_ENV   — env vars to prefix sudo apt-get with for non-interactive installs
 
+SUPPORTED_UBUNTU_VERSION=26.04
+# shellcheck disable=SC2034 # read by the VM integration runner
+SUPPORTED_UBUNTU_CODENAME=resolute
+SUPPORTED_MACOS_MAJOR=27
+
 detect_os() {
+  local release_file="${1:-/etc/os-release}" version='' ID='' VERSION_ID=''
   case "$(uname -s)" in
-    Darwin) OS_KIND=macos; DISTRO=macos ;;
-    Linux)
-      OS_KIND=linux
-      if [[ -f /etc/os-release ]]; then
-        # shellcheck disable=SC1091
-        . /etc/os-release
-        DISTRO="${ID:-linux}"
-      else
-        DISTRO=linux
-      fi
+    Darwin)
+      version=$(sw_vers -productVersion) || fail "Cannot read the macOS version"
+      [[ "${version%%.*}" == "$SUPPORTED_MACOS_MAJOR" ]] \
+        || fail "Unsupported macOS version: $version. Requires macOS $SUPPORTED_MACOS_MAJOR."
+      OS_KIND=macos; DISTRO=macos
       ;;
-    *) fail "Unsupported OS: $(uname -s). This script supports macOS and Linux." ;;
+    Linux)
+      [[ -r "$release_file" ]] || fail "Cannot read Linux release information: $release_file"
+      # shellcheck disable=SC1090
+      . "$release_file"
+      [[ "$ID" == ubuntu && "$VERSION_ID" == "$SUPPORTED_UBUNTU_VERSION" ]] \
+        || fail "Unsupported Linux release: ${ID:-unknown} ${VERSION_ID:-unknown}. Requires Ubuntu $SUPPORTED_UBUNTU_VERSION LTS."
+      OS_KIND=linux; DISTRO=ubuntu
+      ;;
+    *) fail "Unsupported OS: $(uname -s). Requires Ubuntu $SUPPORTED_UBUNTU_VERSION LTS or macOS $SUPPORTED_MACOS_MAJOR." ;;
   esac
   export OS_KIND DISTRO
 }
@@ -103,24 +112,19 @@ detect_pkgmgr() {
     refresh_brew_environment
   elif command -v apt-get >/dev/null 2>&1; then
     PKGMGR=apt-get
-    DISTRO="${DISTRO:-debian}"
   elif command -v apt >/dev/null 2>&1; then
     PKGMGR=apt
-    DISTRO="${DISTRO:-debian}"
   else
-    fail "Unsupported Linux package manager. This setup currently supports Ubuntu/Debian (apt)."
-  fi
-  if [[ "$OS_KIND" == linux && "$DISTRO" != ubuntu && "$DISTRO" != debian ]]; then
-    fail "Unsupported Linux distribution: $DISTRO. This setup currently supports Ubuntu and Debian."
+    fail "Ubuntu $SUPPORTED_UBUNTU_VERSION requires apt-get or apt."
   fi
   export PKGMGR BREW_BIN BREW_PREFIX
 
-  # On Debian/Ubuntu, apt/dpkg can prompt during postinst scripts (tzdata
+  # apt/dpkg can prompt during postinst scripts (tzdata
   # timezone, locales language picker, keyboard-configuration, etc.) and
   # will hang a non-TTY SSH session. sudo's env_reset strips env vars by
   # default, so we must pass them via `sudo env VAR=val ...` (or sudo's
   # `VAR=val cmd` form). DEBIAN_FRONTEND=noninteractive covers debconf
-  # prompts; NEEDRESTART_MODE=a covers Ubuntu 24.04+'s needrestart "restart
+  # prompts; NEEDRESTART_MODE=a covers needrestart's "restart
   # services?" dialog (separate mechanism, not debconf). APT_LISTCHANGES_FRONTEND=none
   # covers apt-listchanges. These are transient (per-command), not written
   # to /etc/apt/apt.conf.d/, so they don't affect the user's future apt runs.

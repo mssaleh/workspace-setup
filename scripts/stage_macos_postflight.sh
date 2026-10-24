@@ -78,6 +78,14 @@ postflight_macos_packages() {
     postflight_fail "missing Homebrew formulae: ${missing[*]}"
   fi
 
+  for pkg in "${PACKAGES_BREW_CLI_CASK[@]+"${PACKAGES_BREW_CLI_CASK[@]}"}"; do
+    if "$BREW_BIN" list --cask "$pkg" >/dev/null 2>&1; then
+      postflight_pass "CLI cask $pkg is installed"
+    else
+      postflight_fail "missing CLI cask: $pkg"
+    fi
+  done
+
   host_is_workstation || return 0
   missing=()
   for pkg in "${PACKAGES_BREW_CASK[@]+"${PACKAGES_BREW_CASK[@]}"}"; do
@@ -412,6 +420,7 @@ stage_macos_postflight() {
   postflight_macos_terminal_profile
   postflight_macos_completions
   postflight_macos_upstream_tools
+  postflight_cloud_clis
   postflight_macos_kitty_platform_layer
   postflight_headless_credentials
   postflight_macos_containers

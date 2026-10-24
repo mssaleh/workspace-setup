@@ -19,6 +19,7 @@ calls="$TEST_TMP/calls"
 export HOMEBREW_TEST_CALLS="$calls"
 PACKAGES_BREW=(alpha beta container-compose)
 PACKAGES_BREW_CASK=(desktop-app)
+PACKAGES_BREW_CLI_CASK=()
 
 brew_test() {
   printf '%s\n' "$*" >> "$HOMEBREW_TEST_CALLS"

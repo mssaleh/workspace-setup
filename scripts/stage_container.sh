@@ -84,13 +84,6 @@ stage_container() {
       return 1
       ;;
   esac
-  local mac_major
-  mac_major=$(sw_vers -productVersion | cut -d. -f1)
-  if ((mac_major < 26)); then
-    warn "Apple Container requires macOS 26 or later; found $(sw_vers -productVersion)"
-    return 1
-  fi
-
   local container_bin
   container_bin=$(apple_container_bin 2>/dev/null || true)
   if [[ -n "$container_bin" ]] \

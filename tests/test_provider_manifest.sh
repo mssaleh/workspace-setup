@@ -119,7 +119,7 @@ done
 array_has cmake "${PACKAGES_BREW[@]}"
 array_has ninja "${PACKAGES_BREW[@]}"
 array_has cmake "${PACKAGES_APT[@]}"
-# Debian names the ninja binary's package ninja-build; `ninja` is an unrelated
+# Ubuntu names the ninja binary's package ninja-build; `ninja` is an unrelated
 # IRC bouncer utility, so the apt list must not carry the upstream name.
 array_has ninja-build "${PACKAGES_APT[@]}"
 if array_has ninja "${PACKAGES_APT[@]}"; then
@@ -179,10 +179,7 @@ done
 array_has zsh-autosuggestions "${PACKAGES_BREW[@]}"
 array_has zsh-syntax-highlighting "${PACKAGES_BREW[@]}"
 
-# Microsoft's CLIs each come from the one channel that actually publishes for
-# this host. azure-cli has an apt repository only for Ubuntu LTS codenames, so
-# a non-LTS or newer release resolves nothing; markitdown is PyPI-only. Both
-# are therefore uv-owned, and must not drift into an apt or brew list.
+# MarkItDown is uv-owned. Azure uses uv only without a matching Microsoft suite.
 array_has 'markitdown[all]' "${UV_TOOLS_COMMON[@]}"
 array_has azure-cli "${UV_TOOLS_LINUX[@]}"
 
@@ -195,9 +192,7 @@ for _uv_tool in "${UV_TOOLS_COMMON[@]}"; do
   fi
 done
 
-# Deliberate split ownership: uv on Linux where no repository packages it,
-# Homebrew on macOS where one does. It must not appear in the apt list, which
-# would mean two owners on the same host.
+# Linux fallback tools must not enter the default distribution package list.
 for _uv_tool in "${UV_TOOLS_LINUX[@]}"; do
   if array_has "$_uv_tool" "${PACKAGES_APT[@]}"; then
     printf '%s is uv-owned on Linux; remove it from PACKAGES_APT\n' "$_uv_tool" >&2
@@ -205,6 +200,20 @@ for _uv_tool in "${UV_TOOLS_LINUX[@]}"; do
   fi
 done
 array_has azure-cli "${PACKAGES_BREW[@]}"
+array_has awscli "${PACKAGES_BREW[@]}"
+array_has gcloud-cli "${PACKAGES_BREW_CLI_CASK[@]}"
+array_has cf "${NPM_TOOLS_COMMON[@]}"
+for _cloud_tool in openai ant gddy; do
+  array_has "$_cloud_tool" "${PROVIDERS_COMMON_UPSTREAM[@]}"
+  upstream_has_project "$_cloud_tool"
+done
+array_has agy "${PROVIDERS_COMMON_UPSTREAM[@]}"
+array_has aws-cli "${PROVIDERS_LINUX_UPSTREAM[@]}"
+array_has google-cloud-cli "${PROVIDERS_LINUX_OFFICIAL_REPO[@]}"
+array_has azure-cli "${PROVIDERS_LINUX_OFFICIAL_REPO[@]}"
+array_has ttscoff/thelab/apex "${PACKAGES_BREW[@]}"
+array_has apex "${PROVIDERS_LINUX_UPSTREAM[@]}"
+upstream_has_project apex
 
 # The Graph CLI ships as a GitHub release tarball, so it is upstream-owned and
 # must carry a project entry for the currency check to have anything to compare.

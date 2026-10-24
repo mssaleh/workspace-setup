@@ -3,12 +3,9 @@
 set -euo pipefail
 
 repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-base=ubuntu:26.04
-case "$*" in
-  '') ;;
-  --base\ *) [[ $# == 2 ]] || exit 2; base=$2 ;;
-  *) printf 'usage: bash tests/host-integration.sh [--base IMAGE]\n' >&2; exit 2 ;;
-esac
+. "$repo/lib/os.sh"
+[[ $# == 0 ]] || { printf 'usage: bash tests/host-integration.sh\n' >&2; exit 2; }
+base="ubuntu:$SUPPORTED_UBUNTU_VERSION"
 docker info >/dev/null
 results=$(mktemp -d "${TMPDIR:-/tmp}/workspace-host-integration.XXXXXX")
 container=${results##*/}

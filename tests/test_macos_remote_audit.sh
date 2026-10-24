@@ -38,7 +38,7 @@ launchctl() {
 dscl() { return 0; }
 dseditgroup() { printf 'yes test is a member of com.apple.access_ssh\n'; }
 fdesetup() { printf 'FileVault is On.\n'; }
-sw_vers() { printf '26.6\n'; }
+sw_vers() { printf '27.0.1\n'; }
 uname() { [[ "${1:-}" == -m ]] && printf 'arm64\n' || printf 'Darwin\n'; }
 stat() { printf '600\n'; }
 pmset() {

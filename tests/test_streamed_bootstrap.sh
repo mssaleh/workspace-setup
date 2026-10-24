@@ -77,7 +77,7 @@ cp -R "$TEST_ROOT/manifests" "$fixture/"
 tar -czf "$TEST_TMP/payload.tar.gz" -C "$TEST_TMP/fixture" workspace-setup-main
 
 # The one-liner is normally written with curl, but curl is not a given: on
-# Debian and Ubuntu it is Priority: optional while wget is Priority: standard,
+# Ubuntu it is Priority: optional while wget is Priority: standard,
 # so a minimal install is likelier to have wget. A script that fetches its own
 # payload with curl fails on exactly those hosts, before reaching the stage
 # that would install curl. These cases pin which tool setup.sh reaches for.

@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
 # scripts/stage_docker.sh — install the official Docker Engine + Docker
-# Compose v2 on Linux (Ubuntu/Debian). macOS skips this stage (uses Apple's
+# Compose v2 on Ubuntu. macOS skips this stage (uses Apple's
 # native `container` CLI instead — see stage_container.sh).
 #
 # Idempotent: re-running is safe. The apt repo + key writes overwrite in
 # place; apt install is a no-op if already at the latest version; usermod
 # -aG docker is idempotent (the -a appends, won't duplicate).
 #
-# Sources: https://docs.docker.com/engine/install/ubuntu/ and
-# https://docs.docker.com/engine/install/debian/.
+# Source: https://docs.docker.com/engine/install/ubuntu/
 
 # docker_remove_conflicting_packages — retire the distribution runtimes the
 # official Engine replaces, which Docker's install docs make the first step.
@@ -81,9 +80,8 @@ stage_docker() {
   local docker_repo_os
   case "$DISTRO" in
     ubuntu) docker_repo_os=ubuntu ;;
-    debian) docker_repo_os=debian ;;
     *)
-      warn "Docker Engine stage supports Ubuntu/Debian; detected DISTRO=$DISTRO"
+      warn "Docker Engine stage requires Ubuntu; detected DISTRO=$DISTRO"
       return 1
       ;;
   esac
@@ -110,7 +108,7 @@ stage_docker() {
   fi
 
   # --- 3. Add the apt repository (deb822 .sources format — official 2026 form) ---
-  # The suite is the Ubuntu/Debian codename. Architecture is resolved
+  # The suite is the Ubuntu codename. Architecture is resolved
   # via `dpkg --print-architecture` so the same script works on amd64 and arm64.
   # This setup supports the amd64 and arm64 workstation/server architectures.
   local codename
@@ -118,11 +116,7 @@ stage_docker() {
     # shellcheck source=/dev/null
     # shellcheck disable=SC1091
     . /etc/os-release 2>/dev/null
-    if [[ "$docker_repo_os" == ubuntu ]]; then
-      echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}"
-    else
-      echo "$VERSION_CODENAME"
-    fi
+    echo "$VERSION_CODENAME"
   )
   if [[ -z "$codename" ]]; then
     warn "could not determine distro codename from /etc/os-release — skipping Docker Engine"

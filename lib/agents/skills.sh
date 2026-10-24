@@ -177,7 +177,7 @@ skills_install() {
     names=$(manifest_field "$row" 2)
     mode=$(manifest_field "$row" 3)
 
-    want=$({ printf '%s\n' "$names" | tr ',' '\n' | grep -vE '^(\*|)$';
+    want=$({ printf '%s\n' "$names" | tr ',' '\n' | grep -v -e '^\*$' -e '^$';
              [[ "$mode" != whole ]] || lock_source_skill_names "$source"; } | sort -u)
     missing=$(comm -23 <(printf '%s\n' "$want") <(store_skill_names))
     [[ -n "$missing" || -n "${UPDATE_SKILLS:-}" || ( "$mode" == whole && -z "$want" ) ]] || continue

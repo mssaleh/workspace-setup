@@ -1,4 +1,4 @@
-ARG BASE=ubuntu:26.04
+ARG BASE
 FROM ${BASE}
 RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends sudo ca-certificates \

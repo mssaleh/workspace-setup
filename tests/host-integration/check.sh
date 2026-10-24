@@ -32,7 +32,7 @@ HTTPS_PROXY=http://127.0.0.1:1 HTTP_PROXY=http://127.0.0.1:1 ALL_PROXY=http://12
   bash /repo/setup.sh
 
 printf '\n== Installed commands in a fresh login shell ==\n'
-bash -lic 'command -v uv rustup claude codex opencode fd bat 7zz; uv --version; rustc --version; claude --version; codex --version; opencode --version'
+bash -lic 'set -e; for tool in uv rustup claude codex opencode fd bat 7zz gh aws gcloud az kubectl cf gddy openai ant agy; do command -v "$tool"; done; uv --version; rustc --version; claude --version; codex --version; opencode --version; gh --version; aws --version; gcloud --version; az --version; kubectl version --client; cf --version; gddy --version; openai --version; ant --version; agy --version'
 
 printf '\n== Full unit suite on the installed distribution ==\n'
 bash /repo/tests/run.sh

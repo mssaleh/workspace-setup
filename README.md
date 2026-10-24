@@ -1,6 +1,6 @@
 # workspace-setup
 
-Provision a terminal-first workspace and configure its coding agents on **macOS** and **Ubuntu/Debian Linux**. One repository owns packages, toolchains, regular configuration files, SSH, terminals, containers, shared skills, MCP servers, and Claude Code plugins.
+Provision a terminal-first workspace and configure its coding agents on **Ubuntu 26.04 LTS** and **macOS 27**. These are the only supported operating systems. Setup rejects other releases before provisioning or synchronizing agents. One repository owns packages, toolchains, regular configuration files, SSH, terminals, containers, shared skills, MCP servers, and Claude Code plugins.
 
 The setup payload is disposable. `curl | bash` downloads it into a temporary directory, provisions and verifies the host, synchronizes agents, then deletes the payload. Installed files do not depend on the checkout. Providers retain their native state, including the skills CLI's lock file; setup retains no separate receipt or state directory.
 
@@ -42,7 +42,7 @@ one. Point `REPO_ARCHIVE_URL` at a `file://` archive to run without either.
 
 Re-running is safe: every stage inspects the provider's real artifacts and only applies missing deltas. If you run from a clone, the clone is not needed afterward and can be deleted.
 
-Apple Container requires Apple silicon and macOS 26 or later. On an older/Intel Mac, set `SKIP_CONTAINER=1`; the rest of the macOS setup remains usable.
+Apple Container requires Apple silicon. Set `SKIP_CONTAINER=1` when that runtime is unavailable.
 
 On macOS, host role and invocation context are separate. The default `HOST_PROFILE` is
 `workstation`, including when that workstation is provisioned over SSH. An SSH
@@ -61,7 +61,7 @@ packages without their recommendations; each control still overrides it.
 | **bootstrap** | On macOS, verifies that the selected Xcode Command Line Tools actually provide `xcrun clang` before touching Homebrew, then discovers Homebrew at its real prefix or installs it. It never launches the asynchronous CLT installer dialog. On Linux, ensures curl + git. |
 | **packages** | Installs the cross-platform CLI toolbox: `eza`, `fd`, `bat`, `ripgrep` (`rg`), `fzf`, `zoxide`, `yazi`, `git`, `git-delta` (`delta`), `lazygit`, `gh`, `zmx`, `rsync`, `rclone`, `nmap`, `jq`, `yq`, `pandoc`, `7zz` (`7z`), `cmake`, `ninja`, `node`, `uv`, `ruff`, `helm`, `kubectl`, `cosign`, `ffmpeg`, `poppler` (`poppler-utils`), `nano`, `himalaya`, `ncdu`, `shellcheck`, `pre-commit`, … It installs `xterm-kitty` terminfo as a non-GUI SSH capability on every host. Where a Linux release's apt has no `git-delta`, `eza` or `lazygit`, their upstream releases install into `~/.local/bin`. On Linux it registers **every** vendor archive before installing anything (see below), then installs the toolbox, the **Claude Desktop** app (skip with `SKIP_CLAUDE_DESKTOP=1`) and the **Codex app** (skip with `SKIP_CODEX_APP=1`). |
 | **docker** | Linux only: installs the official **Docker Engine** + **Docker Compose v2** from download.docker.com. Docker's documented pre-clean of the distribution's `docker.io`, `containerd` and `runc` names every package apt would take with them before it runs, since those runtimes carry reverse dependencies of their own. A complete, responsive official installation is a no-op on rerun. |
-| **toolchains** | Installs upstream **rustup**, Astral's standalone **uv/uvx** (plus its receipt), native Claude Code and Codex CLIs, and upstream opencode on Linux. Installs PowerShell and the Microsoft Graph SDK for the current user, plus `markitdown[all]` for document conversion. The separate Homebrew `uv` formula remains an intentional backup. |
+| **toolchains** | Installs upstream **rustup**, Astral's standalone **uv/uvx** (plus its receipt), native Claude Code and Codex CLIs, and upstream opencode on Linux. Adds the OpenAI API (`openai`), Anthropic API (`ant`), GoDaddy (`gddy`), Antigravity (`agy`), and Cloudflare (`cf`) CLIs, plus AWS CLI v2 on Linux. Installs PowerShell and the Microsoft Graph SDK for the current user, plus `markitdown[all]` for document conversion. The separate Homebrew `uv` formula remains an intentional backup. |
 | **configuration** | Converges ordinary files under `$HOME`; repairs old links into temporary checkouts, atomically upgrades exact known historical versions, semantically merges supported JSON/TOML/Git/ssh formats and repairs a shell startup file that has lost the host-local environment loader, preserves ambiguous user-owned content, installs the coding-agent skills into each agent home, and provisions the host-local environment directory `~/.config/shell/env.d/` that the supported shells source. |
 | **completions** | macOS only: runs `brew completions link` when Homebrew reports that external-command completions are not linked, then generates and syntax-checks Bash/Zsh completions from the installed Codex, rustup/cargo, opencode, Container, and Container Compose binaries. Existing files without this setup's ownership marker are preserved. Linux retains its existing himalaya loader only. |
 | **containers** | macOS only: installs Apple Container from Apple's signed package, ensures Rosetta, and writes only the stable build/registry defaults. The Container system remains stopped for on-demand laptop use unless `CONTAINER_START=1`; it is never stopped automatically. `container-compose` is supplied separately by Homebrew. |
@@ -156,7 +156,7 @@ Registering a vendor archive means running that vendor's maintainer scripts,
 and several write into `/etc` instead of packaging it. Claude Desktop's
 `postinst` writes an AppArmor profile `dpkg -S` reports no owner for; the Codex
 app ships one as a conffile and manages its own `disable/` symlink. Both need
-one: Ubuntu 24.04+ sets `kernel.apparmor_restrict_unprivileged_userns=1`, and an
+one: Ubuntu 26.04 sets `kernel.apparmor_restrict_unprivileged_userns=1`, and an
 Electron app cannot open its namespace sandbox without `userns` permitted.
 
 Microsoft Edge's package copies a profile into `/etc/apparmor.d` on every
@@ -403,7 +403,7 @@ sudo sshd -t                                # must pass; see below
 systemctl is-active --quiet ssh.service && sudo systemctl reload ssh
 ```
 
-The reload is conditional because Ubuntu 22.10 and later enable `ssh.socket`
+The reload is conditional because Ubuntu 26.04 enables `ssh.socket`
 instead of `ssh.service`: systemd holds port 22 and starts `sshd` on the first
 connection, so between connections there is nothing to reload and
 `systemctl reload ssh` answers `ssh.service is not active, cannot reload`.
@@ -467,7 +467,7 @@ lets the protocol work.
 ## Terminals and clipboard
 
 `xterm-kitty` terminfo is part of the non-GUI package baseline and remains
-installed when `SKIP_FONT=1`. Debian/Ubuntu use the lightweight
+installed when `SKIP_FONT=1`. Ubuntu uses the lightweight
 `kitty-terminfo` package; hosts without that package compile Kitty's official
 definition into `~/.terminfo`. Postflight resolves the entry with Kitty's
 private `TERMINFO` environment removed, matching a plain SSH session.
@@ -522,7 +522,7 @@ separate TCC decision. There are deliberately no `systemsetup`, `dseditgroup`,
 Apple documents Remote Login, its allow-list, and the separate “Allow full disk
 access for remote users” switch in [Sharing
 settings](https://support.apple.com/en-gb/guide/mac-help/mchlp1066/mac). On Apple
-silicon with macOS 26 or later, Apple also supports unlocking FileVault over
+silicon with macOS 27, Apple also supports unlocking FileVault over
 SSH after restart when Remote Login was already enabled and a supported network
 is available; platform eligibility is reported, but the setup cannot prove the
 preboot network/recovery journey and does not claim that it has. See Apple's
@@ -828,21 +828,31 @@ The script detects the OS and adapts:
 
 | Component | macOS | Linux |
 |---|---|---|
-| Package manager | Homebrew | apt-get (Ubuntu/Debian) |
+| Package manager | Homebrew | apt-get (Ubuntu 26.04) |
 | Host/session policy | `HOST_PROFILE=workstation` by default; SSH/noninteractive sessions suppress activation, not the workstation package set | `HOST_PROFILE=headless` sets the Linux graphical skip controls; `SETUP_SESSION_KIND` is not applied, and desktop integration never selects a default terminal |
 | Container runtime | Apple `container` CLI (Apple-signed release pkg) + Homebrew `container-compose`; installed-and-stopped is healthy, with no baseline CPU/memory override | **Docker Engine** (official, from download.docker.com) + Docker Compose v2 |
 | Apple Terminal defaults | untouched unless locally authorized with `CONFIGURE_APPLE_TERMINAL=1`; selecting Clear Dark needs the additional `SET_APPLE_TERMINAL_DEFAULT=1` | skipped |
-| SSH agent | macOS Keychain (launchd-managed `com.openssh.ssh-agent`, `--apple-use-keychain`) | systemd user unit (Ubuntu 26.04+: socket-activated; Ubuntu 24.04: headless drop-in), forwarding-aware local socket fallback, linger + `AddKeysToAgent yes`; passphrase typed once per boot |
+| SSH agent | macOS Keychain (launchd-managed `com.openssh.ssh-agent`, `--apple-use-keychain`) | socket-activated systemd user unit, forwarding-aware local socket fallback, linger + `AddKeysToAgent yes`; passphrase typed once per boot |
 | SSH key passphrase | passphrase-less (Keychain + FileVault protect the on-disk key) | passphrase-protected by default (override with `SSH_KEY_PASSPHRASE=none` for disposable VMs) |
 | Nerd Font | brew cask (`JetBrainsMono Nerd Font`) | GitHub release → `~/.local/share/fonts` (`JetBrainsMono Nerd Font Mono` variant — single-width icons for TUI alignment) |
 | Maccy clipboard manager | brew cask | skipped (Linux has its own clipboard managers) |
-| LibreOffice | brew cask | Linux preserves an installed official versioned DEB bundle. Otherwise Ubuntu uses `ppa:libreoffice/ppa` and Debian uses the distribution package. Skip installation with `SKIP_LIBREOFFICE=1` |
+| LibreOffice | brew cask | Preserves an installed official versioned DEB bundle. Otherwise uses `ppa:libreoffice/ppa`. Skip installation with `SKIP_LIBREOFFICE=1` |
 | Claude Desktop | optional Homebrew cask with `INSTALL_CLAUDE_DESKTOP=1`; an existing `/Applications/Claude.app` is preserved | official Anthropic apt repo, key fingerprint verified (skip with `SKIP_CLAUDE_DESKTOP=1`); beta, amd64/arm64 only |
 | ChatGPT/Codex desktop app | optional `chatgpt` cask with `INSTALL_CHATGPT_APP=1`; an existing `/Applications/ChatGPT.app` is preserved. OpenAI's current app combines ChatGPT, Work, and Codex ([migration guide](https://help.openai.com/en/articles/20001276-moving-to-the-new-chatgpt-desktop-app)) | OpenAI's own apt repo, registered by the package it publishes at `persistent.oaistatic.com` — they document no standalone signing key, so that package is the bootstrap and every later version arrives through apt. Fetched only while the repo is absent; the repo URI and keyring fingerprint are checked afterwards (skip with `SKIP_CODEX_APP=1`); amd64/arm64 only. Distinct from the Codex **CLI**, which stays upstream-owned on both platforms |
-| CMake | Homebrew `cmake` | Ubuntu LTS: Kitware's own archive (`apt.kitware.com`), key fingerprint verified, then handed to `kitware-archive-keyring` so the annual key rotation arrives through apt. Ubuntu releases Kitware does not publish for, and Debian, keep the distribution package |
+| CMake | Homebrew `cmake` | Kitware's own archive (`apt.kitware.com`) when it publishes a 26.04 suite, with a verified key fingerprint and `kitware-archive-keyring` for key rotation. Otherwise uses Ubuntu's package |
 | Ninja | Homebrew `ninja` | `ninja-build` from the distribution — Ubuntu ships the current upstream release, and Ninja publishes no apt repository |
-| Git | Homebrew `git` | Ubuntu: `ppa:git-core/ppa`, the PPA git-scm.com names for the current stable Git; Debian: distribution package |
+| Git | Homebrew `git` | `ppa:git-core/ppa`, the PPA git-scm.com names for the current stable Git |
 | GitHub CLI | Homebrew `gh` | GitHub's own archive (`cli.github.com`), every key in the downloaded keyring checked against the declared fingerprints. The distribution build trails upstream by tens of minor releases |
+| AWS CLI v2 (`aws`) | Homebrew `awscli` | [AWS's installer](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) verifies signatures, installs under `~/.local/share/aws-cli`, exposes `~/.local/bin/aws`, and checks for updates on each setup run. Setup restores missing launchers from the managed payload. An unavailable update installer preserves a working installation |
+| Google Cloud CLI (`gcloud`) | Homebrew `gcloud-cli` CLI cask, including headless hosts | [Google's apt archive](https://docs.cloud.google.com/sdk/docs/install-sdk#deb), with its signing fingerprint verified. An apt preference excludes Google's `kubectl` package so Kubernetes' declared minor and archive retain ownership |
+| Azure CLI (`az`) | Homebrew `azure-cli` | [Microsoft's apt archive](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli-linux?pivots=apt) when it publishes the host's suite. An existing uv copy is removed only after the apt command works. Hosts without a matching suite retain the uv fallback |
+| Cloudflare CLI (`cf`, `cloudflare`) | npm package [`cf`](https://developers.cloudflare.com/cf/get-started/) in `~/.npm/packages` | same; installed when missing and uses the project's Node 24 runtime |
+| GoDaddy CLI (`gddy`) | [Official installer](https://developer.godaddy.com/en/docs/api-users/cli/set-up), with checksum verification and execution checked before placement in `~/.local/bin` | same; compares installed and published releases on each run |
+| OpenAI API CLI (`openai`) | [Official release](https://developers.openai.com/api/docs/libraries/openai-cli) to `~/.local/bin`, verified against its published digest | same; separate from Codex, compares installed and published releases on each run |
+| Codex CLI (`codex`) | [OpenAI's native installer](https://releases.openai.com/codex/install.sh) to `~/.local/bin`, with package state under `CODEX_HOME`; shell setup uses a temporary home to preserve profiles | same |
+| Anthropic API CLI (`ant`) | [Official release](https://platform.claude.com/docs/en/cli-sdks-libraries/cli/quickstart) to `~/.local/bin`, verified against its published digest | same; separate from Claude Code, compares installed and published releases on each run |
+| Antigravity CLI (`agy`) | [Official installer](https://antigravity.google/download) to `~/.local/bin`; shell setup runs with a temporary home to preserve profiles and aliases | same; native background updates own its subsequent releases |
+| Apex Markdown (`apex`) | Homebrew `ttscoff/thelab/apex` | [Official release](https://github.com/ApexMarkdown/apex) to `~/.local/bin`, checksum verified, with installed and published versions compared on each run |
 | Tools not in default apt repo (helm, kubectl, himalaya, ruff, yazi, opencode) | Homebrew formula | official apt repo (helm, kubectl) / official installers (himalaya, opencode) / GitHub release → `~/.local/bin` (ruff, yazi). Each run compares what is installed against what the project publishes and upgrades when the published version is newer — see below |
 | `yq` and `cosign` | Homebrew `yq` (mikefarah) and `cosign` | upstream release → `~/.local/bin`, checksum verified against the publisher's own list. **Not** the distribution packages: Ubuntu's `yq` is kislyuk's jq wrapper — a different program with a different command language — and its `cosign` is a whole major behind. A setup for parity between a Mac and a Linux box cannot give the same command name to two different programs. A distribution build left installed alongside is preserved; `~/.local/bin` wins on PATH and postflight names the ambiguity |
 | Node.js | Homebrew owns both the unversioned formula and `node@24`, each with a job: `node@24` is the declared major and macOS creates `~/.local/bin/{node,npm,npx,corepack}` links to that keg wherever a destination is free, while the unversioned formula stays keg-linked in `$BREW_PREFIX/bin` as the fallback for a host where a link cannot be made. Postflight verifies the resolved executable and major from a bare SSH-style PATH | **NodeSource** apt repo (`deb.nodesource.com`), major set by `NODE_MAJOR` in `lib/manifest.sh`; signing key fingerprint verified. Ubuntu's own `nodejs` trails upstream by several majors and its separately versioned `npm` package drags an older nodejs in with it, so neither name stays in `PACKAGES_APT`, and `/etc/apt/preferences.d/nodesource.pref` puts the distribution's `nodejs`, `npm`, `nodejs-doc` and `libnode-dev` below zero so apt cannot select them at all. The pin is written alongside the repository and never without it. The repo and keyring are written only when their content differs, so a re-run performs no apt work at all |
@@ -873,13 +883,14 @@ forgotten.
 **Distribution packages** come from the vendor's own archive where the
 distribution's build is too far behind to use — `ppa:git-core/ppa`,
 `cli.github.com`, `apt.kitware.com`, `pkgs.k8s.io`, `packages.buildkite.com`,
-`downloads.claude.ai`, `deb.nodesource.com`, `ppa:libreoffice/ppa`. On Linux
+`downloads.claude.ai`, `deb.nodesource.com`, `packages.cloud.google.com`,
+`packages.microsoft.com/repos/azure-cli`, `ppa:libreoffice/ppa`. On Linux
 every archive is registered before any package is installed, so a name resolves
 to the vendor's build the first time rather than being installed from the
 distribution and replaced afterwards. One index refresh covers them all.
 
 **Publisher-installed tools** — `ruff`, `yazi`, `himalaya`, `opencode`, `yq`,
-`cosign`, standalone `uv`, and `delta`, `eza` and `lazygit` where apt lacks them —
+`cosign`, `openai`, `ant`, `gddy`, standalone `uv`, and `delta`, `eza` and `lazygit` where apt lacks them —
 have no package manager carrying them forward, so each run compares what is
 installed against what the project publishes and upgrades when the published version is newer.
 GitHub release archives use the publisher's SHA-256 sidecar when available,
@@ -990,9 +1001,8 @@ bash tests/run.sh
 bash tests/run.sh --only host
 bash tests/run.sh --only agents
 
-# Agent synchronization under Bash 3.2 and an Alpine userland:
-docker run --rm -v "$PWD":/repo:ro bash:3.2 sh -c \
-  'apk add --no-cache gawk >/dev/null; cp -R /repo /w && cd /w && bash tests/run.sh --only agents'
+# On macOS 27, this runs agent tests under Apple's Bash 3.2 and Homebrew Bash:
+bash tests/run.sh --only agents
 
 # Real agent CLIs, temporary homes, and shipped manifests:
 bash tests/integration.sh
@@ -1000,8 +1010,6 @@ bash tests/integration.sh --image workspace-setup-integration:latest
 
 # Real headless host provisioning, with no host credentials or Docker socket:
 bash tests/host-integration.sh
-bash tests/host-integration.sh --base ubuntu:22.04
-bash tests/host-integration.sh --base debian:13-slim
 
 # Real systemd, SSH and Docker Engine in a disposable Ubuntu VM:
 bash tests/vm-integration.sh
@@ -1022,8 +1030,8 @@ enabled state, OpenCode V1/V2, Copilot, plugin scope and updates, pruning,
 directory aliases, store relocation, argument preservation, failure recovery,
 and streamed execution. They use stubs and require no network.
 
-The integration runner builds the Node major declared in `lib/manifest.sh` and
-checks agent synchronization with real CLIs. Reused images must match that major. Its source
+The integration runner uses Ubuntu 26.04 and builds the Node major declared in `lib/manifest.sh` and
+checks agent synchronization with real CLIs. Reused images must match that OS and Node major. Its source
 snapshot contains only the entry point, agent worker and libraries, manifests,
 baseline agent policies, README, and agent tests. A non-root container has read-only source and root
 filesystem, disposable scratch and home, and no host credentials or Docker
@@ -1045,7 +1053,7 @@ read-only source snapshot. Docker Engine, desktop applications, and SSH key
 generation are explicitly excluded from this container profile. Checks cover
 fresh provisioning, reruns, login-shell commands, Word conversion, Graph SDK
 loading and repair, missing Rust compiler recovery, JSONC comment preservation, malformed configuration, retained dpkg
-configuration, download failure, checksum mismatch, and edited shell files.
+configuration, missing AWS launcher recovery, Azure CLI migration from uv to apt, download failure, checksum mismatch, and edited shell files.
 It also qualifies streamed host execution and combined host/agent setup with
 native CLIs, blocking remote MCP discovery during registration to prevent login
 prompts. The same `tests/run.sh` regression entry point runs inside the installed host.

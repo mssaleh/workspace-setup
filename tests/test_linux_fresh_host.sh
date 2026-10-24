@@ -81,7 +81,7 @@ bash_path_semantically_compliant \
 }
 
 # ── 3. A pristine distribution skeleton file must be replaced, not preserved ─
-# Every fresh Ubuntu/Debian account starts life with a copy of /etc/skel. That
+# Every fresh Ubuntu account starts life with a copy of /etc/skel. That
 # is not user-authored content, so convergence must overwrite it rather than
 # report an ambiguous conflict and leave the account with no PATH setup.
 CONFIG_SKEL_DIR="$TEST_TMP/skel"

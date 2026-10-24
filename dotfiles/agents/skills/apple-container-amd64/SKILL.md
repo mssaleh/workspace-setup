@@ -16,8 +16,7 @@ Apple's `container` runs each container in its own lightweight VM on `Virtualiza
 no Docker daemon and no `docker` CLI. `linux/amd64` workloads run on Apple Silicon through Rosetta 2
 binary translation inside an arm64 guest.
 
-Everything below was verified against **container 1.1.0** on macOS 26 / Apple Silicon. Where this file
-contradicts a blog post or a Docker habit, this file is right.
+This skill targets macOS 27 on Apple Silicon. Version-specific behavior refers to **container 1.1.0**.
 
 ## Hard constraints — read before doing anything
 
@@ -36,7 +35,7 @@ contradicts a blog post or a Docker habit, this file is right.
 
 ## Requirements
 
-* Apple Silicon Mac (M1–M5). macOS 15+, macOS 26+ for the full networking/socket feature set.
+* Apple Silicon Mac (M1–M5) running macOS 27.
 * `container` v1.0.0+ (`container --version`). Install the signed `.pkg` from
   <https://github.com/apple/container/releases>; uninstall with `/usr/local/bin/uninstall-container.sh`.
 * Rosetta 2 present (`/Library/Apple/usr/libexec/oah` exists). Install with
@@ -197,7 +196,6 @@ Its sharp edges — all verified:
   arrives as `CACHE_HOST=192.168.65.2`), rather than relying on DNS. Don't assume DNS-name semantics.
 * The `$HOME` build-context rule (constraint #1) applies to compose `build:` stages exactly as it does to
   `container build`.
-* No DNS auto-configuration on macOS 15; macOS 26+ is required for the intended behavior.
 
 ## Troubleshooting
 

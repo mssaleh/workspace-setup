@@ -211,7 +211,7 @@ fi
 # Plugins (Homebrew, sourced — not aliases). Syntax highlighting is sourced at
 # the absolute end of the file, as required by the plugin.
 # OS-aware: on Homebrew they live under $BREW_PREFIX/share/<plugin>/; on Linux
-# distros that ship them as packages (Debian/Ubuntu: zsh-autosuggestions,
+# Ubuntu packages (zsh-autosuggestions,
 # zsh-syntax-highlighting) they live in /usr/share/zsh-<plugin>/.
 _zsh_plugin() {
   local name="$1" file="$2"

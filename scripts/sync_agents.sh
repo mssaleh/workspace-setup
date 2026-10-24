@@ -30,6 +30,8 @@ MANIFEST_DIR=${MANIFEST_DIR:-$REPO_DIR/manifests}
 
 # shellcheck source=lib/agents/log.sh
 . "$REPO_DIR/lib/agents/log.sh"
+# shellcheck source=lib/os.sh
+. "$REPO_DIR/lib/os.sh"
 # shellcheck source=lib/agents/manifest.sh
 . "$REPO_DIR/lib/agents/manifest.sh"
 # shellcheck source=lib/agents/agentcfg.sh
@@ -66,6 +68,7 @@ while (($#)); do
   esac
   shift
 done
+detect_os
 export DRY_RUN=${DRY_RUN:-}
 export PRUNE_PLUGIN_CACHE=${PRUNE_PLUGIN_CACHE:-}
 export PRUNE_DUPLICATE_MCP=${PRUNE_DUPLICATE_MCP:-}

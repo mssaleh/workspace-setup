@@ -34,7 +34,7 @@ stage_bootstrap() {
       warn "Xcode CLI tools installation may require accepting a dialog. Re-run after it finishes."
     fi
   else
-    # Linux: apt is pre-installed on Ubuntu/Debian. Ensure curl + git are
+    # Ubuntu: apt is pre-installed. Ensure curl + git are
     # present (needed by the rest of the script). `apt update` takes no -y.
     # APT_ENV is set by detect_pkgmgr in lib/os.sh; if it's empty (e.g. the
     # bootstrap runs before detect_pkgmgr — shouldn't happen since setup.sh

@@ -136,7 +136,7 @@ config_strip_env_loader() {
 
 # A dotfile byte-identical to the distribution's skeleton copy is not user
 # content — it is exactly what adduser/useradd placed there when the account
-# was created. Every fresh Ubuntu/Debian account starts with /etc/skel/.bashrc
+# was created. Every fresh Ubuntu account starts with /etc/skel/.bashrc
 # and /etc/skel/.profile, so without this test the very first run on a new
 # Linux user would always classify them as ambiguous and refuse to converge.
 config_is_pristine_skel() {

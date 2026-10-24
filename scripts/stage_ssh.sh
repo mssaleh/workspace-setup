@@ -8,10 +8,7 @@
 #     `ssh-add --apple-use-keychain`. The launchd-managed ssh-agent (the
 #     system default at /System/Library/LaunchAgents/com.openssh.ssh-agent.plist)
 #     is always running; no enablement needed.
-#   Linux: the systemd user unit for ssh-agent ships with openssh-client,
-#     but on Ubuntu 24.04 it's GUI-gated (ConditionPathExists=/etc/X11/X11/Xsession.options),
-#     so on a headless box we drop a drop-in to strip that condition. On
-#     Ubuntu 26.04 a proper socket-activated ssh-agent.socket ships and
+#   Ubuntu 26.04: a socket-activated ssh-agent.socket ships with openssh-client and
 #     works headless out of the box. We enable it via `systemctl --user`.
 #     There is no Keychain equivalent on headless Linux — the passphrase is
 #     typed once per boot (or once per `ssh-add`). `keychain` (the funtoo
@@ -148,16 +145,10 @@ stage_ssh() {
     local agent_socket
     agent_socket=$(linux_ssh_agent_socket)
 
-    # Linux: enable the systemd user ssh-agent if a unit is shipped.
-    # - Ubuntu 26.04: ships ssh-agent.socket (WantedBy=sockets.target, headless-ready).
-    # - Ubuntu 24.04: ships ssh-agent.service only, GUI-gated via
-    #   ConditionPathExists=/etc/X11/Xsession.options. We drop a drop-in to
-    #   strip that condition so it works headless.
-    # - Other distros (Arch, Fedora): may ship the unit; we try and warn if not.
+    # Ubuntu's socket-activated agent is available in headless sessions.
     local agent_unit_found=no
     if [[ -f /usr/lib/systemd/user/ssh-agent.socket ]]; then
       agent_unit_found=yes
-      # 26.04+ path — socket-activated, clean headless enable.
       if systemctl --user is-enabled ssh-agent.socket >/dev/null 2>&1; then
         ok "ssh-agent.socket already enabled"
       else
@@ -167,35 +158,6 @@ stage_ssh() {
       fi
       systemctl --user start ssh-agent.socket 2>/dev/null \
         || warn "could not start ssh-agent.socket"
-    elif [[ -f /usr/lib/systemd/user/ssh-agent.service ]]; then
-      agent_unit_found=yes
-      # 24.04 path — service only, GUI-gated. Drop a drop-in to strip the
-      # ConditionPathExists so it works on a headless box.
-      local dropin_dir="$HOME/.config/systemd/user/ssh-agent.service.d"
-      if [[ ! -f "$dropin_dir/headless.conf" ]]; then
-        info "ssh-agent.service is GUI-gated on this Ubuntu; installing a drop-in to enable it headless…"
-        mkdir -p "$dropin_dir"
-        cat > "$dropin_dir/headless.conf" <<'DROPIN'
-# Strip the GUI-only ConditionPathExists so ssh-agent.service starts on a
-# headless server. The condition is a holdover from Ubuntu's X-session wiring
-# and is irrelevant on a server. See Arch Wiki SSH keys / Ubuntu 24.04
-# openssh-client package for context.
-[Unit]
-ConditionPathExists=
-# Reset to empty — drops the inherited condition entirely.
-DROPIN
-        systemctl --user daemon-reload 2>/dev/null || true
-        if systemctl --user is-enabled ssh-agent.service >/dev/null 2>&1; then
-          ok "ssh-agent.service already enabled"
-        else
-          systemctl --user enable --now ssh-agent.service 2>/dev/null \
-            || warn "could not enable ssh-agent.service (run: systemctl --user enable --now ssh-agent.service)"
-        fi
-      else
-        ok "ssh-agent.service headless drop-in already installed"
-      fi
-      systemctl --user start ssh-agent.service 2>/dev/null \
-        || warn "could not start ssh-agent.service"
     else
       warn "no systemd user ssh-agent unit found on this system"
     fi

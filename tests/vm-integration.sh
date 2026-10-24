@@ -2,6 +2,7 @@
 # Exercise systemd, Docker Engine, and SSH in a disposable booted Ubuntu guest.
 set -euo pipefail
 repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+. "$repo/lib/os.sh"
 for command in qemu-system-x86_64 qemu-img xorriso curl; do
   command -v "$command" >/dev/null || { printf '%s is required\n' "$command" >&2; exit 1; }
 done
@@ -22,10 +23,11 @@ cp -R "$repo/lib" "$repo/scripts" "$repo/dotfiles" "$repo/manifests" "$repo/syst
   "$repo/tests" "$repo/tools" "$results/source/"
 chmod -R a+rX "$results/source"
 tar -czf "$results/source.tar.gz" -C "$results/source" .
-base=https://cloud-images.ubuntu.com/resolute/current
-curl -fL "$base/resolute-server-cloudimg-amd64.img" -o "$results/base.img" > "$results/download.log" 2>&1
+base="https://cloud-images.ubuntu.com/$SUPPORTED_UBUNTU_CODENAME/current"
+cloud_image="$SUPPORTED_UBUNTU_CODENAME-server-cloudimg-amd64.img"
+curl -fL "$base/$cloud_image" -o "$results/base.img" > "$results/download.log" 2>&1
 curl -fsSL "$base/SHA256SUMS" -o "$results/SHA256SUMS"
-expected=$(awk '$2 == "*resolute-server-cloudimg-amd64.img" || $2 == "resolute-server-cloudimg-amd64.img" { print $1 }' "$results/SHA256SUMS")
+expected=$(awk -v image="$cloud_image" '$2 == "*" image || $2 == image { print $1 }' "$results/SHA256SUMS")
 actual=$(sha256sum "$results/base.img" | cut -d' ' -f1)
 [[ -n "$expected" && "$actual" == "$expected" ]]
 printf '%s\n' "$actual" > "$results/image-sha256"

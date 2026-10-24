@@ -1,8 +1,13 @@
 ARG NODE_MAJOR
-FROM node:${NODE_MAJOR:-lts}-trixie-slim
+ARG BASE
+FROM node:${NODE_MAJOR} AS node-runtime
+FROM ${BASE}
+
+COPY --from=node-runtime /usr/local/ /usr/local/
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends bash ca-certificates curl gawk git \
+    && apt-get install -y --no-install-recommends bash ca-certificates curl gawk git libstdc++6 \
+    && useradd --create-home --uid 1001 --shell /bin/bash node \
     && rm -rf /var/lib/apt/lists/*
 
 # Official npm distributions include the platform binaries.

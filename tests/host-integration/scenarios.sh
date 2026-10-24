@@ -25,6 +25,36 @@ stage_toolchains
 rustup which rustc
 rustc --version
 
+printf '\n== Missing AWS launchers are restored from the managed payload ==\n'
+rm "$HOME/.local/bin/aws" "$HOME/.local/bin/aws_completer"
+install_cloud_clis
+for tool in aws aws_completer; do
+  [[ "$HOME/.local/bin/$tool" -ef "$HOME/.local/share/aws-cli/v2/current/bin/$tool" ]]
+done
+aws --version
+
+if apt_repo_is_configured "$AZURE_CLI_APT_URI"; then
+  printf '\n== Azure migration retains uv until the apt command works ==\n'
+  uv tool install azure-cli
+  [[ "$(command -v az)" -ef "$HOME/.local/bin/az" ]]
+  sudo mv /usr/bin/az /usr/bin/az.qa-disabled
+  if stage_toolchains; then
+    printf 'FAIL: Azure migration accepted a missing apt command\n' >&2
+    exit 1
+  fi
+  uv tool list | awk '$1 == "azure-cli" { found = 1 } END { exit !found }'
+  "$HOME/.local/bin/az" --version
+  sudo mv /usr/bin/az.qa-disabled /usr/bin/az
+  /usr/bin/az --version
+  stage_toolchains
+  if uv tool list | awk '$1 == "azure-cli" { found = 1 } END { exit !found }'; then
+    printf 'FAIL: Azure migration retained the duplicate uv installation\n' >&2
+    exit 1
+  fi
+  [[ "$(command -v az)" -ef /usr/bin/az ]]
+  az --version
+fi
+
 printf '\n== Actual document conversion ==\n'
 printf '# Container document\n\nDocument conversion works.\n' > "$scratch/input.md"
 pandoc "$scratch/input.md" -o "$scratch/input.docx"

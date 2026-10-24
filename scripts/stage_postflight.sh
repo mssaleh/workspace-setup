@@ -872,7 +872,7 @@ postflight_upstream_tools() {
   fi
   if [[ "$OS_KIND" == linux ]]; then
     local linux_upstream_missing=() artifact name probe entry unrunnable=""
-    local upstream_names=(zmx ruff yazi ya himalaya yq cosign)
+    local upstream_names=(zmx ruff yazi ya himalaya yq cosign apex)
     for entry in "${APT_UPSTREAM_FALLBACKS[@]}"; do
       [[ -e "$HOME/.local/bin/${entry#*:}" ]] && upstream_names+=("${entry#*:}")
     done
@@ -1159,6 +1159,57 @@ postflight_containers() {
   fi
 }
 
+postflight_cloud_clis() {
+  local tool expected resolved output
+  for tool in gh aws gcloud az kubectl cf gddy openai ant agy; do
+    resolved=$(command -v "$tool" 2>/dev/null || true)
+    if [[ -z "$resolved" ]]; then
+      postflight_fail "missing CLI: $tool"
+      continue
+    fi
+    expected=''
+    case "$tool" in
+      openai|ant|gddy|agy) expected="$HOME/.local/bin/$tool" ;;
+      cf) expected="$HOME/.npm/packages/bin/cf" ;;
+      aws) [[ "$OS_KIND" == linux ]] && expected="$HOME/.local/bin/aws" ;;
+    esac
+    if [[ -n "$expected" && ! "$resolved" -ef "$expected" ]]; then
+      postflight_fail "$tool resolves to $resolved; expected $expected"
+      continue
+    fi
+    if [[ "$tool" == kubectl ]]; then
+      output=$(kubectl version --client 2>/dev/null) || output=''
+    else
+      output=$("$resolved" --version 2>/dev/null) || output=''
+    fi
+    if [[ -z "$output" ]]; then
+      postflight_fail "$tool version check failed"
+    elif [[ "$tool" == aws && "$output" != aws-cli/2.* ]]; then
+      postflight_fail "aws must provide AWS CLI v2"
+    else
+      postflight_pass "$tool is available and its version command runs"
+    fi
+  done
+  if [[ "$OS_KIND" == linux ]]; then
+    if [[ "$(vendor_command_state google-cloud-cli gcloud "$GOOGLE_CLOUD_APT_URI")" == managed ]]; then
+      postflight_pass "Google Cloud CLI uses its official apt package"
+    else
+      postflight_fail "Google Cloud CLI is missing or uses an unrecognized provider"
+    fi
+    if apt_repo_is_configured "$AZURE_CLI_APT_URI"; then
+      if [[ "$(vendor_command_state azure-cli az "$AZURE_CLI_APT_URI")" == managed ]]; then
+        postflight_pass "Azure CLI uses its official apt package"
+      else
+        postflight_fail "Azure CLI does not resolve to its official apt package"
+      fi
+    elif "$HOME/.local/bin/uv" tool list 2>/dev/null | awk '$1 == "azure-cli" { found = 1 } END { exit !found }'; then
+      postflight_pass "Azure CLI uses uv on a host without a Microsoft apt suite"
+    else
+      postflight_fail "Azure CLI fallback is missing from uv"
+    fi
+  fi
+}
+
 stage_postflight() {
   POSTFLIGHT_PASSES=0
   POSTFLIGHT_FAILURES=0
@@ -1176,6 +1227,7 @@ stage_postflight() {
   postflight_shell_env
   postflight_completions
   postflight_upstream_tools
+  postflight_cloud_clis
   postflight_headless_credentials
   postflight_containers
 

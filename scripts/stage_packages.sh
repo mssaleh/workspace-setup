@@ -6,7 +6,7 @@
 #   - Homebrew (macOS): one batch install of PACKAGES_BREW after adding the
 #     explicitly declared third-party taps in the provider manifest.
 #   - apt (Linux): PACKAGES_APT covers the toolbox available from the selected
-#     Ubuntu/Debian release's default repositories. Tools that aren't there
+#     Ubuntu's default repositories. Tools that aren't there
 #     are installed through their explicitly declared upstream providers into
 #     user-standard locations.
 #     kubectl + helm have OFFICIAL apt repos (pkgs.k8s.io + packages.buildkite.com)
@@ -261,7 +261,6 @@ register_third_party_apt_repos() {
     curl gnupg ca-certificates apt-transport-https || return 1
 
   # --- git — ppa:git-core/ppa, the PPA git-scm.com names for Ubuntu. ---
-  # Launchpad PPAs are Ubuntu-only; Debian keeps the distribution package.
   if [[ "$DISTRO" == ubuntu ]] \
      && ! find /etc/apt/sources.list.d -name 'git-core-ubuntu-ppa*' 2>/dev/null | grep -q .; then
     info "adding the Git maintainers' PPA (ppa:git-core/ppa)…"
@@ -306,6 +305,37 @@ register_third_party_apt_repos() {
       info "added the kubectl apt repo (pkgs.k8s.io, ${KUBERNETES_MINOR} stable)"
       changed=1
     fi
+  fi
+
+  if [[ "$(vendor_command_state google-cloud-cli gcloud "$GOOGLE_CLOUD_APT_URI")" != foreign ]] \
+     && apt_trust_repo_key 'Google Cloud CLI' "$GOOGLE_CLOUD_KEY_URL" \
+        "$GOOGLE_CLOUD_KEYRING" "$GOOGLE_CLOUD_KEY_FINGERPRINT"; then
+    # Google's kubectl package uses an epoch and otherwise wins over pkgs.k8s.io.
+    apt_write_sources "$GOOGLE_CLOUD_KUBECTL_PREFERENCES_FILE" \
+      "$(printf 'Package: kubectl\nPin: origin packages.cloud.google.com\nPin-Priority: -1\n')" \
+      >/dev/null || return 1
+    if [[ -n $(apt_write_sources /etc/apt/sources.list.d/google-cloud-sdk.list \
+        "$(printf 'deb [arch=%s signed-by=%s] %s cloud-sdk main\n' \
+          "$arch" "$GOOGLE_CLOUD_KEYRING" "$GOOGLE_CLOUD_APT_URI")") ]]; then
+      info "added the Google Cloud CLI apt repo"
+      changed=1
+    fi
+  fi
+
+  # Probe the actual suite; never substitute another distribution's release.
+  if [[ -n "$codename" && ( "$arch" == amd64 || "$arch" == arm64 ) ]] \
+     && curl -fsI "$AZURE_CLI_APT_URI/dists/$codename/Release" >/dev/null 2>&1; then
+    if apt_trust_repo_key 'Azure CLI' "$AZURE_CLI_KEY_URL" \
+        "$AZURE_CLI_KEYRING" "$AZURE_CLI_KEY_FINGERPRINT"; then
+      if [[ -n $(apt_write_sources /etc/apt/sources.list.d/azure-cli.sources \
+          "$(printf 'Types: deb\nURIs: %s\nSuites: %s\nComponents: main\nArchitectures: %s\nSigned-By: %s\n' \
+            "$AZURE_CLI_APT_URI" "$codename" "$arch" "$AZURE_CLI_KEYRING")") ]]; then
+        info "added the Azure CLI apt repo ($codename)"
+        changed=1
+      fi
+    fi
+  else
+    info "Azure CLI: could not confirm a Microsoft apt suite for $codename/$arch"
   fi
 
   # --- helm — helm.sh's current official archive (packages.buildkite.com). ---
@@ -368,8 +398,7 @@ register_third_party_apt_repos() {
   fi
 
   # --- cmake — Kitware's archive (apt.kitware.com). ---
-  # Ubuntu LTS suites only, and no Debian suite at all: ask the archive whether
-  # it publishes for this release rather than assuming from the codename.
+  # Probe whether Kitware publishes a suite for this Ubuntu release.
   local kitware_registered=''
   if [[ "$DISTRO" == ubuntu && -n "$codename" ]]; then
     if apt_package_installed kitware-archive-keyring \
@@ -571,6 +600,11 @@ stage_packages() {
       ok "all brew packages already installed"
     fi
 
+    for pkg in "${PACKAGES_BREW_CLI_CASK[@]}"; do
+      "$BREW_BIN" list --cask "$pkg" >/dev/null 2>&1 \
+        || "$BREW_BIN" install --cask "$pkg" || return 1
+    done
+
   else  # Linux (apt)
     # First refresh the package index (apt update doesn't take -y; that's only
     # for apt install). Best-effort — if offline, we still try the installs.
@@ -605,7 +639,7 @@ stage_packages() {
     # 2. apt-installable packages (only those actually in the default repos).
     #    Filter out packages that aren't in this Ubuntu version's repos so a
     #    missing name doesn't fail the whole batch; availability varies by
-    #    Ubuntu/Debian release.
+    #    Ubuntu release.
     local apt_pkgs=() fallback
     for pkg in "${PACKAGES_APT[@]}"; do
       apt_manifest_package_wanted "$pkg" || continue
@@ -665,6 +699,11 @@ stage_packages() {
       https://kubernetes.io/docs/tasks/tools/install-kubectl-linux/
     install_vendor_package helm helm "$HELM_APT_URI" \
       https://helm.sh/docs/intro/install/
+    install_vendor_package google-cloud-cli gcloud "$GOOGLE_CLOUD_APT_URI" \
+      https://docs.cloud.google.com/sdk/docs/install-sdk#deb
+    if apt_repo_is_configured "$AZURE_CLI_APT_URI"; then
+      apt_install_candidate azure-cli || return 1
+    fi
 
     # 5. Node.js — the NodeSource build of the declared major. The repository
     #    and its pin went in at step 1, so apt cannot resolve `nodejs` to the
@@ -741,6 +780,8 @@ stage_packages() {
       local zmx_arch=$uname_m
       [[ "$zmx_arch" == arm64 ]] && zmx_arch=aarch64
       install_upstream_archive_tool zmx "zmx-{version}-linux-${zmx_arch}.tar.gz" zmx
+      install_upstream_archive_tool apex "apex-{version}-linux-${zmx_arch}.tar.gz" \
+        "apex-{version}-linux-${zmx_arch}/apex"
       # --- ruff (Astral Python linter/formatter, not in apt) ---
       # The release is an archive rather than a bare binary, so currency is
       # decided by the version ruff reports against the version the project
@@ -749,17 +790,16 @@ stage_packages() {
 
       # --- yazi (TUI file manager, not in apt) — .zip archive ---
       # yazi ships two executables and both come from the same release, so the
-      # version yazi reports governs the pair. The musl build, because the gnu
-      # build needs glibc 2.39 and will not start on Ubuntu 22.04.
+      # version yazi reports governs the pair.
       if upstream_artifact_needed yazi "$HOME/.local/bin/yazi" "$HOME/.local/bin/yazi" --version; then
-        local tmp tag musl_triple=${rust_triple/-gnu/-musl}; tmp=$(mktemp -d)
+        local tmp tag; tmp=$(mktemp -d)
         if tag=$(upstream_latest_tag sxyazi/yazi) \
-            && upstream_fetch_verified_asset sxyazi/yazi "$tag" "yazi-${musl_triple}.zip" "$tmp/yazi.zip" \
+            && upstream_fetch_verified_asset sxyazi/yazi "$tag" "yazi-${rust_triple}.zip" "$tmp/yazi.zip" \
             && unzip -o "$tmp/yazi.zip" -d "$tmp" >/dev/null 2>&1 \
             && upstream_place_artifact yazi \
-              "$tmp/yazi-${musl_triple}/yazi" "$HOME/.local/bin/yazi" \
+              "$tmp/yazi-${rust_triple}/yazi" "$HOME/.local/bin/yazi" \
             && upstream_place_artifact yazi \
-              "$tmp/yazi-${musl_triple}/ya" "$HOME/.local/bin/ya"; then
+              "$tmp/yazi-${rust_triple}/ya" "$HOME/.local/bin/ya"; then
           ok "yazi → ~/.local/bin/yazi"
         else
           warn "yazi download or installation failed (skipped)"

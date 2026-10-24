@@ -6,9 +6,10 @@ TEST_TMP=$(mktemp -d "${TMPDIR:-/tmp}/toolchain-provider-test.XXXXXX")
 trap 'rm -rf "$TEST_TMP"' EXIT
 
 HOME="$TEST_TMP/home"
+CODEX_HOME="$HOME/.codex"
 USER='test'
 OS_KIND=linux
-export HOME USER OS_KIND
+export HOME CODEX_HOME USER OS_KIND
 mkdir -p "$HOME/.cargo/bin" "$HOME/.local/bin" "$HOME/.config/uv" "$HOME/.opencode/bin"
 
 fake_command() {
@@ -50,6 +51,7 @@ chmod +x "$HOME/.local/bin/uv"
 . "$TEST_ROOT/lib/log.sh"
 # shellcheck disable=SC1091
 . "$TEST_ROOT/lib/manifest.sh"
+. "$TEST_ROOT/lib/agents/paths.sh"
 # shellcheck disable=SC1091
 . "$TEST_ROOT/lib/upstream.sh"
 # shellcheck disable=SC1091
@@ -59,6 +61,8 @@ chmod +x "$HOME/.local/bin/uv"
 # published uv release is supplied directly.
 upstream_artifact_needed() { return 1; }
 install_graph_powershell() { return 0; }
+install_cloud_clis() { return 0; }
+apt_repo_is_configured() { return 1; }
 STUB_UV_RELEASE=0.1.0
 upstream_latest_version() { printf '%s\n' "$STUB_UV_RELEASE"; }
 
@@ -75,5 +79,31 @@ stage_toolchains >/dev/null
 rm "$TEST_TMP/rust-toolchain"
 stage_toolchains >/dev/null
 [[ -f "$TEST_TMP/rust-toolchain" ]] || { printf 'FAIL: rustup without a compiler was not repaired\n' >&2; exit 1; }
+
+# Required native installers must propagate download failures.
+curl() { return 22; }
+rm "$HOME/.local/bin/claude"
+if stage_toolchains >/dev/null 2>&1; then
+  printf 'FAIL: the failed Claude installer returned success\n' >&2; exit 1
+fi
+fake_command "$HOME/.local/bin/claude"
+rm "$HOME/.local/bin/codex"
+if stage_toolchains >/dev/null 2>&1; then
+  printf 'FAIL: the failed Codex installer returned success\n' >&2; exit 1
+fi
+
+printf 'user shell settings\n' > "$HOME/.bashrc"
+cat > "$TEST_TMP/codex-installer.sh" <<'SH'
+#!/bin/sh
+set -eu
+printf 'installer profile edits\n' > "$HOME/.bashrc"
+mkdir -p "$CODEX_HOME/packages" "$CODEX_INSTALL_DIR"
+printf '#!/bin/sh\nprintf "codex-cli 1.0.0\\n"\n' > "$CODEX_INSTALL_DIR/codex"
+chmod +x "$CODEX_INSTALL_DIR/codex"
+SH
+curl() { cp "$TEST_TMP/codex-installer.sh" "$4"; }
+stage_toolchains >/dev/null
+[[ "$(cat "$HOME/.bashrc")" == 'user shell settings' ]]
+[[ -d "$CODEX_HOME/packages" && -x "$HOME/.local/bin/codex" ]]
 
 printf 'toolchain provider tests: ok\n'

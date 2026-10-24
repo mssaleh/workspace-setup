@@ -23,7 +23,7 @@ stage_macos_remote_audit() {
   [[ "${OS_KIND:-}" == macos ]] || return 0
 
   local remote_state acl_state key_count key_mode firewall_bin firewall_state
-  local stealth_state filevault_state power_rows mac_major
+  local stealth_state filevault_state power_rows
   remote_state=$(macos_remote_login_state)
   info "Remote Login: $remote_state (reported only; setup does not change it)"
 
@@ -46,8 +46,7 @@ stage_macos_remote_audit() {
 
   filevault_state=$(fdesetup status 2>&1 || true)
   info "FileVault: ${filevault_state:-state unavailable}"
-  mac_major=$(sw_vers -productVersion 2>/dev/null | cut -d. -f1)
-  if [[ "$(uname -m)" == arm64 && "$mac_major" =~ ^[0-9]+$ ]] && ((mac_major >= 26)); then
+  if [[ "$(uname -m)" == arm64 ]]; then
     info "FileVault remote-unlock capability: platform eligible; validate the recovery journey separately"
   fi
 

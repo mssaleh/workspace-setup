@@ -90,7 +90,7 @@ fi
 # ── 4. Every declared archive is registered in that phase ──────────────────
 # A new vendor repository added to the install half would reintroduce exactly
 # the ordering defect this file exists to prevent.
-for archive in KUBERNETES HELM CLAUDE_DESKTOP NODESOURCE KITWARE GITHUB_CLI; do
+for archive in KUBERNETES HELM CLAUDE_DESKTOP NODESOURCE KITWARE GITHUB_CLI GOOGLE_CLOUD AZURE_CLI; do
   key_var="${archive}_KEY_URL"
   [[ -n "${!key_var:-}" ]] || fail "$key_var is not declared in the manifest"
   grep -q "\$$key_var" <<< "$register_body" \
@@ -103,6 +103,8 @@ done
 # phase — including as a dependency of something else.
 grep -q 'install_nodesource_pin' <<< "$register_body" \
   || fail 'the NodeSource apt pin is not written during repository registration'
+grep -q '\$GOOGLE_CLOUD_KUBECTL_PREFERENCES_FILE' <<< "$register_body" \
+  || fail 'Google Cloud registration must keep kubectl under Kubernetes ownership'
 if grep -q 'install_nodesource_pin' <<< "$branch"; then
   fail 'the NodeSource apt pin is written from the install phase; it belongs with its repository'
 fi

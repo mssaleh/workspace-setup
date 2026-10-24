@@ -5,6 +5,7 @@ set -uo pipefail
 
 TEST_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 host_tests=(
+  test_platforms.sh
   test_config_convergence.sh
   test_linux_preservation.sh
   test_host_context.sh
@@ -16,6 +17,7 @@ host_tests=(
   test_apt_removals.sh
   test_apt_state.sh
   test_toolchain_providers.sh
+  test_cloud_clis.sh
   test_macos_cli.sh
   test_generated_completions.sh
   test_container_lifecycle.sh

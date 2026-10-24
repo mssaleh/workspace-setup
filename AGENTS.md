@@ -3,6 +3,8 @@
 Use the current branch. Create branches and pull requests only when requested.
 Commit only when requested; push only when separately requested.
 
+The only supported hosts are Ubuntu 26.04 LTS and macOS 27.
+
 ## Toolchain and verification
 
 `setup.sh` is the public entry point. It provisions and verifies the host before
@@ -19,7 +21,7 @@ Use `-ef` for symlink identity and name stdin for BSD `paste`: `paste -sd, -`.
 
 Run `bash tests/run.sh`. It runs both host and agent tests with isolated homes.
 Use `--only host` or `--only agents` for focused checks. Agent shell changes
-also require the README's Bash 3.2 container command before claiming portability.
+also require the suite on macOS 27 under Apple's Bash 3.2 before claiming portability.
 Changes to native agent command integration require
 `bash tests/integration.sh`, which uses disposable container state and real CLIs.
 Do not substitute stubs for native command verification.

@@ -120,7 +120,7 @@ apt_write_sources() {
 #
 # Registration and installation are separate phases, so the install re-checks
 # that the vendor's own archive is what offers the package. Package names are
-# not reserved: Debian owns `helm` as a source package for the unrelated Emacs
+# not reserved: Ubuntu owns `helm` as a source package for the unrelated Emacs
 # framework, and any release may start publishing a binary under these names.
 apt_repo_is_configured() {
   grep -rqsF "$1" /etc/apt/sources.list.d /etc/apt/sources.list 2>/dev/null

@@ -6,7 +6,7 @@
 
 stage_toolchains() {
   mkdir -p "$HOME/.local/bin"
-  export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+  export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH:$HOME/.npm/packages/bin"
 
   # --- rustup ---
   if [[ -x "$HOME/.cargo/bin/rustup" && -f "$HOME/.cargo/env" ]]; then
@@ -81,6 +81,16 @@ stage_toolchains() {
   local tool tool_name
   for tool in "${uv_tools[@]}"; do
     tool_name=${tool%%\[*}
+    if [[ "$tool_name" == azure-cli ]] && apt_repo_is_configured "$AZURE_CLI_APT_URI"; then
+      if ! apt_package_installed azure-cli || ! /usr/bin/az --version >/dev/null 2>&1; then
+        warn "Azure CLI apt installation is unusable; retaining the uv copy"
+        return 1
+      fi
+      if grep -Fx azure-cli >/dev/null <<<"$uv_installed"; then
+        "$HOME/.local/bin/uv" tool uninstall azure-cli || return 1
+      fi
+      continue
+    fi
     if [[ "$tool" == "$tool_name" ]] && grep -Fx "$tool_name" >/dev/null <<<"$uv_installed"; then
       ok "$tool already installed by uv"
     else
@@ -89,6 +99,8 @@ stage_toolchains() {
         || { warn "uv tool install $tool failed"; return 1; }
     fi
   done
+
+  install_cloud_clis || return 1
 
   # --- PowerShell and Microsoft Graph SDK ---
   install_graph_powershell || return 1
@@ -148,16 +160,17 @@ stage_toolchains() {
     warn "preserving an existing path that blocks the native Claude artifact: ~/.local/bin/claude"
   else
     info "installing Claude Code (official native installer)…"
-    if curl -fsSL https://claude.ai/install.sh | bash 2>/dev/null; then
+    if curl -fsSL https://claude.ai/install.sh | bash; then
       ok "claude installed via native installer → ~/.local/bin/claude"
     else
       warn "Claude Code native installer failed — install manually: curl -fsSL https://claude.ai/install.sh | bash"
       warn "  alternatives: https://docs.anthropic.com/en/docs/claude-code/setup (Homebrew cask, apt/dnf/apk, npm)"
+      return 1
     fi
   fi
 
   # --- OpenAI Codex CLI — official native installer ---
-  # The native installer (https://chatgpt.com/codex/install.sh) is the
+  # The native installer from releases.openai.com/codex is the
   # recommended method per https://github.com/openai/codex#installing-and-running-codex-cli.
   # It installs to ~/.local/bin/codex. Alternative supported methods (NOT used
   # here): Homebrew cask (`brew install --cask codex`), npm
@@ -168,15 +181,24 @@ stage_toolchains() {
     warn "preserving an existing path that blocks the native Codex artifact: ~/.local/bin/codex"
   else
     info "installing OpenAI Codex CLI (official native installer)…"
-    # CODEX_NON_INTERACTIVE is the installer's own documented switch for
-    # skipping prompts.
-    if curl -fsSL https://chatgpt.com/codex/install.sh \
-         | CODEX_NON_INTERACTIVE=1 sh 2>/dev/null; then
-      ok "codex installed via native installer → ~/.local/bin/codex"
-    else
-      warn "Codex native installer failed — install manually: curl -fsSL https://chatgpt.com/codex/install.sh | sh"
-      warn "  alternatives: https://github.com/openai/codex (Homebrew cask, npm, GitHub releases)"
+    local codex_tmp codex_home codex_status=0
+    codex_home=$(agent_home codex)
+    codex_tmp=$(mktemp -d) || return 1
+    # Codex 0.164's installer edits profiles when another package manager owns
+    # a command on PATH. Keep its package state while isolating those edits.
+    # https://releases.openai.com/codex/install.sh
+    if ! curl -fsSL "$CODEX_INSTALL_URL" -o "$codex_tmp/install.sh" \
+        || ! env HOME="$codex_tmp" CODEX_HOME="$codex_home" \
+          CODEX_INSTALL_DIR="$HOME/.local/bin" CODEX_NON_INTERACTIVE=1 \
+          sh "$codex_tmp/install.sh" </dev/null; then
+      codex_status=1
     fi
+    rm -rf "$codex_tmp"
+    if ((codex_status != 0)) || ! "$HOME/.local/bin/codex" --version; then
+      warn "Codex native installer failed: $CODEX_INSTALL_URL"
+      return 1
+    fi
+    ok "codex installed via native installer → ~/.local/bin/codex"
   fi
 
   # --- OpenCode — Homebrew owns it on macOS; upstream owns it on Linux ---
@@ -209,6 +231,93 @@ stage_toolchains() {
       info "linked $opencode_link → $opencode_bin"
     fi
   fi
+}
+
+install_cloud_clis() {
+  local platform arch extension=tar.gz tool tmp status=0 aws_bin
+  platform=linux
+  if [[ "$OS_KIND" == macos ]]; then
+    platform=macos
+    extension=zip
+  fi
+  case "$(uname -m)" in
+    x86_64|amd64) arch=amd64 ;;
+    aarch64|arm64) arch=arm64 ;;
+    *) warn "cloud CLI releases are unavailable for $(uname -m)"; return 1 ;;
+  esac
+  for tool in openai ant; do
+    install_upstream_archive_tool "$tool" "${tool}_{version}_${platform}_${arch}.$extension" "$tool" || return 1
+  done
+  if upstream_artifact_needed gddy "$HOME/.local/bin/gddy" "$HOME/.local/bin/gddy" --version; then
+    tmp=$(mktemp -d) || return 1
+    if ! curl -fsSL "$GODADDY_INSTALL_URL" -o "$tmp/install.sh" \
+        || ! bash "$tmp/install.sh" --prefix "$tmp/bin" </dev/null \
+        || ! "$tmp/bin/gddy" --version \
+        || ! upstream_place_artifact gddy "$tmp/bin/gddy" "$HOME/.local/bin/gddy"; then
+      status=1
+    fi
+    rm -rf "$tmp"
+    ((status == 0)) || return 1
+  fi
+  "$HOME/.local/bin/gddy" --version || return 1
+
+  if [[ "$OS_KIND" == linux ]]; then
+    for tool in aws aws_completer; do
+      aws_bin="$HOME/.local/share/aws-cli/v2/current/bin/$tool"
+      if [[ ( -e "$HOME/.local/bin/$tool" || -L "$HOME/.local/bin/$tool" ) \
+            && ! "$HOME/.local/bin/$tool" -ef "$aws_bin" ]]; then
+        if [[ ! -L "$HOME/.local/bin/$tool" \
+              || "$(readlink "$HOME/.local/bin/$tool")" != "$aws_bin" ]]; then
+          warn "preserving an existing path that blocks the AWS CLI installer: ~/.local/bin/$tool"
+          return 1
+        fi
+      fi
+      # The native installer exits early for a current payload without
+      # restoring missing launchers. https://awscli.amazonaws.com/v2/install.sh
+      if [[ -x "$aws_bin" && ! -e "$HOME/.local/bin/$tool" && ! -L "$HOME/.local/bin/$tool" ]]; then
+        ln -s "$aws_bin" "$HOME/.local/bin/$tool" || return 1
+      fi
+    done
+    tmp=$(mktemp -d) || return 1
+    # The official installer verifies signatures and handles version comparison.
+    if ! curl -fsSL "$AWS_CLI_INSTALL_URL" -o "$tmp/install.sh"; then
+      if [[ -x "$HOME/.local/bin/aws" ]]; then
+        warn "AWS CLI is installed; its update installer could not be downloaded"
+      else
+        status=1
+      fi
+    elif ! XDG_DATA_HOME="$HOME/.local/share" XDG_BIN_HOME="$HOME/.local/bin" \
+        bash "$tmp/install.sh" </dev/null; then
+      status=1
+    fi
+    rm -rf "$tmp"
+    ((status == 0)) || return 1
+    "$HOME/.local/bin/aws" --version || return 1
+  fi
+
+  if [[ ! -e "$HOME/.local/bin/agy" && ! -L "$HOME/.local/bin/agy" ]]; then
+    tmp=$(mktemp -d) || return 1
+    # agy 1.4.6 bootstrap always invokes shell setup without forwarding its
+    # --skip-path/--skip-aliases flags. Isolate that setup from real profiles.
+    # https://antigravity.google/cli/install.sh
+    if ! curl -fsSL "$ANTIGRAVITY_INSTALL_URL" -o "$tmp/install.sh" \
+        || ! env HOME="$tmp" bash "$tmp/install.sh" --dir "$HOME/.local/bin" </dev/null; then
+      status=1
+    fi
+    rm -rf "$tmp"
+    ((status == 0)) || return 1
+  fi
+  "$HOME/.local/bin/agy" --version || return 1
+
+  # An explicit user prefix works before stage_npm_config on a fresh host.
+  for tool in "${NPM_TOOLS_COMMON[@]}"; do
+    if [[ ! -x "$HOME/.npm/packages/bin/$tool" ]] \
+        || ! npm ls --global --prefix "$HOME/.npm/packages" --depth=0 --json "$tool" \
+          | jq -e --arg name "$tool" '.dependencies[$name].version' >/dev/null; then
+      npm install --global --prefix "$HOME/.npm/packages" "$tool@latest" </dev/null || return 1
+    fi
+    "$HOME/.npm/packages/bin/$tool" --version || return 1
+  done
 }
 
 # Microsoft documents the universal DEB for hosts without a matching PMC feed:
