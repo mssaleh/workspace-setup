@@ -72,7 +72,8 @@ container-compose() {
   fi
 }
 opencode() {
-  if [[ "$SHELL" == /bin/bash ]]; then
+  [[ "$1" == --completions ]] || return 1
+  if [[ "$2" == bash ]]; then
     printf '_opencode() { COMPREPLY=(run); }\ncomplete -F _opencode opencode\n'
   else
     printf '#compdef opencode\n_opencode() { _values command run; }\n'

@@ -11,6 +11,10 @@ apt_package_installed() {
   [[ "$(dpkg-query -W -f='${db:Status-Status}' "$1" 2>/dev/null)" == installed ]]
 }
 
+snap_package_installed() {
+  command -v snap >/dev/null 2>&1 && snap list "$1" >/dev/null 2>&1
+}
+
 # apt_gpg <gpg arguments...> — gpg with a throwaway home directory. Reading or
 # dearmouring a downloaded key needs no keyring, and an unwritable ~/.gnupg
 # (one left by `sudo gpg`, for example) makes gpg print nothing at all.
@@ -132,6 +136,7 @@ apt_repo_is_configured() {
 # vendor repository is added, while keeping a converged host a no-op.
 apt_install_candidate() {
   local pkg="$1" label="${2:-$1}" installed candidate
+  apt_preserve_application "$pkg" && return 0
   installed=''
   if apt_package_installed "$pkg"; then
     installed=$(dpkg-query -W -f='${Version}' "$pkg" 2>/dev/null || true)
@@ -151,9 +156,43 @@ apt_install_candidate() {
     || { warn "$label install failed (skipped)"; return 1; }
 }
 
+# apt_application_equivalent <apt package> — an installed alternative, never
+# a store search result. snap list and flatpak info inspect local installations.
+apt_application_equivalent() {
+  local entry provider app
+  for entry in ${APT_APPLICATION_EQUIVALENTS[@]+"${APT_APPLICATION_EQUIVALENTS[@]}"}; do
+    [[ "${entry%%:*}" == "$1" ]] || continue
+    entry=${entry#*:}
+    provider=${entry%%:*}
+    app=${entry#*:}
+    command -v "$provider" >/dev/null 2>&1 || continue
+    case "$provider" in
+      flatpak) flatpak info "$app" >/dev/null 2>&1 || continue ;;
+      snap) snap_package_installed "$app" || continue ;;
+      *) continue ;;
+    esac
+    printf '%s:%s\n' "$provider" "$app"
+    return 0
+  done
+  return 1
+}
+
+# Preserve a chosen application provider and report existing duplicates.
+apt_preserve_application() {
+  local alternative
+  alternative=$(apt_application_equivalent "$1") || return 1
+  if apt_package_installed "$1"; then
+    warn "$1 is installed through apt and $alternative; preserving both installations"
+  else
+    ok "$1 is installed through $alternative; not adding the apt package"
+  fi
+  return 0
+}
+
 # Official LibreOffice DEB bundles use a versioned package name rather than
-# Ubuntu's unversioned package name.
+# Ubuntu's unversioned package name; Snap and Flatpak can also provide it.
 libreoffice_installed() {
+  apt_application_equivalent libreoffice >/dev/null && return 0
   if dpkg-query -W -f='${Status}' libreoffice 2>/dev/null \
       | grep -Fxq 'install ok installed'; then
     return 0
@@ -205,6 +244,22 @@ distro_codename() {
   printf '%s\n' "$codename"
 }
 
+# apt_version_from_archive <package> <version> <archive uri> — true when that
+# archive offers exactly this version of the package.
+apt_version_from_archive() {
+  apt-cache madison "$1" 2>/dev/null | awk -F'|' -v version="$2" -v uri="${3%/}" '
+    { gsub(/^[ \t]+|[ \t]+$/, "", $2) }
+    $2 == version && index($3, uri) { found = 1 }
+    END { exit !found }'
+}
+
+# apt_newest_from_archive <package> <archive uri> — the newest version that
+# archive offers; madison lists versions newest first.
+apt_newest_from_archive() {
+  apt-cache madison "$1" 2>/dev/null | awk -F'|' -v uri="${2%/}" '
+    index($3, uri) { gsub(/^[ \t]+|[ \t]+$/, "", $2); print $2; exit }'
+}
+
 # vendor_command_state <package> <command> <archive uri> — current provider.
 #   managed  the vendor package is installed and its command resolves
 #   foreign  something else provides the command; leave it alone
@@ -222,10 +277,7 @@ vendor_command_state() {
   version=$(dpkg-query -W -f='${Version}' "$pkg" 2>/dev/null || true)
   if apt_package_installed "$pkg" \
       && dpkg-query -L "$pkg" 2>/dev/null | grep -Fx "$path" >/dev/null \
-      && apt-cache madison "$pkg" | awk -F'|' -v version="$version" -v uri="$uri" '
-        { gsub(/^[ \t]+|[ \t]+$/, "", $2) }
-        $2 == version && index($3, uri) { found = 1 }
-        END { exit !found }'; then
+      && apt_version_from_archive "$pkg" "$version" "$uri"; then
     printf 'managed\n'
   else
     printf 'foreign\n'
@@ -233,12 +285,14 @@ vendor_command_state() {
 }
 
 # apt_gui_app_wanted <package> <skip-value> — true when a desktop application
-# should be installed: not opted out, not already installed, and on an
-# architecture its publisher builds for (amd64 and arm64, for all of these).
+# should be installed: not opted out, not already installed (as the package or
+# as a Snap or Flatpak), and on an architecture its publisher builds for (amd64 and
+# arm64, for all of these).
 apt_gui_app_wanted() {
   local pkg="$1" skip="$2" arch
   [[ -z "$skip" ]] || return 1
   apt_package_installed "$pkg" && return 1
+  apt_application_equivalent "$pkg" >/dev/null && return 1
   arch=$(dpkg --print-architecture 2>/dev/null || true)
   [[ "$arch" == amd64 || "$arch" == arm64 ]]
 }
@@ -248,6 +302,7 @@ apt_gui_app_wanted() {
 # recommended GTK desktop portal along with it.
 apt_manifest_package_wanted() {
   [[ "$1" == flatpak && -n "${SKIP_FLATPAK:-}" ]] && return 1
+  apt_application_equivalent "$1" >/dev/null && return 1
   return 0
 }
 

@@ -98,6 +98,22 @@ env -i HOME="$TEST_TMP/home" USER=test PATH="/usr/bin:/bin" \
 [[ "$(cat "$calls")" == "$(grep -vx stage_agents <<< "$expected_default")" ]] \
   || fail_test 'host-only provisioning entered agent synchronization'
 
+# A failing stage ends the run under set -e before stage() can report it; the
+# EXIT handler names it and keeps the stage's status.
+failing="$TEST_TMP/failing"
+cp -R "$fixture" "$failing"
+cp "$TEST_ROOT/lib/log.sh" "$failing/lib/log.sh"
+printf 'stage_docker() { return 3; }\n' > "$failing/scripts/stage_docker.sh"
+failing_status=0
+env -i HOME="$TEST_TMP/home" USER=test PATH="/usr/bin:/bin" \
+  REPO_DIR="$failing" LINUX_PRESERVATION_CALLS="$calls" \
+  /bin/bash "$TEST_ROOT/setup.sh" host >/dev/null 2> "$TEST_TMP/failing.err" \
+  || failing_status=$?
+[[ "$failing_status" == 3 ]] \
+  || fail_test "a failing stage exited with $failing_status instead of its own status"
+grep -Fq 'docker: official Docker Engine (Linux) failed' "$TEST_TMP/failing.err" \
+  || fail_test 'a failing stage ended the run without being named'
+
 # The macOS session override and narrow graphical switches are inert on Linux.
 run_linux_setup SETUP_SESSION_KIND=local \
   SKIP_NERD_FONT=1 SKIP_KITTY=1 SKIP_TERMINAL_PROFILE=1 SKIP_COMPLETIONS=1
@@ -137,10 +153,6 @@ postflight_line=$(grep -n '^stage_postflight$' "$calls" | cut -d: -f1)
 . "$TEST_ROOT/lib/manifest.sh"
 [[ " ${PACKAGES_APT[*]} " == *' xsel '* ]] \
   || fail_test 'xsel disappeared from the Linux apt inventory'
-[[ " ${PROVIDERS_LINUX_UPSTREAM[*]} " == *' pwsh '* ]] \
-  || fail_test 'PowerShell is missing from the Linux upstream provider inventory'
-[[ " ${UPSTREAM_RELEASE_PROJECTS[*]} " == *' pwsh:PowerShell/PowerShell '* ]] \
-  || fail_test 'the PowerShell release source is missing'
 
 # The policy helper itself has an OS guard, so an accidental future direct call
 # cannot translate a macOS headless profile into Linux SKIP_* variables.

@@ -25,6 +25,12 @@
 
 set -uo pipefail
 
+# Name sets meet in sort, comm and uniq, which must agree on one byte order.
+# uutils coreutils 0.10 (Ubuntu 26.04) sorts by the locale's collation while
+# comm compares bytes, so under en_US.UTF-8 a declared name can read as missing
+# or as extra.
+export LC_ALL=C
+
 REPO_DIR=${REPO_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}
 MANIFEST_DIR=${MANIFEST_DIR:-$REPO_DIR/manifests}
 
@@ -129,9 +135,9 @@ selected plugins && stage "plugins: declared installs"          pass_plugins
 selected verify  && stage "verify: read back what each agent reads" pass_verify
 
 setup_color bold; printf '\n── summary ──\n'; setup_color reset
-if ((DELTAS == 0)); then
+if ((DELTAS == 0 && PROBLEMS == 0)); then
   ok "converged — nothing to change"
-else
+elif ((DELTAS > 0)); then
   info "$DELTAS change(s) $([[ -n "$DRY_RUN" ]] && printf 'pending' || printf 'applied')"
 fi
 if ((PROBLEMS > 0)); then

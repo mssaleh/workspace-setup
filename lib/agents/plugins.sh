@@ -2,7 +2,7 @@
 # lib/agents/plugins.sh — install and refresh declared plugins; preserve other installs.
 # shellcheck shell=bash
 
-claude_plugin() { run env CLAUDE_CONFIG_DIR="$CLAUDE_HOME" claude plugin "$@"; }
+claude_plugin() { run env ${CLAUDE_PLUGIN_ENV[@]+"${CLAUDE_PLUGIN_ENV[@]}"} claude plugin "$@"; }
 
 plugins_converge() {
   local row agent marketplace source plugin installed markets refreshed=""

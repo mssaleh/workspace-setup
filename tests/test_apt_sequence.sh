@@ -189,6 +189,10 @@ raw_installs=$(printf '%s\n' "$branch" \
 # A status check for Ubuntu's unversioned package alone would install a second,
 # older LibreOffice build on a host that already has the upstream bundle.
 (
+  # The host's own Flatpaks are not part of these dpkg fixtures.
+  # shellcheck disable=SC2329 # called by libreoffice_installed
+  flatpak() { [[ "$1" != info ]] && command flatpak "$@"; }
+  snap() { return 1; }
   dpkg-query() {
     case "$3" in
       libreoffice) printf '%s' "${LO_APT_STATUS:-}" ;;

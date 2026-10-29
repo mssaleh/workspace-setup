@@ -304,8 +304,9 @@ agent_mcp_invalidate
 mcp_converge >/dev/null 2>&1
 agent_mcp_invalidate
 assert_eq "Copilot replaces existing names natively" "$(agent_mcp_target github-copilot copilot-docs)" "$(printf 'remote\thttps://docs.example/mcp\ttrue')"
-sed 's|"url": "https://docs.example/mcp"|"url": "https://docs.example/mcp", "enabled": false|' "$COPILOT_HOME/mcp-config.json" > "$root/copilot-disabled.json"
-mv "$root/copilot-disabled.json" "$COPILOT_HOME/mcp-config.json"
+# Disabled state survives remove and add, as in Copilot; only enable clears it.
+printf 'copilot-docs\n' >> "$SANDBOX/state/disabled-github-copilot"
+"$SANDBOX/bin/sandbox-render"
 agent_mcp_invalidate
 out=$(verify_mcp 2>&1)
 assert_contains "Copilot disabled state is detected" "$out" "github-copilot → disabled"

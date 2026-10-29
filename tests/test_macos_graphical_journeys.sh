@@ -145,11 +145,11 @@ defaults() {
   case "$*" in
     "read com.apple.Terminal Window Settings")
       [[ "${TERMINAL_PROFILE_PRESENT:-}" == 1 ]] \
-        && printf '%s\n' '{' '    "Clear Dark" = {' '    };' '}'
+        && printf '%s\n' '{' '    "Workspace" = {' '    };' '}'
       ;;
     "read com.apple.Terminal Default Window Settings"|\
     "read com.apple.Terminal Startup Window Settings")
-      [[ "${TERMINAL_DEFAULT_PRESENT:-}" == 1 ]] && printf '%s\n' 'Clear Dark'
+      [[ "${TERMINAL_DEFAULT_PRESENT:-}" == 1 ]] && printf '%s\n' 'Workspace'
       ;;
     *) return 1 ;;
   esac

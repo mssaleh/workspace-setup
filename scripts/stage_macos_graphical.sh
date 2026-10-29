@@ -2,9 +2,12 @@
 # scripts/stage_macos_graphical.sh — Darwin-only applications, font, Kitty,
 # and explicitly authorized Apple Terminal integration.
 
+# The profile name is one Terminal.app does not ship: macOS 27 bundles its own
+# "Clear Dark" (Initial Settings) and selects it by default, so a shared name
+# made Apple's profile indistinguishable from this one.
 apple_terminal_profile_exists() {
   defaults read com.apple.Terminal 'Window Settings' 2>/dev/null \
-    | grep -Eq '^[[:space:]]*"?Clear Dark"?[[:space:]]*='
+    | grep -Eq '^[[:space:]]*"?Workspace"?[[:space:]]*='
 }
 
 # A .terminal plist handed to `open` is the supported import path: Terminal.app
@@ -24,19 +27,19 @@ install_terminal_profile_if_missing() {
   fi
 
   if apple_terminal_profile_exists; then
-    ok "Apple Terminal profile 'Clear Dark' already exists; preserving it"
+    ok "Apple Terminal profile 'Workspace' already exists; preserving it"
     return 0
   fi
 
   local tmp_dir term_profile
   tmp_dir=$(mktemp -d "${TMPDIR:-/tmp}/terminal-profile.XXXXXX") || return 1
-  term_profile="$tmp_dir/Clear Dark.terminal"
+  term_profile="$tmp_dir/Workspace.terminal"
   cat > "$term_profile" <<'PROFILE'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>name</key><string>Clear Dark</string>
+	<key>name</key><string>Workspace</string>
 	<key>ProfileCurrentVersion</key><real>2.09</real>
 	<key>type</key><string>Window Settings</string>
 	<key>columnCount</key><integer>200</integer>
@@ -69,10 +72,10 @@ PROFILE
 }
 
 set_apple_terminal_profile_default() {
-  defaults write com.apple.Terminal 'Default Window Settings' 'Clear Dark'
-  defaults write com.apple.Terminal 'Startup Window Settings' 'Clear Dark'
-  if [[ "$(defaults read com.apple.Terminal 'Default Window Settings' 2>/dev/null)" == 'Clear Dark' \
-        && "$(defaults read com.apple.Terminal 'Startup Window Settings' 2>/dev/null)" == 'Clear Dark' ]]; then
+  defaults write com.apple.Terminal 'Default Window Settings' 'Workspace'
+  defaults write com.apple.Terminal 'Startup Window Settings' 'Workspace'
+  if [[ "$(defaults read com.apple.Terminal 'Default Window Settings' 2>/dev/null)" == 'Workspace' \
+        && "$(defaults read com.apple.Terminal 'Startup Window Settings' 2>/dev/null)" == 'Workspace' ]]; then
     ok "Apple Terminal profile selected by explicit request"
     return 0
   fi

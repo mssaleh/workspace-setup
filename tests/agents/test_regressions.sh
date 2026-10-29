@@ -255,9 +255,65 @@ dry_run_repairs() (
   ((TEST_FAILURES == 0))
 )
 
+# Claude 2.1 reads its global config from CLAUDE_CONFIG_DIR; pointing that at
+# the default root made it recreate ~/.claude/.claude.json and rewrite
+# settings.json. Plugin commands may only change it for a separate plugin root.
+claude_default_root() (
+  fixture
+  unset CLAUDE_CONFIG_DIR
+  bash "$REPO_DIR/setup.sh" agents --only plugins >/dev/null 2>&1
+  assert_eq "plugin commands keep the user's Claude root" \
+    "$(sort -u "$SANDBOX/calls/claude-config-dir")" unset
+  : > "$SANDBOX/calls/claude-config-dir"
+  mkdir -p "$root/plugin-home/plugins"
+  CLAUDE_HOME="$root/plugin-home" bash "$REPO_DIR/setup.sh" agents --only plugins >/dev/null 2>&1
+  assert_eq "a separate plugin root is passed to Claude" \
+    "$(sort -u "$SANDBOX/calls/claude-config-dir")" "$root/plugin-home"
+  ((TEST_FAILURES == 0))
+)
+
+# Disabling a plugin is the user's decision: reported, never a problem.
+disabled_plugin() (
+  fixture
+  printf 'widgets\n' > "$SANDBOX/state/marketplaces"
+  printf 'widget@widgets\tuser\tfalse\n' > "$SANDBOX/state/plugins"
+  "$SANDBOX/bin/sandbox-render"
+  out=$(bash "$REPO_DIR/setup.sh" agents --only verify 2>&1)
+  assert_contains "a disabled declared plugin is reported" "$out" "widget@widgets installed but disabled"
+  assert_absent "a disabled declared plugin is not a problem" "$out" "widget@widgets declared but not installed"
+  ((TEST_FAILURES == 0))
+)
+
+# uutils coreutils (Ubuntu 26.04) sorts by locale but compares bytes in comm;
+# a declared name must survive pruning under an ordinary UTF-8 locale.
+locale_set_operations() (
+  fixture
+  # grep reads everything: with -q it exits early and pipefail reports the
+  # writer's SIGPIPE on macOS's long locale list.
+  if ! locale -a 2>/dev/null | grep -iE '^en_US\.utf-?8$' >/dev/null; then
+    printf 'SKIP: %s locale_set_operations (no en_US.UTF-8 locale)\n' "$TEST_NAME"
+    return 0
+  fi
+  printf 'acme/pack\tbuild-mcp-server\tselect\n' > "$MANIFEST_DIR/skills.tsv"
+  "$SANDBOX/bin/npx" -y skills@latest add acme/pack -s build-mcp-server -s build-mcpb \
+    -a universal -g -y < /dev/null
+  LC_ALL=en_US.UTF-8 bash "$REPO_DIR/setup.sh" agents --only skills --prune-skills >/dev/null 2>&1
+  assert_eq "a declared skill survives pruning" \
+    "$([[ -f "$AGENTS_STORE/build-mcp-server/SKILL.md" ]] && echo yes)" yes
+  assert_missing "an undeclared skill is pruned" "$AGENTS_STORE/build-mcpb"
+  printf 'docs-z\thttp\thttps://docs.example/mcp\tclaude-code\n' > "$MANIFEST_DIR/mcp.tsv"
+  sandbox_set_mcp claude-code docs-z remote https://docs.example/mcp
+  sandbox_set_mcp claude-code docsa remote https://docs.example/mcp
+  : > "$SANDBOX/calls/claude-code"
+  LC_ALL=en_US.UTF-8 bash "$REPO_DIR/setup.sh" agents --only mcp --prune-duplicate-mcp >/dev/null 2>&1
+  assert_absent "a declared server is never removed as a duplicate" \
+    "$(cat "$SANDBOX/calls/claude-code")" "remove --scope user docs-z"
+  ((TEST_FAILURES == 0))
+)
+
 for check in missing_manifests mirror_identity failed_writes only_arguments read_failures \
   commented_boolean stdio_arguments plugin_scope_and_cache relocated_store conflicting_stores relative_store_alias \
-  equivalent_absent_paths dry_run_repairs; do
+  equivalent_absent_paths dry_run_repairs claude_default_root disabled_plugin locale_set_operations; do
   "$check" || tfail "$check"
 done
 test_summary

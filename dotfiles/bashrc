@@ -166,6 +166,12 @@ unset -f _find_brew_bin _path_prepend _path_append _path_dedupe
 #   git, less, python) or LANG= (empty).
 # Default to en_US.UTF-8 (universally available, locale-neutral for CLI work)
 # unless the current LANG is already UTF-8-capable.
+# A forwarded locale this host lacks (ssh sends LANG and LC_*) is reset to
+# C.UTF-8 first by Ubuntu's own check, which /etc/profile.d/01-locale-fix.sh
+# runs only for login shells.
+if [[ -x /usr/bin/locale-check ]]; then
+  eval "$(/usr/bin/locale-check C.UTF-8)"
+fi
 case "${LANG:-}" in
   *.UTF-8|*.utf8) : ;;                                   # already UTF-8 → leave it
   *) export LANG=en_US.UTF-8 ;;                          # unset/empty/C/POSIX → upgrade
@@ -263,18 +269,21 @@ __set_term_title() { printf '\e]2;%s: %s\a' "$_host_label" "${PWD/#$HOME/\~}"; }
 
 # A TUI killed by a signal never sends the disables for what it turned on, so a
 # killed `claude` or `opencode` leaves the alternate screen, mouse reporting,
-# focus events and the kitty keyboard flags set. Undo them at the next prompt,
-# and only after a signal: ?1049l restores the cursor ?1049h saved, so sending
-# it on the normal screen would move it. Stop signals are excluded because a
-# suspended program restored the terminal itself and takes it back on `fg`.
-# The status is passed through so every later prompt hook still reads it.
+# focus events and the kitty keyboard flags set. Undo them at the next prompt
+# after a signal status, which Ctrl-C at the prompt also produces. ?1049l
+# restores the saved cursor, so \e7 saves the current one first: on the normal
+# screen nothing moves, and leaving the alternate screen restores the position
+# ?1049h saved (measured in kitty 0.49, VTE 0.84 and Terminal.app 488). Stop
+# signals are excluded because a suspended program restored the terminal itself
+# and takes it back on `fg`. The status is passed through so every later prompt
+# hook still reads it.
 __restore_term() {
   local _status=$? _signal
   if ((_status > 128)) && _signal=$(builtin kill -l "$((_status - 128))" 2>/dev/null); then
     case $_signal in
       STOP|TSTP|TTIN|TTOU) ;;
       *) [[ -t 1 ]] && printf \
-        '\e[?1049l\e[?1000l\e[?1002l\e[?1003l\e[?1004l\e[?1006l\e[?25h\e[<u\e[>4m' ;;
+        '\e7\e[?1049l\e[?1000l\e[?1002l\e[?1003l\e[?1004l\e[?1006l\e[?25h\e[<u\e[>4m' ;;
     esac
   fi
   return "$_status"
@@ -292,17 +301,20 @@ __restore_term() {
 # before that rewrite replaces the file. `-c; -r` then resyncs this shell, so
 # Up and Ctrl-R immediately see what every other terminal has run.
 __history_sync() { history -n; history -w; history -c; history -r; }
+# Login shells on Ubuntu 26.04 arrive with an array already: systemd's
+# /etc/profile.d/80-systemd-osc-context.sh and VTE's vte-2.91.sh create it.
+# __restore_term is added at the end of this file instead, ahead of every hook.
 if ((BASH_VERSINFO[0] >= 5)); then
   if [[ "$(declare -p PROMPT_COMMAND 2>/dev/null)" != 'declare -a'* ]]; then
     _prompt_command_previous=${PROMPT_COMMAND:-}
-    PROMPT_COMMAND=(__restore_term)
-    [[ -z "$_prompt_command_previous" ]] || PROMPT_COMMAND+=("$_prompt_command_previous")
+    PROMPT_COMMAND=()
+    [[ -z "$_prompt_command_previous" ]] || PROMPT_COMMAND=("$_prompt_command_previous")
     unset _prompt_command_previous
   fi
   PROMPT_COMMAND+=(__history_sync __set_term_title)
 else
   # shellcheck disable=SC2128,SC2178 # Bash <5 scalar compatibility branch
-  PROMPT_COMMAND="__restore_term; ${PROMPT_COMMAND:+$PROMPT_COMMAND; }__history_sync; __set_term_title"
+  PROMPT_COMMAND="${PROMPT_COMMAND:+$PROMPT_COMMAND; }__history_sync; __set_term_title"
 fi
 
 export EDITOR=nano VISUAL=nano SUDO_EDITOR=nano
@@ -332,10 +344,12 @@ function y() {
 
 # A dropped link exits 255 with the remote program's terminal modes still set.
 # The alternate screen has no scrollback and turns the wheel into arrow keys, so
-# leave it then; clear mouse and keyboard modes whenever ssh returns.
+# leave it then (\e7 first, as in __restore_term: a refused connection also
+# exits 255 on the normal screen); clear mouse and keyboard modes whenever ssh
+# returns.
 __ssh_restore_term() {
   if [[ -t 1 ]]; then
-    if (($1 == 255)); then printf '\e[?1049l'; fi
+    if (($1 == 255)); then printf '\e7\e[?1049l'; fi
     printf '\e[?1000l\e[?1002l\e[?1003l\e[?1004l\e[?1006l\e[?25h\e[<u\e[>4m'
   fi
   return "$1"
@@ -361,7 +375,8 @@ function ds() {
 
 # Managed hosts install xterm-kitty terminfo without a GUI dependency, so plain
 # `ssh` preserves TERM. `s` advertises xterm-256color to unmanaged hosts.
-function s() { TERM=xterm-256color command ssh "$@"; __ssh_restore_term $?; }
+# -S none, as for ds: plain ssh keeps the shared connection.
+function s() { TERM=xterm-256color command ssh -S none "$@"; __ssh_restore_term $?; }
 
 # ks: opt in to Kitty's ssh kitten for hosts where you want Kitty integration.
 # The kitten refuses to run outside a kitty window ("Error: The SSH kitten is
@@ -374,7 +389,7 @@ function ks() {
   if [ -n "$KITTY_WINDOW_ID" ] && command -v kitten >/dev/null 2>&1; then
     kitten ssh "$@"
   else
-    command ssh "$@"
+    command ssh -S none "$@"
   fi
   __ssh_restore_term $?
 }
@@ -382,7 +397,11 @@ function ks() {
 # fzf: fuzzy finder. Ctrl-R fuzzy history · Ctrl-T insert file paths · Alt-C cd
 # into a subdir · `**<Tab>` fuzzy completion. Official bash integration:
 # https://github.com/junegunn/fzf
-if command -v fzf >/dev/null 2>&1; then
+# fzf before 0.48 has no --bash and rejects the colour names below (Ubuntu
+# 22.04 ships 0.29, which prints "invalid color specification" at every
+# start), so the options and bindings apply only where --bash works.
+if command -v fzf >/dev/null 2>&1 \
+    && _fzf_bash=$(FZF_DEFAULT_OPTS='' fzf --bash 2>/dev/null); then
   # Source `fd` (respects .gitignore, includes dotfiles, skips .git) for speed:
   command -v fd >/dev/null 2>&1 && {
     export FZF_DEFAULT_COMMAND='fd --hidden --strip-cwd-prefix --exclude .git'
@@ -405,9 +424,10 @@ if command -v fzf >/dev/null 2>&1; then
   # fzf's key bindings assume a real terminal; skip them in automated and
   # redirected shells.
   if [ -t 0 ] && [ -t 1 ]; then
-    eval "$(fzf --bash)"
+    eval "$_fzf_bash"
   fi
 fi
+unset _fzf_bash
 
 # Keep directory jumping available even when fzf is absent.
 if command -v zoxide >/dev/null 2>&1; then
@@ -426,4 +446,14 @@ fi
 # source from stacking a second hook.
 if command -v direnv >/dev/null 2>&1; then
   eval "$(direnv hook bash)"
+fi
+
+# The signal check goes first, ahead of every hook added above: it needs the
+# command's own status, and older hooks reset $? (zoxide 0.4's _zoxide_hook
+# returns 0, so after it a signal death was never seen).
+if ((BASH_VERSINFO[0] >= 5)); then
+  PROMPT_COMMAND=(__restore_term "${PROMPT_COMMAND[@]}")
+else
+  # shellcheck disable=SC2128,SC2178 # Bash <5 scalar compatibility branch
+  PROMPT_COMMAND="__restore_term${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
 fi

@@ -48,6 +48,14 @@ stage_docker() {
     return 0
   fi
 
+  # The Snap owns a separate daemon and data root; apt is not a migration.
+  # https://github.com/canonical/docker-snap#changing-the-data-root-directory
+  if snap_package_installed docker; then
+    warn "Docker Snap is installed; resolve the provider conflict before installing apt Docker Engine"
+    warn "  preserving the Snap and its container data; SKIP_DOCKER=1 leaves Docker provisioning manual"
+    return 1
+  fi
+
   # A complete official install is already converged. Avoid rewriting apt
   # sources/keys or running package transactions on every setup rerun.
   local official_ready=1 docker_pkg

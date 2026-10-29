@@ -210,5 +210,12 @@ prefix_rule(
     match = ["snap remove foo"],
 )
 
+prefix_rule(
+    pattern = ["snap", "refresh"],
+    decision = "forbidden",
+    justification = "No snap upgrades from a coding agent; refresh snaps manually.",
+    match = ["snap refresh foo"],
+)
+
 # --- Note: read-only apt/snap commands are NOT blocked ---
 # `apt list`, `apt show`, `apt-cache search`, `dpkg -l`, `snap list`, etc. remain allowed.

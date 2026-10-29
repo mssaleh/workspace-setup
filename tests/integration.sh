@@ -54,9 +54,12 @@ mkdir -p "$source_dir/lib/agents" "$source_dir/manifests" "$source_dir/tests/int
   "$source_dir/dotfiles/config/opencode" \
   "$result_dir/build-context" || exit
 cp "$repo/setup.sh" "$repo/README.md" "$source_dir/" || exit
-cp "$repo/lib/log.sh" "$repo/lib/os.sh" "$source_dir/lib/" || exit
+cp "$repo/lib/log.sh" "$repo/lib/os.sh" "$repo/lib/manifest.sh" \
+  "$repo/lib/upstream.sh" "$source_dir/lib/" || exit
 cp "$repo/lib/agents/"*.sh "$source_dir/lib/agents/" || exit
-cp "$repo/scripts/sync_agents.sh" "$repo/scripts/stage_agents.sh" "$source_dir/scripts/" || exit
+cp "$repo/scripts/sync_agents.sh" "$repo/scripts/stage_agents.sh" \
+  "$repo/scripts/stage_toolchains.sh" "$repo/scripts/stage_completions.sh" \
+  "$source_dir/scripts/" || exit
 cp "$repo/dotfiles/claude/settings.json" "$source_dir/dotfiles/claude/" || exit
 cp "$repo/dotfiles/codex/rules/default.rules" "$source_dir/dotfiles/codex/rules/" || exit
 cp "$repo/dotfiles/config/opencode/opencode.jsonc" "$source_dir/dotfiles/config/opencode/" || exit
@@ -88,13 +91,11 @@ image_id=$(docker image inspect --format '{{.Id}}' "$image") || exit
 printf '%s\n' "$image_id" > "$result_dir/image-id"
 printf 'Results: %s\n' "$result_dir"
 printf 'Testing %s with disposable agent state\n' "$image_id"
-# Codex 0.163.0 starts OAuth during add when remote discovery succeeds.
+# Remote MCP discovery stays reachable: lib/agents/mcp.sh itself keeps Codex
+# from starting an OAuth login during `mcp add`.
 docker run --name "$container" --user node --read-only --cap-drop ALL \
   --security-opt no-new-privileges --network bridge \
   --env "WORKSPACE_NODE_MAJOR=$NODE_MAJOR" \
-  --env HTTPS_PROXY=http://127.0.0.1:0 --env HTTP_PROXY=http://127.0.0.1:0 \
-  --env ALL_PROXY=http://127.0.0.1:0 \
-  --env NO_PROXY=localhost,127.0.0.1,::1,github.com,.github.com,.githubusercontent.com,registry.npmjs.org,skills.sh,.skills.sh,models.dev,.models.dev \
   --tmpfs /tmp:rw,exec,nosuid,nodev,mode=1777 \
   --mount type=volume,destination=/home/node \
   --volume "$source_dir:/repo:ro" --entrypoint bash "$image_id" \

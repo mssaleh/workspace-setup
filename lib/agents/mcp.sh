@@ -35,7 +35,18 @@ mcp_install() {
       if [[ "$transport" == stdio ]]; then
         run codex mcp add "$name" -- ${command[@]+"${command[@]}"}
       else
-        run codex mcp add "$name" --url "$target"
+        # Codex 0.165 starts an interactive OAuth login inside `mcp add` when it
+        # discovers OAuth support ("Detected OAuth support. Starting OAuth
+        # flow"); `codex mcp add --help` offers no switch to skip it, and the
+        # login can wait 300 s and fail the run after the entry is written.
+        # Setup registers servers and does not authenticate them, so discovery
+        # is unreachable for this one command; `codex mcp login` signs in.
+        run env HTTPS_PROXY=http://127.0.0.1:0 https_proxy=http://127.0.0.1:0 \
+          HTTP_PROXY=http://127.0.0.1:0 http_proxy=http://127.0.0.1:0 \
+          ALL_PROXY=http://127.0.0.1:0 all_proxy=http://127.0.0.1:0 \
+          NO_PROXY= no_proxy= \
+          codex mcp add "$name" --url "$target" || return
+        info "codex: sign in to $name, if it requires it, with: codex mcp login $name"
       fi ;;
     github-copilot)
       if [[ -n "$(agent_mcp_target "$agent" "$name")" ]]; then

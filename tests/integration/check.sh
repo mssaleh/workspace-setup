@@ -10,6 +10,8 @@ mkdir -p "$results" "$CODEX_HOME" "$CLAUDE_CONFIG_DIR" "$COPILOT_HOME"
 current_step=""
 finish() {
   local status=$?
+  # Subshell output is already redirected into this log by step().
+  ((BASH_SUBSHELL == 0)) || return "$status"
   if ((status != 0)); then
     printf 'FAILED: %s\n' "$current_step" >&2
     [[ ! -f "$results/$current_step.log" ]] || tail -60 "$results/$current_step.log" >&2
@@ -47,10 +49,50 @@ versions() {
   skills --version
 }
 
+native_installers() (
+  export HOME="$HOME/native-installers"
+  export CODEX_HOME="$HOME/.codex" CLAUDE_CONFIG_DIR="$HOME/.claude" \
+    COPILOT_HOME="$HOME/.copilot" XDG_CONFIG_HOME="$HOME/.config" \
+    XDG_DATA_HOME="$HOME/.local/share" XDG_STATE_HOME="$HOME/.local/state" \
+    XDG_CACHE_HOME="$HOME/.cache"
+  local profile tool
+  mkdir -p "$HOME"
+  for profile in .bashrc .bash_profile .profile .zshrc .zprofile; do
+    printf '# user shell settings\n' > "$HOME/$profile"
+  done
+  . /repo/lib/log.sh
+  . /repo/lib/manifest.sh
+  . /repo/lib/upstream.sh
+  . /repo/lib/agents/paths.sh
+  . /repo/scripts/stage_toolchains.sh
+  . /repo/scripts/stage_completions.sh
+  install_coding_agents
+  for tool in claude codex copilot opencode agy; do
+    [[ "$(command -v "$tool")" -ef "$HOME/.local/bin/$tool" ]]
+    "$HOME/.local/bin/$tool" --version
+    cksum "$HOME/.local/bin/$tool"
+  done > "$results/native-installers.before"
+  install_coding_agents
+  for tool in claude codex copilot opencode agy; do
+    "$HOME/.local/bin/$tool" --version
+    cksum "$HOME/.local/bin/$tool"
+  done > "$results/native-installers.after"
+  cmp "$results/native-installers.before" "$results/native-installers.after"
+  for profile in .bashrc .bash_profile .profile .zshrc .zprofile; do
+    [[ "$(cat "$HOME/$profile")" == '# user shell settings' ]]
+  done
+  completion_generate opencode bash > "$results/opencode-completion.bash"
+  completion_generate opencode zsh > "$results/opencode-completion.zsh"
+  bash -n "$results/opencode-completion.bash"
+  bash --noprofile --norc -c '. "$1"; complete -p opencode' \
+    bash "$results/opencode-completion.bash"
+)
+
 snapshot() {
   local path dir link
   {
-    for path in "$CLAUDE_CONFIG_DIR/.claude.json" "$CODEX_HOME/config.toml" \
+    for path in "$CLAUDE_CONFIG_DIR/.claude.json" "$CLAUDE_CONFIG_DIR/settings.json" \
+      "$HOME/.claude.json" "$CODEX_HOME/config.toml" \
       "$COPILOT_HOME/mcp-config.json" "$COPILOT_HOME/settings.json" \
       "$XDG_CONFIG_HOME/opencode/opencode.json" "$XDG_CONFIG_HOME/opencode/opencode.jsonc" \
       "$CLAUDE_CONFIG_DIR/plugins/known_marketplaces.json" \
@@ -103,13 +145,22 @@ native_readback() {
   done < /repo/manifests/mcp.tsv
   opencode api --standalone config.get < /dev/null > "$results/opencode-config.json"
   claude plugin list --json < /dev/null > "$results/claude-plugins.json"
+  local skills=()
   for dir in "$HOME/.agents/skills/"*/; do
     [[ -f "$dir/SKILL.md" ]] || die "Incomplete skill: $dir"
     skill=${dir%/}; skill=${skill##*/}
     [[ "$CLAUDE_CONFIG_DIR/skills/$skill" -ef "$dir" ]]
     [[ "$CODEX_HOME/skills/$skill" -ef "$dir" ]]
-    [[ "$COPILOT_HOME/skills/$skill" -ef "$dir" ]]
+    skills+=("$skill")
   done
+  # At its default home Copilot reads the shared store itself, without a mirror.
+  copilot skill list --json < /dev/null > "$results/copilot-skills.json"
+  node -e '
+    const listed = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+    const missing = process.argv.slice(2).filter((name) =>
+      !listed.some((s) => s.name === name && s.source === "personal-agents"));
+    if (missing.length) { console.error("Copilot does not read: " + missing.join(" ")); process.exit(1); }
+  ' "$results/copilot-skills.json" ${skills[@]+"${skills[@]}"}
   sync_agents --only verify
 }
 
@@ -251,6 +302,24 @@ duplicate_pruning() {
   sync_agents --only verify
 }
 
+# Claude 2.1 reads its global config from CLAUDE_CONFIG_DIR. With it unset, as
+# on most hosts, a dry run and verification must leave ~/.claude.json the only
+# global config and settings.json byte-identical.
+default_claude_root() (
+  local fixture="$HOME/default-claude-root"
+  unset CLAUDE_CONFIG_DIR CLAUDE_HOME
+  mkdir -p "$fixture/.claude"
+  cp "$CLAUDE_HOME_SOURCE/.claude.json" "$fixture/.claude.json"
+  cp -R "$CLAUDE_HOME_SOURCE/plugins" "$fixture/.claude/plugins"
+  printf '{"model":"opus"}\n' > "$fixture/.claude/settings.json"
+  cksum "$fixture/.claude/settings.json" > "$results/default-root.before"
+  HOME="$fixture" bash /repo/setup.sh agents --dry-run --only plugins < /dev/null || true
+  HOME="$fixture" bash /repo/setup.sh agents --only verify < /dev/null || true
+  cksum "$fixture/.claude/settings.json" > "$results/default-root.after"
+  cmp "$results/default-root.before" "$results/default-root.after"
+  [[ ! -e "$fixture/.claude/.claude.json" ]] || die "Claude recreated a second global config"
+)
+
 native_contracts() (
   local fixture="$HOME/native-contracts" item
   export CODEX_HOME="$fixture/codex" CLAUDE_CONFIG_DIR="$fixture/claude" \
@@ -282,6 +351,14 @@ EOF
   sync_agents --only mcp
   codex mcp get argv-fixture --json > "$results/argv-codex.json"
   opencode api --standalone config.get > "$results/argv-opencode.json"
+  node -e '
+    const docs = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+    const rules = docs.flatMap((doc) => doc.info?.permissions ?? []);
+    for (const command of ["apt-get install *", "snap refresh *"]) {
+      if (!rules.some((rule) => rule.action === "shell" &&
+          rule.resource === command && rule.effect === "deny")) process.exit(1);
+    }
+  ' "$results/argv-opencode.json"
   printf '%s\n' '"-y"' "\"$stdio_package\"" '"--label"' '"two words \"quoted\""' \
     '""' '"line\nbreak"' '"C:\\fixture"' > "$results/argv.expected"
   awk '/"args": \[/ { args=1; next } args && /\]/ { exit }
@@ -364,6 +441,9 @@ native_relocation() {
 }
 
 step versions versions
+step native-installers native_installers
+export PATH="$HOME/native-installers/.local/bin:$PATH"
+step native-versions versions
 step unit-suite bash /repo/tests/run.sh --only agents
 step clean-dry-run dry_run
 step streamed-install streamed_install
@@ -391,6 +471,7 @@ step disabled-server disabled_server
 step skill-pruning skill_pruning
 step plugin-update-and-cache-pruning plugin_update_and_cache_pruning
 step duplicate-pruning duplicate_pruning
+CLAUDE_HOME_SOURCE=$CLAUDE_CONFIG_DIR step default-claude-root default_claude_root
 step native-contracts native_contracts
 step equivalent-paths native_equivalent_paths
 step directory-alias native_directory_alias

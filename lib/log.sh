@@ -25,14 +25,19 @@ ok()   { setup_color green; printf '✓ %s\n' "$*"; setup_color reset; }
 warn() { setup_color yellow; printf '! %s\n' "$*" >&2; setup_color reset; }
 fail() { setup_color red; printf '✗ %s\n' "$*" >&2; setup_color reset; exit 1; }
 
-# stage <name> <fn> — run fn() with a header + timing.
+# stage <name> <fn> — run fn() with a header + timing. Under set -e a failing
+# fn ends the script inside this function; SETUP_STAGE then still names it for
+# setup.sh's EXIT handler.
+# shellcheck disable=SC2034 # SETUP_STAGE is read by setup.sh
 stage() {
   local name="$1" fn="$2"
   setup_color bold; printf '\n── %s ──\n' "$name"; setup_color reset
   local start; start=$(date +%s)
   local status
+  SETUP_STAGE=$name
   "$fn"
   status=$?
+  SETUP_STAGE=
   if ((status != 0)); then
     warn "$name failed"
     return "$status"

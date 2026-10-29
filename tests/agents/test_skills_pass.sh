@@ -23,7 +23,16 @@ out=$( { skills_install; skills_prune; skills_mirror; } 2>&1 )
 assert_eq  "every source row is processed" "$(store_skill_names | tr '\n' ' ')" "alpha beta delta gamma "
 assert_link "claude gets alpha"  "$CLAUDE_HOME/skills/alpha"
 assert_link "codex gets gamma"   "$CODEX_HOME/skills/gamma"
-assert_link "Copilot gets the shared skills" "$COPILOT_HOME/skills/alpha"
+assert_missing "Copilot at its default home reads the store without a mirror" "$COPILOT_HOME/skills/alpha"
+custom_copilot=$(
+  export COPILOT_HOME="$root/home/copilot-custom"
+  mkdir -p "$COPILOT_HOME"
+  unset SKILL_MIRROR_AGENTS
+  . "$REPO_DIR/lib/agents/agentcfg.sh"; . "$REPO_DIR/lib/agents/skills.sh"
+  skills_mirror >/dev/null 2>&1
+  [[ -L "$COPILOT_HOME/skills/alpha" && "$COPILOT_HOME/skills/alpha" -ef "$AGENTS_STORE/alpha" ]] && echo yes
+)
+assert_eq "Copilot with a custom home gets the shared skills" "$custom_copilot" yes
 assert_eq  "'whole' mode resolved the source to one skill" "$(cat "$AGENTS_STORE/gamma/SKILL.md" | sed -n 2p)" "name: gamma"
 
 # --- drift 1: a payload deleted behind the lock's back ---
@@ -145,5 +154,24 @@ out=$(UPDATE_SKILLS=1 skills_install 2>&1)
 assert_eq "updating a collection discovers new skills" "$([[ -f "$AGENTS_STORE/third/SKILL.md" ]] && echo yes)" yes
 assert_eq "a source subfolder matches its lock path" "$(lock_source_skill_names acme/solo/deep)" gamma
 assert_eq "a different subfolder does not match" "$(lock_source_skill_names acme/solo/other)" ""
+
+# skills 1.7.4 keys its lock by the frontmatter name and installs into a
+# sanitized directory; the two are the same skill.
+mkdir -p "$AGENTS_STORE/mixedcase"
+printf -- '---\nname: "MixedCase"\n---\n' > "$AGENTS_STORE/mixedcase/SKILL.md"
+printf 'acme/mixed\n' > "$SANDBOX/state/source-MixedCase"
+printf 'MixedCase\n' >> "$SANDBOX/state/lock"
+"$SANDBOX/bin/sandbox-render"
+printf 'acme/mixed\tMixedCase\tselect\n' >> "$MANIFEST_DIR/skills.tsv"
+out=$( { skills_install; skills_mirror; verify_store; } 2>&1)
+assert_absent "a frontmatter name is not re-fetched" "$out" "fetching MixedCase"
+assert_absent "a frontmatter name verifies" "$out" "✗"
+assert_link "the mirror links the installed directory" "$CLAUDE_HOME/skills/mixedcase"
+
+# Planned removal uses the lock name, while the mirror uses the directory.
+DRY_RUN=1
+plan 'unskill:MixedCase'
+assert_absent "a planned removal excludes the sanitized mirror" "$(mirror_set)" mixedcase
+DRY_RUN=''
 
 test_summary

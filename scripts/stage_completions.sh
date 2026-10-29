@@ -49,7 +49,7 @@ ensure_brew_completions_linked() {
 
 # completion_generate <command> <shell>
 # Each command line below was verified against the installed publisher binary.
-# OpenCode selects its output format from SHELL rather than from an argument.
+# OpenCode V2 exposes completion generation as a global flag.
 completion_generate() {
   local command_name="$1" shell_name="$2"
   case "$command_name:$shell_name" in
@@ -63,8 +63,8 @@ completion_generate() {
     container:zsh) container --generate-completion-script zsh ;;
     container-compose:bash) container-compose --generate-completion-script bash ;;
     container-compose:zsh) container-compose --generate-completion-script zsh ;;
-    opencode:bash) SHELL=/bin/bash opencode completion ;;
-    opencode:zsh) SHELL=/bin/zsh opencode completion ;;
+    opencode:bash) opencode --completions bash ;;
+    opencode:zsh) opencode --completions zsh ;;
     *) return 2 ;;
   esac
 }

@@ -182,12 +182,16 @@ mcp_unplanned() {
 }
 
 verify_plugins() {
-  local row marketplace plugin installed
+  local row marketplace plugin installed disabled
   installed=$(claude_installed_plugins user) || { problem "cannot read Claude user plugins"; return 1; }
+  disabled=$(claude_disabled_plugins user) || { problem "cannot read Claude user plugins"; return 1; }
   while IFS= read -r row; do
     marketplace=$(manifest_field "$row" 2)
     plugin=$(manifest_field "$row" 4)
-    if grep -qxF "$plugin@$marketplace" <<< "$installed"; then
+    if grep -qxF "$plugin@$marketplace" <<< "$disabled"; then
+      # Disabling is a user decision; it is reported, not reverted.
+      warn "plugin: $plugin@$marketplace installed but disabled (left as chosen)"
+    elif grep -qxF "$plugin@$marketplace" <<< "$installed"; then
       ok "plugin: $plugin@$marketplace installed"
     elif ! planned "plugin:$plugin@$marketplace"; then
       problem "plugin: $plugin@$marketplace declared but not installed"

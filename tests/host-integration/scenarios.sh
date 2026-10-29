@@ -72,19 +72,6 @@ uv tool install 'markitdown[all]'
 markitdown "$scratch/input.docx" > "$scratch/restored-output.md"
 grep -Fq 'Document conversion works.' "$scratch/restored-output.md"
 
-printf '\n== Graph SDK load and repeat install without credentials ==\n'
-pwsh -NoLogo -NoProfile -NonInteractive -File "$HARNESS_REPO/scripts/graph.ps1"
-pwsh -NoLogo -NoProfile -NonInteractive -File "$HARNESS_REPO/scripts/graph.ps1" -VerifyOnly
-
-printf '\n== Missing SDK dependency is detected and repaired ==\n'
-auth_dir=$(pwsh -NoLogo -NoProfile -NonInteractive -Command \
-  '(Get-Module -ListAvailable Microsoft.Graph.Authentication | Select-Object -First 1).ModuleBase')
-[[ "$auth_dir" == "$HOME/"* && -d "$auth_dir" ]]
-mv "$auth_dir" "$scratch/graph-authentication"
-if pwsh -NoLogo -NoProfile -NonInteractive -File "$HARNESS_REPO/scripts/graph.ps1" -VerifyOnly; then exit 1; fi
-pwsh -NoLogo -NoProfile -NonInteractive -File "$HARNESS_REPO/scripts/graph.ps1"
-pwsh -NoLogo -NoProfile -NonInteractive -File "$HARNESS_REPO/scripts/graph.ps1" -VerifyOnly
-
 printf '\n== JSONC comments, trailing commas, user values, and convergence ==\n'
 cat > "$scratch/user.jsonc" <<'JSONC'
 {

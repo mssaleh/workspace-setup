@@ -34,7 +34,7 @@
 #   INSTALL_CLAUDE_DESKTOP — set to 1 to install Claude on a macOS workstation
 #   SKIP_TERMINAL_PROFILE — macOS only: skip Apple Terminal integration;
 #                Linux Ptyxis remains governed by the existing SKIP_FONT path
-#   CONFIGURE_APPLE_TERMINAL — set to 1 to import the Clear Dark profile in a
+#   CONFIGURE_APPLE_TERMINAL — set to 1 to import the Workspace profile in a
 #                local interactive session. Never activated over SSH/CI.
 #   SET_APPLE_TERMINAL_DEFAULT — set to 1, together with the preceding option,
 #                to select that profile inside Terminal.app.
@@ -213,9 +213,24 @@ if [[ -z "${BASH_SOURCE[0]:-}" ]] || [[ ! -f "$(dirname "${BASH_SOURCE[0]:-$0}")
   cd "${REPO_DIR}"
 fi
 
-# Reject unsupported hosts before loading provisioning stages or agent workers.
 # shellcheck disable=SC1091
 . "$(repo_dir)/lib/log.sh"
+
+# One EXIT handler from here on: name an interrupted stage, then remove a
+# streamed payload.
+setup_exit() {
+  local status=$?
+  if ((status != 0)) && [[ -n "${SETUP_STAGE:-}" ]]; then
+    warn "$SETUP_STAGE failed"
+  fi
+  if declare -F _setup_cleanup >/dev/null; then
+    _setup_cleanup
+  fi
+  exit "$status"
+}
+trap setup_exit EXIT
+
+# Reject unsupported hosts before loading provisioning stages or agent workers.
 # shellcheck disable=SC1091
 . "$(repo_dir)/lib/os.sh"
 detect_os
@@ -322,6 +337,8 @@ apply_linux_host_profile() {
 main() {
   if [[ "$SETUP_SCOPE" == all ]]; then
     (
+      # sort | uniq -d needs one byte order; see scripts/sync_agents.sh.
+      export LC_ALL=C
       REPO_DIR=$(repo_dir)
       MANIFEST_DIR=${MANIFEST_DIR:-$REPO_DIR/manifests}
       . "$REPO_DIR/lib/agents/log.sh"

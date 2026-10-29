@@ -82,7 +82,11 @@ fixture_tmux_installed=1 postflight_legacy_tmux >/dev/null
 POSTFLIGHT_PASSES=0 POSTFLIGHT_FAILURES=0
 postflight_legacy_tmux >/dev/null
 [[ "$POSTFLIGHT_PASSES" == 1 && "$POSTFLIGHT_FAILURES" == 0 ]]
-for command_name in uv uvx claude codex delta pwsh; do
+mkdir -p "$HOME/.opencode/bin"
+printf '#!/bin/sh\nexit 0\n' > "$HOME/.opencode/bin/opencode"
+chmod +x "$HOME/.opencode/bin/opencode"
+ln -s "$HOME/.opencode/bin/opencode" "$HOME/.local/bin/opencode"
+for command_name in uv uvx claude codex copilot delta; do
   printf '%s\n' '#!/bin/sh' 'exit 0' > "$HOME/.local/bin/$command_name"
   chmod +x "$HOME/.local/bin/$command_name"
 done

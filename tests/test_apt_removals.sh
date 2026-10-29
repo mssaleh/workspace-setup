@@ -32,6 +32,15 @@ APT_ENV=()
 CALLS="$TEST_TMP/calls"
 : > "$CALLS"
 
+snap() { [[ "$*" == 'list docker' ]]; }
+if OS_KIND=linux stage_docker > "$TEST_TMP/snap-conflict.log" 2>&1; then
+  printf 'Docker apt provisioning ignored the installed Snap\n' >&2
+  exit 1
+fi
+[[ ! -s "$CALLS" ]]
+grep -qF 'Docker Snap is installed' "$TEST_TMP/snap-conflict.log"
+snap() { return 1; }
+
 # Every apt call passes through sudo, so stubbing it captures the real argument
 # vector — the assertions are about that, not about a message.
 sudo() {

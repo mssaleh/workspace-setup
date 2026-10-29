@@ -17,7 +17,7 @@
 upstream_latest_tag() {
   local repo="$1" location
   location=$(curl -fsSI "https://github.com/${repo}/releases/latest" 2>/dev/null \
-    | awk 'BEGIN { IGNORECASE = 1 } /^location:/ { print $2 }' | tr -d '\r')
+    | awk 'tolower($1) == "location:" { print $2 }' | tr -d '\r')
   [[ -n "$location" ]] || return 1
   # A repository that has been transferred redirects to the new project rather
   # than to a tag. Anything that is not a tag URL is not a version.

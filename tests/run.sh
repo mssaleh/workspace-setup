@@ -88,20 +88,28 @@ trap 'rm -rf "$run_root"' EXIT
 user=$(id -un)
 
 failed=""
+skipped=""
 for interpreter in "${interpreters[@]}"; do
   # shellcheck disable=SC2016 # expanded by the interpreter being reported
   printf '\n── %s %s\n' "$interpreter" "$("$interpreter" -c 'printf %s "$BASH_VERSION"')"
   for test in "${tests[@]}"; do
     rm -rf "${run_root:?}/home" "${run_root:?}/tmp"
     mkdir -p "$run_root/home" "$run_root/tmp"
+    # stdin is closed like the environment: a stub that reads it would
+    # otherwise wait on whatever the suite was started from. Output is kept to
+    # name the files that skipped all or part of their checks.
     env -i HOME="$run_root/home" USER="$user" LOGNAME="$user" TMPDIR="$run_root/tmp" \
-      LANG=C.UTF-8 PATH="$test_path" "$interpreter" "$TEST_ROOT/tests/$test" \
-      || failed="$failed $test($interpreter)"
+      LANG=C.UTF-8 PATH="$test_path" "$interpreter" "$TEST_ROOT/tests/$test" < /dev/null 2>&1 \
+      | tee "$run_root/output"
+    status=${PIPESTATUS[0]}
+    ((status == 0)) || failed="$failed $test($interpreter)"
+    ! grep -q '^SKIP:' "$run_root/output" || skipped="$skipped $test($interpreter)"
   done
 done
 
+[[ -z "$skipped" ]] || printf '\nskipped all or part of:%s\n' "$skipped"
 if [[ -n "$failed" ]]; then
   printf '\nFAILED:%s\n' "$failed" >&2
   exit 1
 fi
-printf '\nall %d test files passed or were skipped under: %s\n' "${#tests[@]}" "${interpreters[*]}"
+printf '\nall %d test files passed under: %s\n' "${#tests[@]}" "${interpreters[*]}"

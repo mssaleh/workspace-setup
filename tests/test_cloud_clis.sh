@@ -44,17 +44,6 @@ else
 fi
 chmod +x "$2/gddy"
 SH
-cat > "$scratch/installers/agy" <<'SH'
-#!/bin/bash
-set -eu
-printf 'agy\n' >> "$CLI_TEST_LOG"
-test "$HOME" != "$CLI_TEST_HOME"
-test "$1" = --dir
-test "$2" = "$CLI_TEST_HOME/.local/bin"
-printf 'installer shell edits\n' > "$HOME/.bashrc"
-printf '#!/bin/sh\nprintf "agy 1.0.0\\n"\n' > "$2/agy"
-chmod +x "$2/agy"
-SH
 
 fixture_download_failure=''
 curl() {
@@ -62,7 +51,6 @@ curl() {
   case "$2" in
     "$AWS_CLI_INSTALL_URL") installer=aws ;;
     "$GODADDY_INSTALL_URL") installer=gddy ;;
-    "$ANTIGRAVITY_INSTALL_URL") installer=agy ;;
     *) return 22 ;;
   esac
   [[ "$fixture_download_failure" != "$installer" ]] || return 22
@@ -100,7 +88,7 @@ install_cloud_clis >/dev/null
 grep -Fxq 'openai openai_{version}_linux_amd64.tar.gz openai' "$scratch/archives"
 grep -Fxq 'ant ant_{version}_linux_amd64.tar.gz ant' "$scratch/archives"
 [[ "$HOME/.local/bin/aws" -ef "$HOME/.local/share/aws-cli/v2/current/bin/aws" ]]
-[[ "$(cat "$CLI_TEST_LOG")" == $'gddy\naws\nagy\ncf' ]]
+[[ "$(cat "$CLI_TEST_LOG")" == $'gddy\naws\ncf' ]]
 
 # AWS owns its update check; the other installed native/npm tools stay put.
 : > "$CLI_TEST_LOG"

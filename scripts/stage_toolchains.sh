@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# scripts/stage_toolchains.sh — install rustup + uv + coding-agent CLIs,
-# the uv-managed Python applications, and Microsoft Graph PowerShell.
+# scripts/stage_toolchains.sh — install rustup + uv + coding-agent CLIs and
+# the uv-managed Python applications.
 # These are deliberately owned by their upstream installers, not inferred from
 # whichever same-named executable happens to be on PATH.
 
@@ -102,9 +102,6 @@ stage_toolchains() {
 
   install_cloud_clis || return 1
 
-  # --- PowerShell and Microsoft Graph SDK ---
-  install_graph_powershell || return 1
-
   # --- Git Credential Manager — GitHub release tarball ---
   # Linux only; a Mac gets its keychain helper from git itself. The archive is a
   # self-contained .NET application: the executable needs its two .so files
@@ -115,14 +112,15 @@ stage_toolchains() {
     local gcm_bin="$gcm_dir/git-credential-manager"
     local gcm_link="$HOME/.local/bin/git-credential-manager"
     if upstream_artifact_needed git-credential-manager "$gcm_bin" "$gcm_bin" --version; then
-      local gcm_ver gcm_tmp
-      gcm_ver=$(upstream_latest_version git-ecosystem/git-credential-manager 2>/dev/null || true)
-      if [[ -z "$gcm_ver" ]]; then
+      local gcm_tag gcm_ver gcm_tmp
+      gcm_tag=$(upstream_latest_tag git-ecosystem/git-credential-manager 2>/dev/null || true)
+      gcm_ver=${gcm_tag#v}
+      if [[ -z "$gcm_tag" ]]; then
         warn "could not determine the published git-credential-manager version"
       else
         gcm_tmp=$(mktemp -d)
-        if curl -fsSL -o "$gcm_tmp/gcm.tar.gz" \
-             "https://github.com/git-ecosystem/git-credential-manager/releases/download/v${gcm_ver}/gcm-linux-x64-${gcm_ver}.tar.gz" \
+        if upstream_fetch_verified_asset git-ecosystem/git-credential-manager "$gcm_tag" \
+             "gcm-linux-x64-${gcm_ver}.tar.gz" "$gcm_tmp/gcm.tar.gz" \
            && mkdir -p "$gcm_dir" \
            && tar -xzf "$gcm_tmp/gcm.tar.gz" -C "$gcm_dir"; then
           chmod 0755 "$gcm_bin"
@@ -145,92 +143,122 @@ stage_toolchains() {
     fi
   fi
 
-  # --- Claude Code (Anthropic) — official native installer ---
-  # The native installer (https://claude.ai/install.sh) is the recommended
-  # method per https://docs.anthropic.com/en/docs/claude-code/setup. It
-  # installs to ~/.local/bin/claude (a symlink into
-  # ~/.local/share/claude/versions/) and auto-updates in the background.
-  # Alternative supported methods (NOT used here): Homebrew cask
-  # (`brew install --cask claude-code`), npm (`npm install -g @anthropic-ai/claude-code`,
-  # requires Node 22+, does NOT auto-update), apt/dnf/apk repos. See the docs
-  # page for the full list — the native installer is the recommended one.
+  install_coding_agents || return 1
+}
+
+install_coding_agents() {
+  local tool tmp status codex_home opencode_bin opencode_link version
+  mkdir -p "$HOME/.local/bin" || return 1
+  export PATH="$HOME/.local/bin:$PATH"
+  for tool in claude codex copilot agy; do
+    if [[ ( -e "$HOME/.local/bin/$tool" || -L "$HOME/.local/bin/$tool" ) \
+          && ! -x "$HOME/.local/bin/$tool" ]]; then
+      warn "preserving an existing path that blocks $tool: ~/.local/bin/$tool"
+      return 1
+    fi
+  done
+
+  # https://code.claude.com/docs/en/setup#install-a-specific-version
+  # Anthropic's stable channel skips releases with major regressions.
   if [[ -x "$HOME/.local/bin/claude" ]]; then
-    ok "claude native install already present ($("$HOME/.local/bin/claude" --version 2>/dev/null || echo present))"
-  elif [[ -e "$HOME/.local/bin/claude" || -L "$HOME/.local/bin/claude" ]]; then
-    warn "preserving an existing path that blocks the native Claude artifact: ~/.local/bin/claude"
+    "$HOME/.local/bin/claude" install stable </dev/null || return 1
   else
-    info "installing Claude Code (official native installer)…"
-    if curl -fsSL https://claude.ai/install.sh | bash; then
-      ok "claude installed via native installer → ~/.local/bin/claude"
-    else
-      warn "Claude Code native installer failed — install manually: curl -fsSL https://claude.ai/install.sh | bash"
-      warn "  alternatives: https://docs.anthropic.com/en/docs/claude-code/setup (Homebrew cask, apt/dnf/apk, npm)"
-      return 1
+    tmp=$(mktemp -d) || return 1
+    status=0
+    if ! curl -fsSL "$CLAUDE_INSTALL_URL" -o "$tmp/install.sh" \
+        || ! bash "$tmp/install.sh" stable </dev/null; then
+      status=1
     fi
+    rm -rf "$tmp"
+    ((status == 0)) || return 1
   fi
+  "$HOME/.local/bin/claude" --version </dev/null || return 1
 
-  # --- OpenAI Codex CLI — official native installer ---
-  # The native installer from releases.openai.com/codex is the
-  # recommended method per https://github.com/openai/codex#installing-and-running-codex-cli.
-  # It installs to ~/.local/bin/codex. Alternative supported methods (NOT used
-  # here): Homebrew cask (`brew install --cask codex`), npm
-  # (`npm install -g @openai/codex`), GitHub release binaries.
-  if [[ -x "$HOME/.local/bin/codex" ]]; then
-    ok "codex native install already present ($("$HOME/.local/bin/codex" --version 2>/dev/null || echo present))"
-  elif [[ -e "$HOME/.local/bin/codex" || -L "$HOME/.local/bin/codex" ]]; then
-    warn "preserving an existing path that blocks the native Codex artifact: ~/.local/bin/codex"
-  else
-    info "installing OpenAI Codex CLI (official native installer)…"
-    local codex_tmp codex_home codex_status=0
-    codex_home=$(agent_home codex)
-    codex_tmp=$(mktemp -d) || return 1
-    # Codex 0.164's installer edits profiles when another package manager owns
-    # a command on PATH. Keep its package state while isolating those edits.
-    # https://releases.openai.com/codex/install.sh
-    if ! curl -fsSL "$CODEX_INSTALL_URL" -o "$codex_tmp/install.sh" \
-        || ! env HOME="$codex_tmp" CODEX_HOME="$codex_home" \
-          CODEX_INSTALL_DIR="$HOME/.local/bin" CODEX_NON_INTERACTIVE=1 \
-          sh "$codex_tmp/install.sh" </dev/null; then
-      codex_status=1
-    fi
-    rm -rf "$codex_tmp"
-    if ((codex_status != 0)) || ! "$HOME/.local/bin/codex" --version; then
-      warn "Codex native installer failed: $CODEX_INSTALL_URL"
-      return 1
-    fi
-    ok "codex installed via native installer → ~/.local/bin/codex"
+  tmp=$(mktemp -d) || return 1
+  status=0
+  codex_home=$(agent_home codex)
+  # Codex 0.165's installer owns updates and package state, but can edit
+  # profiles when another package manager supplies codex. Isolate those edits.
+  # https://chatgpt.com/codex/install.sh
+  if ! curl -fsSL "$CODEX_INSTALL_URL" -o "$tmp/install.sh" \
+      || ! env HOME="$tmp" CODEX_HOME="$codex_home" \
+        CODEX_INSTALL_DIR="$HOME/.local/bin" CODEX_NON_INTERACTIVE=1 \
+        sh "$tmp/install.sh" --release latest </dev/null; then
+    status=1
   fi
+  rm -rf "$tmp"
+  ((status == 0)) || return 1
+  "$HOME/.local/bin/codex" --version </dev/null || return 1
 
-  # --- OpenCode — Homebrew owns it on macOS; upstream owns it on Linux ---
-  if [[ "$OS_KIND" == linux ]]; then
-    local opencode_bin="$HOME/.opencode/bin/opencode"
-    # The upstream installer replaces what it finds, so re-running it is how a
-    # host that has fallen behind catches up.
-    if upstream_artifact_needed opencode "$opencode_bin" "$opencode_bin" --version; then
-      curl -fsSL https://opencode.ai/install \
-        | SHELL="${SHELL:-/bin/bash}" bash -s -- --no-modify-path
+  # https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli
+  # Copilot 1.0.105's updater exhausts anonymous GitHub API quota. The
+  # installer uses release download URLs; the shared comparison uses HEAD.
+  if upstream_artifact_needed copilot "$HOME/.local/bin/copilot" \
+      "$HOME/.local/bin/copilot" --version; then
+    tmp=$(mktemp -d) || return 1
+    status=0
+    if ! curl -fsSL "$COPILOT_INSTALL_URL" -o "$tmp/install.sh" \
+        || ! env HOME="$tmp" PREFIX="$HOME/.local" VERSION=latest \
+          bash "$tmp/install.sh" </dev/null; then
+      status=1
     fi
-    if [[ ! -x "$opencode_bin" ]]; then
-      warn "opencode upstream artifact is unavailable at $opencode_bin"
-      return 0
-    fi
+    rm -rf "$tmp"
+    ((status == 0)) || return 1
+  fi
+  "$HOME/.local/bin/copilot" --version </dev/null || return 1
 
-    local opencode_link="$HOME/.local/bin/opencode"
-    if [[ -L "$opencode_link" && -e "$opencode_link" && "$opencode_link" -ef "$opencode_bin" ]]; then
-      :
-    elif [[ -e "$opencode_link" && ! -L "$opencode_link" ]]; then
-      if cmp -s "$opencode_bin" "$opencode_link"; then
-        ok "existing ~/.local/bin/opencode is byte-identical to the upstream artifact"
-      else
-        warn "preserving user-owned $opencode_link; cannot expose the upstream opencode artifact"
+  opencode_bin="$HOME/.opencode/bin/opencode"
+  opencode_link="$HOME/.local/bin/opencode"
+  if [[ ( -e "$opencode_bin" || -L "$opencode_bin" ) && ! -x "$opencode_bin" ]]; then
+    warn "preserving an existing path that blocks OpenCode: $opencode_bin"
+    return 1
+  fi
+  version=$("$opencode_bin" --version </dev/null 2>/dev/null) || version=''
+  # V1's updater stays on V1. The V2 installer migrates that native location.
+  # https://opencode.ai/v2/docs/
+  case "$version" in
+    'opencode v2.'*|2.*) "$opencode_bin" upgrade --method curl </dev/null || return 1 ;;
+    *)
+      tmp=$(mktemp -d) || return 1
+      status=0
+      if ! curl -fsSL "$OPENCODE_INSTALL_URL" -o "$tmp/install.sh" \
+          || ! env VERSION= SHELL="${SHELL:-/bin/bash}" \
+            bash "$tmp/install.sh" --no-modify-path </dev/null; then
+        status=1
       fi
-    elif [[ -L "$opencode_link" ]]; then
-      warn "preserving user-owned $opencode_link → $(readlink "$opencode_link"); expected $opencode_bin"
+      rm -rf "$tmp"
+      ((status == 0)) || return 1 ;;
+  esac
+  "$opencode_bin" --version </dev/null || return 1
+  if [[ -e "$opencode_link" && "$opencode_link" -ef "$opencode_bin" ]]; then
+    :
+  elif [[ -e "$opencode_link" || -L "$opencode_link" ]]; then
+    if [[ ! -L "$opencode_link" ]] && cmp -s "$opencode_bin" "$opencode_link"; then
+      ok "$opencode_link matches the native artifact"
     else
-      ln -s "$opencode_bin" "$opencode_link"
-      info "linked $opencode_link → $opencode_bin"
+      warn "preserving user-owned $opencode_link; cannot expose native OpenCode"
+      return 1
     fi
+  else
+    ln -s "$opencode_bin" "$opencode_link" || return 1
   fi
+
+  if [[ -x "$HOME/.local/bin/agy" ]]; then
+    "$HOME/.local/bin/agy" update </dev/null || return 1
+  else
+    tmp=$(mktemp -d) || return 1
+    status=0
+    # agy 1.4.10's bootstrap invokes shell setup without --skip-path or
+    # --skip-aliases. Isolate it from real profiles and aliases.
+    # https://antigravity.google/cli/install.sh
+    if ! curl -fsSL "$ANTIGRAVITY_INSTALL_URL" -o "$tmp/install.sh" \
+        || ! env HOME="$tmp" bash "$tmp/install.sh" --dir "$HOME/.local/bin" </dev/null; then
+      status=1
+    fi
+    rm -rf "$tmp"
+    ((status == 0)) || return 1
+  fi
+  "$HOME/.local/bin/agy" --version </dev/null || return 1
 }
 
 install_cloud_clis() {
@@ -295,20 +323,6 @@ install_cloud_clis() {
     "$HOME/.local/bin/aws" --version || return 1
   fi
 
-  if [[ ! -e "$HOME/.local/bin/agy" && ! -L "$HOME/.local/bin/agy" ]]; then
-    tmp=$(mktemp -d) || return 1
-    # agy 1.4.6 bootstrap always invokes shell setup without forwarding its
-    # --skip-path/--skip-aliases flags. Isolate that setup from real profiles.
-    # https://antigravity.google/cli/install.sh
-    if ! curl -fsSL "$ANTIGRAVITY_INSTALL_URL" -o "$tmp/install.sh" \
-        || ! env HOME="$tmp" bash "$tmp/install.sh" --dir "$HOME/.local/bin" </dev/null; then
-      status=1
-    fi
-    rm -rf "$tmp"
-    ((status == 0)) || return 1
-  fi
-  "$HOME/.local/bin/agy" --version || return 1
-
   # An explicit user prefix works before stage_npm_config on a fresh host.
   for tool in "${NPM_TOOLS_COMMON[@]}"; do
     if [[ ! -x "$HOME/.npm/packages/bin/$tool" ]] \
@@ -318,56 +332,4 @@ install_cloud_clis() {
     fi
     "$HOME/.npm/packages/bin/$tool" --version || return 1
   done
-}
-
-# Microsoft documents the universal DEB for hosts without a matching PMC feed:
-# https://learn.microsoft.com/powershell/scripting/install/install-ubuntu
-install_graph_powershell() {
-  if ! command -v pwsh >/dev/null 2>&1; then
-    if [[ "$OS_KIND" == macos ]]; then
-      "$BREW_BIN" install --cask "${TOOLCHAIN_BREW_CASKS[@]}" || return 1
-    else
-      local tag version arch asset checksum tmp status=0
-      tag=$(upstream_latest_tag PowerShell/PowerShell) || return 1
-      version=${tag#v}
-      arch=$(dpkg --print-architecture)
-      tmp=$(mktemp -d) || return 1
-      case "$arch" in
-        amd64) asset="powershell_${version}-1.deb_amd64.deb" ;;
-        arm64) asset="powershell-${version}-linux-arm64.tar.gz" ;;
-        *) warn "PowerShell is unsupported on $arch"; rm -rf "$tmp"; return 1 ;;
-      esac
-      if [[ "$arch" == arm64 && ( -e "$HOME/.local/share/powershell" || -L "$HOME/.local/share/powershell" ) ]]; then
-        warn "preserving existing PowerShell directory without a usable pwsh command"
-        rm -rf "$tmp"
-        return 1
-      fi
-      checksum=$(curl -fsSL "https://github.com/PowerShell/PowerShell/releases/download/$tag/hashes.sha256" \
-        | iconv -f UTF-16 -t UTF-8 \
-        | awk -v asset="$asset" '{ sub(/^\*/, "", $2); sub(/\r$/, "", $2) } $2 == asset { print tolower($1) }') || status=1
-      if ((status == 0)) && install_verified_binary pwsh \
-          "https://github.com/PowerShell/PowerShell/releases/download/$tag/$asset" \
-          "$checksum" "$tmp/$asset"; then
-        if [[ "$arch" == amd64 ]]; then
-          apt_install_packages "$tmp/$asset" || status=1
-        else
-          apt_install_packages libicu-dev libssl-dev libunwind8 || status=1
-          if ((status == 0)); then
-            mkdir -p "$tmp/extracted" "$HOME/.local/share"
-            tar -xzf "$tmp/$asset" -C "$tmp/extracted" || status=1
-            chmod +x "$tmp/extracted/pwsh" || status=1
-            if ((status == 0)); then
-              mv "$tmp/extracted" "$HOME/.local/share/powershell" || status=1
-              ln -s "$HOME/.local/share/powershell/pwsh" "$HOME/.local/bin/pwsh" || status=1
-            fi
-          fi
-        fi
-      else
-        status=1
-      fi
-      rm -rf "$tmp"
-      ((status == 0)) || return 1
-    fi
-  fi
-  pwsh -NoLogo -NoProfile -NonInteractive -File "$(repo_dir)/scripts/graph.ps1"
 }

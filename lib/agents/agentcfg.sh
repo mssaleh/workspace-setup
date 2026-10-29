@@ -13,6 +13,14 @@
 CLAUDE_CONFIG=${CLAUDE_CONFIG:-${CLAUDE_CONFIG_DIR:+$CLAUDE_CONFIG_DIR/.claude.json}}
 CLAUDE_CONFIG=${CLAUDE_CONFIG:-$HOME/.claude.json}
 CLAUDE_HOME=$(agent_home claude-code)
+# Native plugin commands see a different CLAUDE_CONFIG_DIR only when the plugin
+# root was chosen separately. Forcing it to the default root made Claude 2.1
+# treat ~/.claude/.claude.json as a missing global config, recreate it and rerun
+# its first-start migrations, which rewrite settings.json.
+CLAUDE_PLUGIN_ENV=()
+if [[ "$CLAUDE_HOME" != "$(claude_config_home)" ]]; then
+  CLAUDE_PLUGIN_ENV=("CLAUDE_CONFIG_DIR=$CLAUDE_HOME")
+fi
 CODEX_HOME=$(agent_home codex)
 COPILOT_HOME=$(agent_home github-copilot)
 
@@ -39,7 +47,7 @@ json_mcp_block() {
   awk -v want="$2" -v full="${3:-}" '
     function flush(  i, rest, first) {
       if (name == "") return
-      if (want == "plugins") { printf "%s\t%s\n", name, scope }
+      if (want == "plugins") { printf "%s\t%s\t%s\n", name, scope, enabled }
       else if (want == "marketplaces") { printf "%s\n", name }
       else if (url != "") { printf "%s\tremote\t%s\t%s", name, url, enabled }
       else if (cmd != "" || na > 0) {
@@ -73,6 +81,7 @@ json_mcp_block() {
         if (depth == 1 && key[depth] == "id") name = v
         if (depth == 1 && want == "marketplaces" && key[depth] == "name") name = v
         if (depth == 1 && key[depth] == "scope") scope = v
+        if (depth == 1 && want == "plugins" && key[depth] == "enabled") enabled = v
         return
       }
       if (want == "codex" && depth == 1 && key[depth] == "name") { name = v; return }
@@ -292,18 +301,30 @@ claude_disabled_in() {
   ' "$CLAUDE_CONFIG"
 }
 
-claude_installed_plugins() {
+# claude_plugin_rows [scope] — `id <TAB> scope <TAB> enabled` per installed plugin.
+claude_plugin_rows() {
   local file="$CLAUDE_HOME/plugins/installed_plugins.json"
   [[ -e "$file" || -L "$file" ]] || return 0
   [[ -f "$file" && -r "$file" ]] || return 1
-  (cd / && CLAUDE_CONFIG_DIR="$CLAUDE_HOME" claude plugin list --json < /dev/null) | json_mcp_block - plugins \
-    | awk -F'\t' -v scope="${1:-}" 'scope == "" || $2 == scope { print $1 }' | sort -u
+  (cd / && env ${CLAUDE_PLUGIN_ENV[@]+"${CLAUDE_PLUGIN_ENV[@]}"} claude plugin list --json < /dev/null) \
+    | json_mcp_block - plugins \
+    | awk -F'\t' -v scope="${1:-}" 'scope == "" || $2 == scope'
+}
+claude_installed_plugins() {
+  local rows
+  rows=$(claude_plugin_rows "${1:-}") || return 1
+  [[ -z "$rows" ]] || printf '%s\n' "$rows" | cut -f1 | sort -u
+}
+claude_disabled_plugins() {
+  local rows
+  rows=$(claude_plugin_rows "${1:-}") || return 1
+  [[ -z "$rows" ]] || printf '%s\n' "$rows" | awk -F'\t' '$3 == "false" { print $1 }' | sort -u
 }
 claude_known_marketplaces() {
   # Claude 2.1.309 list initializes user state even without a registry.
   local file="$CLAUDE_HOME/plugins/known_marketplaces.json"
   [[ -e "$file" || -L "$file" ]] || return 0
   [[ -f "$file" && -r "$file" ]] || return 1
-  (cd / && CLAUDE_CONFIG_DIR="$CLAUDE_HOME" claude plugin marketplace list --json < /dev/null) \
+  (cd / && env ${CLAUDE_PLUGIN_ENV[@]+"${CLAUDE_PLUGIN_ENV[@]}"} claude plugin marketplace list --json < /dev/null) \
     | json_mcp_block - marketplaces
 }

@@ -516,6 +516,25 @@ install_vendor_package() {
   esac
 }
 
+# Google Cloud's archive also publishes `kubectl`, versioned with an epoch that
+# outranks pkgs.k8s.io. GOOGLE_CLOUD_KUBECTL_PREFERENCES_FILE stops new installs
+# from it, but a host that already has that build keeps it and has no candidate
+# at all; apt only moves it to the declared minor as an explicit downgrade.
+kubectl_leave_google_build() {
+  local installed target
+  apt_package_installed kubectl || return 0
+  installed=$(dpkg-query -W -f='${Version}' kubectl 2>/dev/null) || return 0
+  apt_version_from_archive kubectl "$installed" "$GOOGLE_CLOUD_APT_URI" || return 0
+  target=$(apt_newest_from_archive kubectl "$KUBERNETES_APT_URI")
+  if [[ -z "$target" ]]; then
+    warn "kubectl $installed comes from Google Cloud's archive and $KUBERNETES_APT_URI offers no replacement"
+    return 1
+  fi
+  info "replacing Google Cloud's kubectl $installed with $target from pkgs.k8s.io…"
+  apt_report_removals install '' --allow-downgrades "kubectl=$target" || return 1
+  apt_install_packages --allow-downgrades "kubectl=$target"
+}
+
 # Report whether the Codex app's updates still arrive from OpenAI's archive.
 # The package's own maintainer script owns that source list and keyring, so
 # this only observes them: a repository that no longer points at OpenAI, or a
@@ -672,7 +691,11 @@ stage_packages() {
     # 4. Packages that exist only in a vendor archive. Each re-checks that its
     #    own archive is present, so a failed registration leaves the package
     #    uninstalled rather than letting another source answer to the name.
-    if [[ -z "${SKIP_VSCODE:-}" ]]; then
+    if [[ -n "${SKIP_VSCODE:-}" ]]; then
+      :
+    elif apt_preserve_application code; then
+      :
+    else
       install_vendor_package code code "$VSCODE_APT_URI" \
         "https://code.visualstudio.com/docs/setup/linux"
     fi
@@ -682,6 +705,9 @@ stage_packages() {
     if [[ -z "${SKIP_GNOME_EXTENSIONS:-}" ]] && pkg_installed gnome-shell; then
       local gnome_pkg gnome_missing=()
       for gnome_pkg in "${PACKAGES_APT_GNOME[@]}"; do
+        if apt_preserve_application "$gnome_pkg"; then
+          continue
+        fi
         pkg_installed "$gnome_pkg" || gnome_missing+=("$gnome_pkg")
       done
       if ((${#gnome_missing[@]})); then
@@ -695,6 +721,8 @@ stage_packages() {
       ok "GNOME Shell is not installed; skipped ${PACKAGES_APT_GNOME[*]}"
     fi
 
+    kubectl_leave_google_build \
+      || warn "kubectl stays on Google Cloud's build; postflight reports it"
     install_vendor_package kubectl kubectl "$KUBERNETES_APT_URI" \
       https://kubernetes.io/docs/tasks/tools/install-kubectl-linux/
     install_vendor_package helm helm "$HELM_APT_URI" \
@@ -732,6 +760,8 @@ stage_packages() {
     # 6. GUI applications. Each is opt-out for a headless host.
     if [[ -n "${SKIP_LIBREOFFICE:-}" ]]; then
       info "skipping LibreOffice (SKIP_LIBREOFFICE=1)"
+    elif apt_preserve_application libreoffice; then
+      :
     elif libreoffice_installed; then
       ok "LibreOffice is already installed"
     else
@@ -889,5 +919,5 @@ stage_packages() {
   # Keep this outside SKIP_FONT and every GUI-specific stage so a plain Kitty
   # SSH session can run ncurses applications on a headless target.
   ensure_xterm_kitty_terminfo
-  remove_legacy_tmux
+  remove_legacy_tmux || warn "the legacy tmux package stays installed; postflight reports it"
 }

@@ -62,7 +62,7 @@ make_executable() {
   chmod +x "$1"
 }
 
-for tool in uv uvx claude codex zmx ruff yazi ya himalaya yq cosign pwsh apex; do
+for tool in uv uvx claude codex copilot agy zmx ruff yazi ya himalaya yq cosign apex; do
   make_executable "$HOME/.local/bin/$tool"
 done
 printf '#!/bin/sh\nprintf "yq (https://github.com/mikefarah/yq/) version v4.0.0\\n"\n' > "$HOME/.local/bin/yq"
@@ -90,6 +90,10 @@ chmod +x "$TEST_TMP/system/cmake" "$TEST_TMP/system/ninja"
 # checks consult it, and a stub that only understands `-s` would silently skip
 # those checks instead of exercising them.
 installed_packages='kubectl helm libreoffice claude-desktop chatgpt'
+# The host's own Flatpaks would satisfy a GUI application these fixtures omit.
+# shellcheck disable=SC2329 # called by libreoffice_installed
+flatpak() { [[ "$1" != info ]] && command flatpak "$@"; }
+snap() { return 1; }
 dpkg() {
   case "$1" in
     -s) [[ " $installed_packages " == *" $2 "* ]] ;;
@@ -155,14 +159,14 @@ POSTFLIGHT_PASSES=0
 POSTFLIGHT_FAILURES=0
 postflight_upstream_tools
 [[ "$POSTFLIGHT_FAILURES" == 0 ]]
-[[ "$POSTFLIGHT_PASSES" == 16 ]]
+[[ "$POSTFLIGHT_PASSES" == 17 ]]
 
 installed_packages='kubectl helm claude-desktop chatgpt'
 versioned_lo=1
 POSTFLIGHT_PASSES=0
 POSTFLIGHT_FAILURES=0
 postflight_upstream_tools >/dev/null
-[[ "$POSTFLIGHT_FAILURES" == 0 && "$POSTFLIGHT_PASSES" == 16 ]]
+[[ "$POSTFLIGHT_FAILURES" == 0 && "$POSTFLIGHT_PASSES" == 17 ]]
 installed_packages='kubectl helm libreoffice claude-desktop chatgpt'
 versioned_lo=0
 
@@ -192,7 +196,7 @@ POSTFLIGHT_PASSES=0
 POSTFLIGHT_FAILURES=0
 SKIP_LIBREOFFICE=1 SKIP_CLAUDE_DESKTOP=1 SKIP_CODEX_APP=1 postflight_upstream_tools
 [[ "$POSTFLIGHT_FAILURES" == 0 ]]
-[[ "$POSTFLIGHT_PASSES" == 13 ]]
+[[ "$POSTFLIGHT_PASSES" == 14 ]]
 
 # A missing GUI application on a host that expects it is a real failure.
 installed_packages='kubectl helm'

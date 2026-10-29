@@ -38,7 +38,9 @@ if array_has container "${PACKAGES_BREW[@]}"; then
   printf 'Apple Container must not become Homebrew-owned\n' >&2
   exit 1
 fi
-array_has opencode "${PROVIDERS_LINUX_UPSTREAM[@]}"
+array_has opencode "${PROVIDERS_COMMON_UPSTREAM[@]}"
+array_has copilot "${PROVIDERS_COMMON_UPSTREAM[@]}"
+upstream_has_project copilot
 array_has neurosnap/tap/zmx "${PACKAGES_BREW[@]}"
 array_has zmx "${PROVIDERS_LINUX_UPSTREAM[@]}"
 upstream_has_project zmx
@@ -214,14 +216,6 @@ array_has azure-cli "${PROVIDERS_LINUX_OFFICIAL_REPO[@]}"
 array_has ttscoff/thelab/apex "${PACKAGES_BREW[@]}"
 array_has apex "${PROVIDERS_LINUX_UPSTREAM[@]}"
 upstream_has_project apex
-
-# The Graph CLI ships as a GitHub release tarball, so it is upstream-owned and
-# must carry a project entry for the currency check to have anything to compare.
-array_has pwsh "${PROVIDERS_LINUX_UPSTREAM[@]}"
-if ! upstream_has_project pwsh; then
-  printf 'pwsh must declare a project in UPSTREAM_RELEASE_PROJECTS\n' >&2
-  exit 1
-fi
 
 # xsel is an X11 clipboard client. Linux keeps it; PACKAGES_BREW is read only
 # where PKGMGR is brew, so a Mac must never be asked to install it at all.

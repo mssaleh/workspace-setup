@@ -92,8 +92,8 @@ function _set_term_title() { print -Pn "\e]2;${_host_label}: %~\a"; }
 
 # Undo what a signal-killed TUI left set: same policy and the same reasons as
 # the __restore_term block in ~/.bashrc. $signals is indexed from EXIT, so
-# signal N is element N+1. First in the list: only the first precmd function
-# sees the real $?, which it then passes on.
+# signal N is element N+1. zsh restores the command's $? before each precmd
+# function (measured with zsh 5.9), so a hook placed ahead of it cannot hide it.
 function _restore_term() {
   local _status=$? _signal
   if (( _status > 128 )); then
@@ -101,14 +101,16 @@ function _restore_term() {
     case $_signal in
       ''|STOP|TSTP|TTIN|TTOU) ;;
       *) [[ -t 1 ]] && print -n \
-        '\e[?1049l\e[?1000l\e[?1002l\e[?1003l\e[?1004l\e[?1006l\e[?25h\e[<u\e[>4m' ;;
+        '\e7\e[?1049l\e[?1000l\e[?1002l\e[?1003l\e[?1004l\e[?1006l\e[?25h\e[<u\e[>4m' ;;
     esac
   fi
   return $_status
 }
 precmd_functions=(_restore_term $precmd_functions vcs_info _set_term_title)
 
-export EDITOR=nano
+export EDITOR=nano VISUAL=nano SUDO_EDITOR=nano
+# Same pager policy as ~/.bashrc: an explicitly supplied pager wins.
+export PAGER=${PAGER:-less} LESS=${LESS:--FRXMi} MANPAGER=${MANPAGER:-'less -R'}
 
 # yazi: `y` opens the file manager and cd's to the directory you quit in.
 # Official wrapper: https://yazi-rs.github.io/docs/quick-start
@@ -126,10 +128,12 @@ function y() {
 
 # A dropped link exits 255 with the remote program's terminal modes still set.
 # The alternate screen has no scrollback and turns the wheel into arrow keys, so
-# leave it then; clear mouse and keyboard modes whenever ssh returns.
+# leave it then (\e7 first, as in _restore_term: a refused connection also exits
+# 255 on the normal screen); clear mouse and keyboard modes whenever ssh
+# returns.
 function _ssh_restore_term() {
   if [[ -t 1 ]]; then
-    if (($1 == 255)); then print -n '\e[?1049l'; fi
+    if (($1 == 255)); then print -n '\e7\e[?1049l'; fi
     print -n '\e[?1000l\e[?1002l\e[?1003l\e[?1004l\e[?1006l\e[?25h\e[<u\e[>4m'
   fi
   return $1
@@ -155,7 +159,8 @@ function ds() {
 
 # Managed hosts install xterm-kitty terminfo without a GUI dependency, so plain
 # `ssh` preserves TERM. `s` advertises xterm-256color to unmanaged hosts.
-function s() { TERM=xterm-256color command ssh "$@"; _ssh_restore_term $?; }
+# -S none, as for ds: plain ssh keeps the shared connection.
+function s() { TERM=xterm-256color command ssh -S none "$@"; _ssh_restore_term $?; }
 
 # ks: opt in to Kitty's ssh kitten for hosts where you want Kitty integration.
 # The kitten refuses to run outside a kitty window ("Error: The SSH kitten is
@@ -168,7 +173,7 @@ function ks() {
   if [ -n "$KITTY_WINDOW_ID" ] && command -v kitten >/dev/null 2>&1; then
     kitten ssh "$@"
   else
-    command ssh "$@"
+    command ssh -S none "$@"
   fi
   _ssh_restore_term $?
 }
@@ -176,7 +181,10 @@ function ks() {
 # fzf: fuzzy finder. Ctrl-R fuzzy history · Ctrl-T insert file paths · Alt-C cd
 # into a subdir · `**<Tab>` fuzzy completion. Official zsh integration (defines
 # the key-binding widgets + completion):  https://github.com/junegunn/fzf
-if command -v fzf >/dev/null 2>&1; then
+# Same gate as ~/.bashrc: fzf before 0.48 has no --zsh and rejects the colour
+# names below, so the options and bindings apply only where --zsh works.
+if command -v fzf >/dev/null 2>&1 \
+    && _fzf_zsh=$(FZF_DEFAULT_OPTS='' fzf --zsh 2>/dev/null); then
   # Source `fd` (respects .gitignore, includes dotfiles, skips .git) for speed:
   command -v fd >/dev/null 2>&1 && {
     export FZF_DEFAULT_COMMAND='fd --hidden --strip-cwd-prefix --exclude .git'
@@ -199,9 +207,10 @@ if command -v fzf >/dev/null 2>&1; then
   # fzf's zsh keybindings assume a real terminal; skip them in non-TTY shells
   # such as automated `zsh -ic` SSH checks.
   if [[ -t 0 && -t 1 ]]; then
-    source <(fzf --zsh)
+    eval "$_fzf_zsh"
   fi
 fi
+unset _fzf_zsh
 
 # Keep directory jumping available even when fzf is absent.
 if command -v zoxide >/dev/null 2>&1; then

@@ -220,7 +220,7 @@ postflight_macos_login_shell() {
 
 postflight_macos_apple_terminal_profile_exists() {
   defaults read com.apple.Terminal 'Window Settings' 2>/dev/null \
-    | grep -Eq '^[[:space:]]*"?Clear Dark"?[[:space:]]*='
+    | grep -Eq '^[[:space:]]*"?Workspace"?[[:space:]]*='
 }
 
 postflight_macos_terminal_profile() {
@@ -230,9 +230,9 @@ postflight_macos_terminal_profile() {
   [[ "${CONFIGURE_APPLE_TERMINAL:-}" == 1 ]] || return 0
 
   if postflight_macos_apple_terminal_profile_exists; then
-    postflight_pass "Apple Terminal reports the requested Clear Dark profile"
+    postflight_pass "Apple Terminal reports the requested Workspace profile"
   elif session_allows_gui_activation; then
-    postflight_fail "Apple Terminal did not retain the requested Clear Dark profile"
+    postflight_fail "Apple Terminal did not retain the requested Workspace profile"
     return 0
   else
     info "Apple Terminal profile verification deferred with GUI activation (${SESSION_KIND:-noninteractive} session)"
@@ -240,11 +240,11 @@ postflight_macos_terminal_profile() {
   fi
 
   [[ "${SET_APPLE_TERMINAL_DEFAULT:-}" == 1 ]] || return 0
-  if [[ "$(defaults read com.apple.Terminal 'Default Window Settings' 2>/dev/null)" == 'Clear Dark' \
-        && "$(defaults read com.apple.Terminal 'Startup Window Settings' 2>/dev/null)" == 'Clear Dark' ]]; then
-    postflight_pass "Apple Terminal reports Clear Dark as its startup and default profile"
+  if [[ "$(defaults read com.apple.Terminal 'Default Window Settings' 2>/dev/null)" == 'Workspace' \
+        && "$(defaults read com.apple.Terminal 'Startup Window Settings' 2>/dev/null)" == 'Workspace' ]]; then
+    postflight_pass "Apple Terminal reports Workspace as its startup and default profile"
   elif session_allows_gui_activation; then
-    postflight_fail "Apple Terminal did not retain Clear Dark as its startup/default profile"
+    postflight_fail "Apple Terminal did not retain Workspace as its startup/default profile"
   else
     info "Apple Terminal default-profile verification deferred with GUI activation"
   fi

@@ -17,7 +17,6 @@
 # PATH winner, while the unversioned formula stays as the keg-linked fallback
 # in $BREW_PREFIX/bin for a host where that link cannot be made.
 BREW_TAPS=(
-  anomalyco/tap
   neurosnap/tap
   ttscoff/thelab
 )
@@ -35,7 +34,7 @@ PACKAGES_BREW=(
   ffmpeg poppler nano
   himalaya ncdu smartmontools pkgconf
   awscli azure-cli
-  anomalyco/tap/opencode ttscoff/thelab/apex
+  ttscoff/thelab/apex
 )
 
 # Casks whose application a direct .dmg install can also provide. Where the
@@ -117,8 +116,7 @@ UPSTREAM_RELEASE_PROJECTS=(
   ruff:astral-sh/ruff
   yazi:sxyazi/yazi
   himalaya:pimalaya/himalaya
-  opencode:anomalyco/opencode
-  pwsh:PowerShell/PowerShell
+  copilot:github/copilot-cli
   git-credential-manager:git-ecosystem/git-credential-manager
   uv:astral-sh/uv
   delta:dandavison/delta
@@ -148,7 +146,10 @@ UV_TOOLS_LINUX=(azure-cli)
 
 NPM_TOOLS_COMMON=(cf)
 AWS_CLI_INSTALL_URL=https://awscli.amazonaws.com/v2/install.sh
-CODEX_INSTALL_URL=https://releases.openai.com/codex/install.sh
+CLAUDE_INSTALL_URL=https://claude.ai/install.sh
+CODEX_INSTALL_URL=https://chatgpt.com/codex/install.sh
+COPILOT_INSTALL_URL=https://gh.io/copilot-install
+OPENCODE_INSTALL_URL=https://opencode.ai/v2/install
 GODADDY_INSTALL_URL=https://github.com/godaddy/cli/releases/latest/download/install.sh
 ANTIGRAVITY_INSTALL_URL=https://antigravity.google/cli/install.sh
 
@@ -174,6 +175,7 @@ PACKAGES_APT_FLATPAK_DESKTOP=(gnome-software-plugin-flatpak)
 #   kvm      /dev/kvm, required by the VM-backed sandboxes the coding agents run
 #   render   GPU compute — /dev/dri/renderD*, and /dev/kfd on AMD
 #   video    /dev/dri/card*, webcams
+#   audio    /dev/snd/*, for sound from SSH sessions and user services
 # logind grants an ACL over some of these to whoever holds the graphical seat,
 # which does not cover SSH sessions, cron or systemd units.
 WORKSTATION_GROUPS=(dialout kvm render video audio)
@@ -200,19 +202,31 @@ KITTY_TERMINFO_SOURCE_URL=https://raw.githubusercontent.com/kovidgoyal/kitty/mas
 
 # Documentation/inventory for non-default-repository providers. These names
 # are intentionally not fed to brew or apt.
-PROVIDERS_COMMON_UPSTREAM=(rustup uv-standalone claude codex kitty openai ant gddy agy)
+PROVIDERS_COMMON_UPSTREAM=(rustup uv-standalone claude codex copilot opencode kitty openai ant gddy agy)
 PROVIDERS_MACOS_UPSTREAM=(apple-container-signed-pkg rosetta)
 # yq and cosign are packaged by the distribution, but not as the same software
 # macOS gets: Ubuntu's `yq` is kislyuk's jq wrapper rather than the mikefarah
 # program, and its `cosign` is a major behind. Both come from the upstream
 # release instead — see YQ_RELEASE_BASE and COSIGN_RELEASE_BASE above.
-PROVIDERS_LINUX_UPSTREAM=(zmx ruff yazi himalaya opencode yq cosign pwsh git-credential-manager aws-cli apex)
-TOOLCHAIN_BREW_CASKS=(powershell)
+PROVIDERS_LINUX_UPSTREAM=(zmx ruff yazi himalaya yq cosign git-credential-manager aws-cli apex)
 # Capabilities the distribution either does not package or packages too far
 # behind to use, taken from the vendor's own signed archive instead.
 PROVIDERS_LINUX_OFFICIAL_REPO=(
   kubectl helm docker-engine docker-compose-v2 claude-desktop nodejs
   cmake gh chatgpt code google-cloud-cli azure-cli
+)
+
+# Equivalent application packages: apt package, store, application id.
+# Library packages and host toolchains still require their declared providers.
+# https://www.libreoffice.org/download-other/
+# https://code.visualstudio.com/docs/setup/linux
+# https://mattjakeman.com/apps/extension-manager/
+APT_APPLICATION_EQUIVALENTS=(
+  libreoffice:flatpak:org.libreoffice.LibreOffice
+  libreoffice:snap:libreoffice
+  code:flatpak:com.visualstudio.code
+  code:snap:code
+  gnome-shell-extension-manager:flatpak:com.mattjakeman.ExtensionManager
 )
 
 # Desktop applications that only make sense where GNOME Shell is installed.

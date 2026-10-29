@@ -27,7 +27,8 @@
       "apt-get upgrade *": "deny",
       "apt-get update *": "deny",
       "snap install *": "deny",
-      "snap remove *": "deny"
+      "snap remove *": "deny",
+      "snap refresh *": "deny"
     }
   }
 }

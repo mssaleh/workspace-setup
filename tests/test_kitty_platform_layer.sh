@@ -48,11 +48,17 @@ if grep -qE '^[[:space:]]*map[[:space:]]' "$KITTY_SRC/kitty.conf"; then
   fail_test 'kitty.conf defines keybindings; they belong to the platform layer'
 fi
 # The same applies to every value the platform layer is responsible for.
-for key in font_size tab_bar_style remember_window_size macos_titlebar_color; do
+for key in font_size tab_bar_style remember_window_size macos_titlebar_color listen_on; do
   if grep -qE "^[[:space:]]*${key}[[:space:]]" "$KITTY_SRC/kitty.conf"; then
     fail_test "kitty.conf sets $key; that is platform-specific"
   fi
 done
+# Anything that can connect to the remote-control socket can type into every
+# window, so it lives in each platform's per-user private directory.
+grep -qxE 'listen_on[[:space:]]+unix:\$\{XDG_RUNTIME_DIR\}/kitty' "$KITTY_SRC/platform-linux.conf" \
+  || fail_test 'platform-linux.conf does not keep the kitty socket in XDG_RUNTIME_DIR'
+grep -qxE 'listen_on[[:space:]]+unix:\$\{TMPDIR\}/kitty' "$KITTY_SRC/platform-macos.conf" \
+  || fail_test 'platform-macos.conf does not keep the kitty socket in TMPDIR'
 
 # ── 2. Each layer must carry its own platform's modifier, and only that ─────
 grep -qE '^[[:space:]]*map[[:space:]]+[^#]*\bcmd\+' "$KITTY_SRC/platform-macos.conf" \

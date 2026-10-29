@@ -27,12 +27,10 @@ find "$HOME/stream-tmp" -mindepth 1 -maxdepth 2 -print > "$HOME/results/stream-s
 rm "$HOME/payload.tar.gz"
 
 printf '\n== Combined host and agent setup with native CLIs ==\n'
-HTTPS_PROXY=http://127.0.0.1:1 HTTP_PROXY=http://127.0.0.1:1 ALL_PROXY=http://127.0.0.1:1 \
-  NO_PROXY=localhost,127.0.0.1,::1,github.com,.github.com,.githubusercontent.com,registry.npmjs.org,skills.sh,.skills.sh,models.dev,.models.dev,pypi.org,.pypi.org,files.pythonhosted.org \
-  bash /repo/setup.sh
+bash /repo/setup.sh
 
 printf '\n== Installed commands in a fresh login shell ==\n'
-bash -lic 'set -e; for tool in uv rustup claude codex opencode fd bat 7zz gh aws gcloud az kubectl cf gddy openai ant agy; do command -v "$tool"; done; uv --version; rustc --version; claude --version; codex --version; opencode --version; gh --version; aws --version; gcloud --version; az --version; kubectl version --client; cf --version; gddy --version; openai --version; ant --version; agy --version'
+bash -lic 'set -e; for tool in uv rustup claude codex copilot opencode fd bat 7zz gh aws gcloud az kubectl cf gddy openai ant agy; do command -v "$tool"; done; uv --version; rustc --version; claude --version; codex --version; copilot --version; opencode --version; gh --version; aws --version; gcloud --version; az --version; kubectl version --client; cf --version; gddy --version; openai --version; ant --version; agy --version'
 
 printf '\n== Full unit suite on the installed distribution ==\n'
 bash /repo/tests/run.sh

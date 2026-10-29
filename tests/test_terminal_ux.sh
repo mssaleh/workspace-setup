@@ -87,9 +87,15 @@ for shell_rc in bashrc zshrc; do
       "$TEST_ROOT/dotfiles/$shell_rc"; then
     fail_test "$shell_rc overrides the standard ssh command"
   fi
-  grep -Fq 'TERM=xterm-256color command ssh "$@"' \
+  grep -Fq 'TERM=xterm-256color command ssh -S none "$@"' \
     "$TEST_ROOT/dotfiles/$shell_rc" \
     || fail_test "$shell_rc compatibility SSH helper is missing"
+  # Terminal.app and VTE move the cursor to the last saved position (top-left
+  # when none) for ?1049l on the normal screen; a preceding \e7 makes it a no-op.
+  bare=$(grep -o '\\e\[?1049l' "$TEST_ROOT/dotfiles/$shell_rc" | wc -l)
+  saved=$(grep -o '\\e7\\e\[?1049l' "$TEST_ROOT/dotfiles/$shell_rc" | wc -l)
+  [[ "$bare" -gt 0 && "$bare" == "$saved" ]] \
+    || fail_test "$shell_rc leaves the alternate screen without saving the cursor first"
 done
 
 # A second source in the same Bash process must not duplicate PROMPT_COMMAND.
@@ -120,6 +126,21 @@ if ! env -i HOME="$TEST_TMP/home" USER=test TERM=dumb \
   fail_test 're-sourcing bashrc changes PROMPT_COMMAND'
 fi
 
+# Ubuntu login shells reach ~/.bashrc with PROMPT_COMMAND already an array
+# (systemd's 80-systemd-osc-context.sh, VTE's vte-2.91.sh); a scalar is the
+# older convention. The signal hook must be installed either way.
+for preset in 'PROMPT_COMMAND=(__vte_osc7)' 'PROMPT_COMMAND=__vte_prompt_command'; do
+  printf '%s\n. "$HOME/.bashrc"\n' "$preset" > "$TEST_TMP/home/preset-rc"
+  # shellcheck disable=SC2016 # expansion belongs to the child Bash process
+  hooks=$(env -i HOME="$TEST_TMP/home" USER=test TERM=dumb \
+      PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+      /bin/bash --noprofile --rcfile "$TEST_TMP/home/preset-rc" -ic \
+        'printf "%s\n" "${PROMPT_COMMAND[@]}"' 2>/dev/null) || hooks=""
+  # Bash 5 keeps an array element per hook; older bash joins them in one string.
+  grep -Eq '(^|[; ])__restore_term(;|$)' <<< "$hooks" \
+    || fail_test "bashrc did not install its signal hook after: $preset"
+done
+
 # `ds` uses its own SSH connection and requests a terminal for zmx.
 stub_bin="$TEST_TMP/stub-bin"
 mkdir -p "$stub_bin"
@@ -137,6 +158,53 @@ for kitty_window in '' 7; do
   expected='ssh -S none -t -- devhost zmx attach main'
   [[ "$(cat "$TEST_TMP/ds-argv" 2>/dev/null)" == "$expected" ]] \
     || fail_test "ds did not run: $expected"
+done
+# An fzf older than 0.48 (Ubuntu 22.04 ships 0.29) has no --bash and rejects
+# the shipped colour names; a remote host carrying these dotfiles must start
+# silently with fzf's defaults, while a current fzf gets the options.
+# Each stub lives in its home's ~/.local/bin, which ~/.bashrc puts ahead of
+# Homebrew, so no installed fzf answers instead.
+for fzf_case in old new; do
+  fzf_home="$TEST_TMP/$fzf_case-fzf-home"
+  mkdir -p "$fzf_home/.local/bin"
+  cp "$TEST_TMP/home/.bashrc" "$fzf_home/.bashrc"
+  if [[ "$fzf_case" == old ]]; then
+    cat > "$fzf_home/.local/bin/fzf" <<'STUB'
+#!/bin/sh
+case "$FZF_DEFAULT_OPTS" in
+  *selected-bg*) echo 'invalid color specification: selected-bg:#45475a' >&2; exit 2 ;;
+esac
+[ "$1" = --bash ] && { echo 'unknown option: --bash' >&2; exit 2; }
+exit 0
+STUB
+  else
+    printf '#!/bin/sh\n[ "$1" = --bash ] && echo "true"\nexit 0\n' > "$fzf_home/.local/bin/fzf"
+  fi
+  chmod +x "$fzf_home/.local/bin/fzf"
+  # shellcheck disable=SC2016 # expansion belongs to the child Bash process
+  fzf_opts=$(env -i HOME="$fzf_home" USER=test TERM=dumb \
+      PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+      /bin/bash --noprofile --rcfile "$fzf_home/.bashrc" -ic \
+        'printf "%s" "${FZF_DEFAULT_OPTS:-}"' 2> "$TEST_TMP/fzf.err") || fzf_opts=""
+  if grep -q 'invalid color specification' "$TEST_TMP/fzf.err"; then
+    fail_test "bashrc startup with the $fzf_case fzf printed a colour error"
+  fi
+  case "$fzf_case:$fzf_opts" in
+    old:) ;;
+    new:*selected-bg*) ;;
+    *) fail_test "bashrc applied fzf options incorrectly for the $fzf_case fzf" ;;
+  esac
+done
+
+# The interactive helpers bypass a shared connection whose link may have died.
+for helper in s ks; do
+  rm -f "$TEST_TMP/ds-argv"
+  env -i HOME="$TEST_TMP/home" USER=test TERM=dumb KITTY_WINDOW_ID= \
+      PATH="$stub_bin:/usr/bin:/bin:/usr/sbin:/sbin" \
+      /bin/bash --noprofile --rcfile "$TEST_TMP/home/.bashrc" -ic "$helper devhost" \
+      >/dev/null 2>&1 || true
+  [[ "$(cat "$TEST_TMP/ds-argv" 2>/dev/null)" == 'ssh -S none devhost' ]] \
+    || fail_test "$helper did not bypass the shared SSH connection"
 done
 rm -f "$TEST_TMP/ds-argv"
 env -i HOME="$TEST_TMP/home" USER=test TERM=dumb \
@@ -203,13 +271,59 @@ STUB
   for helper in ds ks s; do
     script -qfec "env -i HOME='$TEST_TMP/home' USER=test TERM=xterm-256color PATH='$stub_bin:/usr/bin:/bin' /bin/bash --noprofile --rcfile '$TEST_TMP/home/.bashrc' -ic '$helper devhost'" \
       "$TEST_TMP/$helper-drop.log" >/dev/null 2>&1 || true
-    LC_ALL=C grep -aFq $'\e[?1049l' "$TEST_TMP/$helper-drop.log" \
+    LC_ALL=C grep -aFq $'\e7\e[?1049l' "$TEST_TMP/$helper-drop.log" \
       || fail_test "$helper did not leave the alternate screen after a dropped connection"
     LC_ALL=C grep -aFq $'\e[?1000l' "$TEST_TMP/$helper-drop.log" \
       || fail_test "$helper left mouse reporting enabled after a dropped connection"
     LC_ALL=C grep -aFq $'\e[<u' "$TEST_TMP/$helper-drop.log" \
       || fail_test "$helper left the Kitty keyboard mode enabled after a dropped connection"
   done
+
+  # A signal-killed program is followed by the reset at the next prompt, in a
+  # shell that started with Ubuntu's login-time PROMPT_COMMAND array.
+  printf 'PROMPT_COMMAND=(__vte_osc7)\n__vte_osc7() { :; }\n. "$HOME/.bashrc"\n' \
+    > "$TEST_TMP/home/login-rc"
+  printf '%s\n' 'sh -c "kill -INT \$\$"' 'exit' \
+    | script -qfec "env -i HOME='$TEST_TMP/home' USER=test TERM=xterm-256color PATH='/usr/bin:/bin' /bin/bash --noprofile --rcfile '$TEST_TMP/home/login-rc' -i" \
+      "$TEST_TMP/signal.log" >/dev/null 2>&1 || true
+  LC_ALL=C grep -aFq $'\e7\e[?1049l\e[?1000l' "$TEST_TMP/signal.log" \
+    || fail_test 'a login-style shell did not reset the terminal after a signal-killed program'
+
+  # zoxide 0.4 (Ubuntu 22.04) prepends a hook that returns 0; the signal check
+  # must still see the killed program's status.
+  zoxide_home="$TEST_TMP/old-zoxide-home"
+  mkdir -p "$zoxide_home/.local/bin"
+  cp "$TEST_TMP/home/.bashrc" "$TEST_TMP/home/login-rc" "$zoxide_home/"
+  cat > "$zoxide_home/.local/bin/zoxide" <<'STUB'
+#!/bin/sh
+[ "$1" = init ] || exit 0
+cat <<'INIT'
+_zoxide_hook() { _ZO_PWD=$PWD; true; }
+PROMPT_COMMAND="_zoxide_hook;${PROMPT_COMMAND#;}"
+INIT
+STUB
+  chmod +x "$zoxide_home/.local/bin/zoxide"
+  printf '%s\n' 'sh -c "kill -INT \$\$"' 'exit' \
+    | script -qfec "env -i HOME='$zoxide_home' USER=test TERM=xterm-256color PATH='/usr/bin:/bin' /bin/bash --noprofile --rcfile '$zoxide_home/login-rc' -i" \
+      "$TEST_TMP/old-zoxide.log" >/dev/null 2>&1 || true
+  LC_ALL=C grep -aFq $'\e7\e[?1049l\e[?1000l' "$TEST_TMP/old-zoxide.log" \
+    || fail_test 'a prompt hook that resets $? hid a signal-killed program'
+fi
+
+# A forwarded locale this host lacks becomes C.UTF-8 in every bash, as Ubuntu's
+# own profile script does for login shells, so startup prints no setlocale
+# warnings.
+if [[ -x /usr/bin/locale-check ]]; then
+  # shellcheck disable=SC2016 # expansion belongs to the child Bash process
+  locale_value=$(env -i HOME="$TEST_TMP/home" USER=test TERM=dumb \
+      LANG=en_ZZ.UTF-8 PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+      /bin/bash --noprofile --rcfile "$TEST_TMP/home/.bashrc" -ic 'printf "%s" "$LANG"' \
+      2> "$TEST_TMP/locale.err") || locale_value=""
+  [[ "$locale_value" == C.UTF-8 ]] \
+    || fail_test "bashrc kept a locale this host lacks: ${locale_value:-<empty>}"
+  if grep -q setlocale "$TEST_TMP/locale.err"; then
+    fail_test 'bashrc startup printed setlocale warnings for a missing locale'
+  fi
 fi
 
 # ── GNOME terminal: share behaviour, never appearance ──────────────────────

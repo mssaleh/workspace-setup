@@ -855,20 +855,25 @@ postflight_upstream_tools() {
   else
     postflight_fail "Astral standalone uv/uvx install is incomplete"
   fi
-  if [[ -x "$HOME/.local/bin/claude" ]]; then
-    postflight_pass "Claude native artifact exists"
+  local agent resolved artifact
+  for agent in claude codex copilot agy; do
+    artifact="$HOME/.local/bin/$agent"
+    resolved=$(command -v "$agent" 2>/dev/null || true)
+    if [[ -x "$artifact" && -n "$resolved" && "$resolved" -ef "$artifact" ]] \
+        && "$artifact" --version </dev/null >/dev/null 2>&1; then
+      postflight_pass "$agent native artifact runs and resolves on PATH"
+    else
+      postflight_fail "$agent native installation is missing, unusable, or shadowed: $artifact"
+    fi
+  done
+  if [[ -x "$HOME/.opencode/bin/opencode" && -x "$HOME/.local/bin/opencode" ]] \
+      && { [[ "$HOME/.local/bin/opencode" -ef "$HOME/.opencode/bin/opencode" ]] \
+        || cmp -s "$HOME/.opencode/bin/opencode" "$HOME/.local/bin/opencode"; } \
+      && [[ "$(command -v opencode)" -ef "$HOME/.local/bin/opencode" ]] \
+      && "$HOME/.local/bin/opencode" --version </dev/null >/dev/null 2>&1; then
+    postflight_pass "OpenCode native artifact runs and resolves on PATH"
   else
-    postflight_fail "missing native Claude CLI at ~/.local/bin/claude"
-  fi
-  if [[ -x "$HOME/.local/bin/codex" ]]; then
-    postflight_pass "Codex native artifact exists"
-  else
-    postflight_fail "missing native Codex CLI at ~/.local/bin/codex"
-  fi
-  if pwsh -NoLogo -NoProfile -NonInteractive -File "$(repo_dir)/scripts/graph.ps1" -VerifyOnly; then
-    postflight_pass "Microsoft Graph PowerShell SDK loads without authentication"
-  else
-    postflight_fail "Microsoft Graph PowerShell SDK is unavailable or incomplete"
+    postflight_fail "OpenCode native installation is missing, unusable, or shadowed"
   fi
   if [[ "$OS_KIND" == linux ]]; then
     local linux_upstream_missing=() artifact name probe entry unrunnable=""
@@ -1010,17 +1015,6 @@ postflight_upstream_tools() {
           postflight_fail "Claude Desktop apt package is missing (set SKIP_CLAUDE_DESKTOP=1 on a headless host)" ;;
       esac
     fi
-
-    if [[ -x "$HOME/.opencode/bin/opencode" \
-          && -x "$HOME/.local/bin/opencode" ]] \
-        && { { [[ -L "$HOME/.local/bin/opencode" ]] \
-                && [[ "$HOME/.local/bin/opencode" -ef "$HOME/.opencode/bin/opencode" ]]; } \
-             || { [[ ! -L "$HOME/.local/bin/opencode" ]] \
-                && cmp -s "$HOME/.opencode/bin/opencode" "$HOME/.local/bin/opencode"; }; }; then
-      postflight_pass "opencode upstream artifact is exposed on the user PATH"
-    else
-      postflight_fail "Linux opencode upstream installation is incomplete"
-    fi
   fi
 
   if [[ -z "${SKIP_FONT:-}" ]]; then
@@ -1161,7 +1155,7 @@ postflight_containers() {
 
 postflight_cloud_clis() {
   local tool expected resolved output
-  for tool in gh aws gcloud az kubectl cf gddy openai ant agy; do
+  for tool in gh aws gcloud az kubectl cf gddy openai ant; do
     resolved=$(command -v "$tool" 2>/dev/null || true)
     if [[ -z "$resolved" ]]; then
       postflight_fail "missing CLI: $tool"
@@ -1169,7 +1163,7 @@ postflight_cloud_clis() {
     fi
     expected=''
     case "$tool" in
-      openai|ant|gddy|agy) expected="$HOME/.local/bin/$tool" ;;
+      openai|ant|gddy) expected="$HOME/.local/bin/$tool" ;;
       cf) expected="$HOME/.npm/packages/bin/cf" ;;
       aws) [[ "$OS_KIND" == linux ]] && expected="$HOME/.local/bin/aws" ;;
     esac

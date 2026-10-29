@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # lib/agents/skills.sh — the shared skill store, mirrored into the agents that cannot
-# read it. Claude Code reads ~/.claude/skills. Codex and OpenCode also read
-# ~/.agents/skills; the Codex mirror supports its legacy skills directory.
+# read it. Claude Code reads ~/.claude/skills. Codex, OpenCode and Copilot (at
+# its default home) also read ~/.agents/skills; the Codex mirror supports its
+# legacy skills directory.
 #
 # `skills add -a <agent>` writes the store only when that agent's skillsDir is
 # `.agents/skills` — true for codex and opencode, not for claude-code, which
@@ -23,7 +24,15 @@ fi
 case "$AGENTS_LOCK" in /*) ;; *) AGENTS_LOCK="$PWD/$AGENTS_LOCK" ;; esac
 
 SKILL_STORE_AGENT=${SKILL_STORE_AGENT:-universal}
-SKILL_MIRROR_AGENTS=${SKILL_MIRROR_AGENTS:-claude-code codex github-copilot}
+# Copilot reads ~/.agents/skills itself at its default home ("Personal
+# ~/.copilot/skills/ or ~/.agents/skills/", `copilot skill --help`, 1.0.86),
+# but not with a custom COPILOT_HOME, which therefore gets a mirror.
+if [[ -z "${SKILL_MIRROR_AGENTS:-}" ]]; then
+  SKILL_MIRROR_AGENTS="claude-code codex"
+  if [[ "${COPILOT_HOME:-$HOME/.copilot}" != "$HOME/.copilot" ]]; then
+    SKILL_MIRROR_AGENTS="$SKILL_MIRROR_AGENTS github-copilot"
+  fi
+fi
 
 skills_cli() { run npx -y "skills@${SKILLS_CLI_VERSION:-latest}" "$@"; }
 
@@ -103,12 +112,40 @@ skill_flags() {
 }
 
 # No agent loads a directory without a SKILL.md, so one is not a skill yet.
-store_skill_names() {
+# Directory names are what mirrors link to.
+store_skill_dirs() {
   local d
   [[ -d "$AGENTS_STORE" ]] || return 0
   for d in "$AGENTS_STORE"/*/; do
     [[ -f "$d/SKILL.md" ]] || continue   # an unmatched glob expands to itself
     d=${d%/}; printf '%s\n' "${d##*/}"
+  done | sort
+}
+
+# The frontmatter `name:` of a SKILL.md, unquoted; empty when there is none.
+skill_frontmatter_name() {
+  awk '
+    { sub(/\r$/, "") }
+    NR == 1 { if ($0 !~ /^---[[:space:]]*$/) exit; next }
+    /^---[[:space:]]*$/ { exit }
+    /^name:/ {
+      v = $0; sub(/^name:[[:space:]]*/, "", v); sub(/[[:space:]]+$/, "", v)
+      if (v ~ /^".*"$/ || v ~ /^\047.*\047$/) v = substr(v, 2, length(v) - 2)
+      print v; exit
+    }' "$1"
+}
+
+# Names as the manifest and the lock spell them. skills 1.7.4 keys its lock by
+# the frontmatter name but installs into a sanitized directory name, so the two
+# differ for a name such as "Mixed Case"; the directory is the fallback.
+store_skill_names() {
+  local d name
+  [[ -d "$AGENTS_STORE" ]] || return 0
+  for d in "$AGENTS_STORE"/*/; do
+    [[ -f "$d/SKILL.md" ]] || continue
+    d=${d%/}
+    name=$(skill_frontmatter_name "$d/SKILL.md")
+    printf '%s\n' "${name:-${d##*/}}"
   done | sort
 }
 
@@ -213,8 +250,14 @@ skills_install() {
 # What the store holds, plus what install said it would fetch — under --dry-run
 # nothing has been fetched yet, and `planned` is always false on a real run.
 mirror_set() {
-  local name out
-  out=$(unplanned "$(store_skill_names)" 'unskill:')
+  local name dir out
+  out=$(
+    while IFS= read -r dir; do
+      [[ -n "$dir" ]] || continue
+      name=$(skill_frontmatter_name "$AGENTS_STORE/$dir/SKILL.md")
+      planned "unskill:${name:-$dir}" || printf '%s\n' "$dir"
+    done < <(store_skill_dirs)
+  )
   while IFS= read -r name; do
     [[ -n "$name" ]] || continue
     planned "skill:$name" && out="$out

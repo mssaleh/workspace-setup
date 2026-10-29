@@ -156,4 +156,17 @@ STUB_PUBLISHED=26.9.1
 STUB_PUBLISHED=26.8.15
 [[ "$(decide yazi)" == skip ]] || fail_test 'a current yazi was replaced'
 
+# HTTP/2 lowercases header names; HTTP/1.1, as through many proxies, does not.
+# Ubuntu's mawk and macOS awk have no case-insensitive matching switch.
+for location_header in location Location; do
+  # shellcheck disable=SC2329 # called by upstream_latest_tag
+  curl() {
+    printf 'HTTP/1.1 302 Found\r\n%s: https://github.com/o/r/releases/tag/v1.2.3\r\n\r\n' \
+      "$location_header"
+  }
+  [[ "$(upstream_latest_tag o/r)" == v1.2.3 ]] \
+    || fail_test "the release tag was not read from a '$location_header:' header"
+done
+unset -f curl
+
 printf 'upstream currency tests: ok\n'

@@ -91,6 +91,9 @@ json_servers() {           # <state file> <indent> — "name": { … } members
     [[ -n "$name" ]] || continue
     ((first)) || printf ',\n'; first=0
     printf '%s"%s": {\n' "$pad" "$name"
+    if [[ -f "$S/disabled-$agent" ]] && grep -qxF "$name" "$S/disabled-$agent"; then
+      printf '%s  "enabled": false,\n' "$pad"
+    fi
     if [[ "$kind" == remote ]]; then
       printf '%s  "type": "%s",\n%s  "url": "%s"\n' "$pad" "${4:-http}" "$pad" "$target"
     else
@@ -315,6 +318,12 @@ fi
 f="$SANDBOX/state/mcp-$agent"
 case "$action" in
   enable)
+    # Only enable clears a disabled server; remove and add keep the flag.
+    d="$SANDBOX/state/disabled-$agent"
+    if [[ -f "$d" ]]; then
+      grep -vxF "$name" "$d" > "$d.tmp" || true
+      mv "$d.tmp" "$d"
+    fi
     "$SANDBOX/bin/sandbox-render"
     exit 0 ;;
   remove)
@@ -343,6 +352,8 @@ STUB
 #!/usr/bin/env bash
 set -uo pipefail
 [[ "${1:-}" == mcp ]] && exec "$SANDBOX/bin/stub-native-mcp" claude-code "$@"
+# Claude reads its global config and plugins from CLAUDE_CONFIG_DIR when set.
+[[ "${1:-}" == plugin ]] && printf '%s\n' "${CLAUDE_CONFIG_DIR-unset}" >> "$SANDBOX/calls/claude-config-dir"
 if [[ "${1:-}" == plugin && "${2:-}" == marketplace && "${3:-}" == list ]]; then
   [[ -z "${CLAUDE_STUB_FAIL_MARKETPLACES:-}" ]] || exit 1
   printf '[\n'
@@ -352,7 +363,7 @@ fi
 if [[ "${1:-}" == plugin && "${2:-}" == list ]]; then
   [[ -z "${CLAUDE_STUB_FAIL_LIST:-}" ]] || exit 1
   printf '[\n'
-  awk -F'\t' 'NF { if(n++) printf ",\n"; printf "{\"id\":\"%s\",\"scope\":\"%s\"}",$1,($2 == "" ? "user" : $2) } END { print "\n]" }' "$SANDBOX/state/plugins"
+  awk -F'\t' 'NF { if(n++) printf ",\n"; printf "{\"id\":\"%s\",\"scope\":\"%s\",\"enabled\":%s}",$1,($2 == "" ? "user" : $2),($3 == "" ? "true" : $3) } END { print "\n]" }' "$SANDBOX/state/plugins"
   exit
 fi
 printf '%s\n' "$*" >> "$SANDBOX/calls/claude"
