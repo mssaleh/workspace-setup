@@ -88,10 +88,10 @@ run_macos_setup() {
 expected_default=$(cat <<'EXPECTED'
 stage_macos_bootstrap
 stage_packages
+stage_macos_cli
 stage_toolchains
 stage_dotfiles
 stage_container
-stage_macos_cli
 stage_completions
 stage_ssh
 stage_macos_remote_audit

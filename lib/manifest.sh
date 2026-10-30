@@ -11,14 +11,18 @@
 # brew, so it carries nothing a Mac does not want: xsel is an X11 clipboard
 # client and lives in PACKAGES_APT alone.
 #
-# uv is intentionally present as a Homebrew backup while the Astral standalone
-# install in ~/.local/bin is the PATH winner. Both node formulae are likewise
-# deliberate: node@24 is the declared major and stage_macos_cli makes it the
-# PATH winner, while the unversioned formula stays as the keg-linked fallback
-# in $BREW_PREFIX/bin for a host where that link cannot be made.
+# Prefer vendor-documented Homebrew methods on macOS. Node stays on the
+# selected major; stage_macos_cli exposes its keg and the Homebrew CLIs.
+# https://docs.astral.sh/uv/getting-started/installation/#homebrew
+# https://developers.openai.com/api/docs/libraries/openai-cli
+# https://platform.claude.com/docs/en/cli-sdks-libraries/cli/quickstart
+# https://opencode.ai/v2/docs/
 BREW_TAPS=(
   neurosnap/tap
   ttscoff/thelab
+  openai/tools
+  anthropics/tap
+  anomalyco/tap
 )
 
 PACKAGES_BREW=(
@@ -29,27 +33,18 @@ PACKAGES_BREW=(
   jq yq pandoc sevenzip
   direnv
   cmake ninja
-  node node@24 uv ruff
+  node@24 python@3.14 uv ruff
   helm kubernetes-cli cosign container-compose
   ffmpeg poppler nano
   himalaya ncdu smartmontools pkgconf
-  awscli azure-cli
+  anomalyco/tap/opencode-v2
   ttscoff/thelab/apex
 )
 
-# Casks whose application a direct .dmg install can also provide. Where the
-# app is already present from outside Homebrew it is left alone and the cask
-# counts as satisfied: two copies of one application is worse than a single
-# unmanaged one, and reporting it missing forever helps nobody.
-# Colon-delimited so macOS's bash 3.2 can read it.
-# The last two are only ever consulted when INSTALL_CHATGPT_APP or
-# INSTALL_CLAUDE_DESKTOP asks for them; an unrequested entry is inert.
+# Maccy's documented Homebrew cask also accepts an existing direct install.
+# https://github.com/p0deje/Maccy#install
 BREW_CASK_EXISTING_ARTIFACTS=(
   "maccy:/Applications/Maccy.app"
-  "libreoffice:/Applications/LibreOffice.app"
-  "visual-studio-code:/Applications/Visual Studio Code.app"
-  "chatgpt:/Applications/ChatGPT.app"
-  "claude:/Applications/Claude.app"
 )
 
 # brew_cask_existing_artifact <cask> — the .app a direct install would leave,
@@ -66,14 +61,45 @@ brew_cask_existing_artifact() {
 }
 
 PACKAGES_BREW_CASK=(
-  visual-studio-code
   font-jetbrains-mono-nerd-font
   maccy
-  libreoffice
 )
 
 # CLI casks also install on headless Macs.
-PACKAGES_BREW_CLI_CASK=(gcloud-cli)
+# https://learn.microsoft.com/cli/azure/install-azure-cli-macos
+# https://code.claude.com/docs/en/setup
+# https://learn.chatgpt.com/docs/codex/cli
+# https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli
+PACKAGES_BREW_CLI_CASK=(azure-cli claude-code codex copilot-cli openai/tools/openai anthropics/tap/ant)
+BREW_CLI_COMMANDS=(uv uvx claude codex copilot opencode openai ant az)
+
+# These vendors document direct application downloads, not Homebrew.
+# https://code.visualstudio.com/docs/setup/mac
+# https://www.libreoffice.org/get-help/install-howto/macos/
+# https://learn.chatgpt.com/docs/app
+# https://claude.com/download
+MACOS_DIRECT_APPS=(visual-studio-code libreoffice)
+MACOS_APP_ARTIFACTS=(
+  "visual-studio-code:/Applications/Visual Studio Code.app"
+  "libreoffice:/Applications/LibreOffice.app"
+  "chatgpt:/Applications/ChatGPT.app"
+  "claude:/Applications/Claude.app"
+)
+VSCODE_MACOS_DOWNLOAD_BASE=https://update.code.visualstudio.com/latest
+LIBREOFFICE_DOWNLOAD_BASE=https://download.documentfoundation.org/libreoffice/stable
+CHATGPT_MACOS_DOWNLOAD_URL=https://persistent.oaistatic.com/codex-app-prod/Codex.dmg
+CLAUDE_MACOS_RELEASES_URL=https://downloads.claude.ai/releases/darwin/universal/RELEASES.json
+GOOGLE_CLOUD_MACOS_DOWNLOAD_BASE=https://dl.google.com/dl/cloudsdk/channels/rapid/downloads
+
+macos_app_path() {
+  local entry
+  for entry in "${MACOS_APP_ARTIFACTS[@]}"; do
+    [[ "${entry%%:*}" == "$1" ]] || continue
+    printf '%s\n' "${entry#*:}"
+    return 0
+  done
+  return 1
+}
 
 # Ubuntu packages requested from the distribution repository. Unavailable
 # package names are skipped; non-apt providers are listed
@@ -138,10 +164,10 @@ APT_UPSTREAM_FALLBACKS=(git-delta:delta eza:eza lazygit:lazygit)
 # environment and a launcher in ~/.local/bin. Preferred over pipx or a shared
 # virtualenv because uv is already a dependency of this setup.
 #
-# markitdown is PyPI-only and has no packaged form on either platform.
+# MarkItDown's documented Python installation supports the requested extras.
 UV_TOOLS_COMMON=('markitdown[all]')
 # Azure uses uv only when Microsoft publishes no apt suite for this host.
-# macOS uses the Homebrew formula.
+# macOS uses the Homebrew cask.
 UV_TOOLS_LINUX=(azure-cli)
 
 NPM_TOOLS_COMMON=(cf)
@@ -202,13 +228,13 @@ KITTY_TERMINFO_SOURCE_URL=https://raw.githubusercontent.com/kovidgoyal/kitty/mas
 
 # Documentation/inventory for non-default-repository providers. These names
 # are intentionally not fed to brew or apt.
-PROVIDERS_COMMON_UPSTREAM=(rustup uv-standalone claude codex copilot opencode kitty openai ant gddy agy)
-PROVIDERS_MACOS_UPSTREAM=(apple-container-signed-pkg rosetta)
+PROVIDERS_COMMON_UPSTREAM=(rustup kitty gddy agy aws-cli)
+PROVIDERS_MACOS_UPSTREAM=(apple-container-signed-pkg rosetta google-cloud-cli visual-studio-code libreoffice chatgpt claude-desktop)
 # yq and cosign are packaged by the distribution, but not as the same software
 # macOS gets: Ubuntu's `yq` is kislyuk's jq wrapper rather than the mikefarah
 # program, and its `cosign` is a major behind. Both come from the upstream
 # release instead — see YQ_RELEASE_BASE and COSIGN_RELEASE_BASE above.
-PROVIDERS_LINUX_UPSTREAM=(zmx ruff yazi himalaya yq cosign git-credential-manager aws-cli apex)
+PROVIDERS_LINUX_UPSTREAM=(zmx ruff yazi himalaya yq cosign git-credential-manager apex uv-standalone claude codex copilot opencode openai ant)
 # Capabilities the distribution either does not package or packages too far
 # behind to use, taken from the vendor's own signed archive instead.
 PROVIDERS_LINUX_OFFICIAL_REPO=(
@@ -316,9 +342,8 @@ DOCKER_CONFLICTING_PACKAGES=(
   docker.io docker-compose docker-compose-v2 docker-doc podman-docker containerd runc
 )
 
-# CMake from Kitware's own archive. Ubuntu 26.04 ships 4.2.x while Kitware
-# publishes 4.4.x. The distribution package is used until Kitware publishes
-# a matching suite. Kitware rotate the signing key annually and ship
+# CMake from Kitware's archive, with the distribution package as fallback
+# until Kitware publishes a matching suite. Kitware rotate the signing key and ship
 # `kitware-archive-keyring` to carry the replacement, which is installed once
 # the repository is trusted.
 KITWARE_APT_URI=https://apt.kitware.com/ubuntu/
@@ -326,8 +351,7 @@ KITWARE_KEY_URL=https://apt.kitware.com/keys/kitware-archive-latest.asc
 KITWARE_KEYRING=/usr/share/keyrings/kitware-archive-keyring.gpg
 KITWARE_KEY_FINGERPRINT=4DBEBE3EEC96E7B8C6EC5BE99E92FDC6C5B9BA75
 
-# GitHub's own archive for the `gh` CLI. Ubuntu 26.04 ships 2.46 against
-# upstream 2.98. GitHub sign the archive with more than one key and rotate
+# GitHub's archive for the `gh` CLI. GitHub sign it with multiple keys and rotate
 # them, so every key in the downloaded keyring must be one of these — an
 # unrecognised key means the keyring is not the one GitHub published.
 GITHUB_CLI_APT_URI=https://cli.github.com/packages

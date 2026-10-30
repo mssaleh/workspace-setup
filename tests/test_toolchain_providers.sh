@@ -167,13 +167,25 @@ install_coding_agents >/dev/null
 [[ "$(cat "$HOME/.bashrc")" == 'user shell settings' ]]
 [[ -d "$CODEX_HOME/packages" && "$HOME/.local/bin/opencode" -ef "$HOME/.opencode/bin/opencode" ]]
 
-# Reruns use native stable update commands, including a V2 install on macOS.
-for platform in linux macos; do
-  : > "$TEST_TMP/native-calls"
-  for tool in claude codex copilot opencode agy; do printf '2.2.1\n' > "$TEST_TMP/versions/$tool"; done
-  OS_KIND=$platform install_coding_agents >/dev/null
-  [[ "$(cat "$TEST_TMP/native-calls")" == $'claude install stable\ncodex install\nopencode upgrade --method curl\nagy update' ]]
+# Linux reruns use native stable update commands.
+: > "$TEST_TMP/native-calls"
+for tool in claude codex copilot opencode agy; do printf '2.2.1\n' > "$TEST_TMP/versions/$tool"; done
+install_coding_agents >/dev/null
+[[ "$(cat "$TEST_TMP/native-calls")" == $'claude install stable\ncodex install\nopencode upgrade --method curl\nagy update' ]]
+
+# macOS executes the declared Homebrew artifacts without native installers.
+BREW_PREFIX="$TEST_TMP/brew"
+mkdir -p "$BREW_PREFIX/bin"
+for tool in claude codex copilot opencode; do
+  cp "$TEST_TMP/current/$tool" "$BREW_PREFIX/bin/$tool"
+  rm "$HOME/.local/bin/$tool"
+  ln -s "$BREW_PREFIX/bin/$tool" "$HOME/.local/bin/$tool"
 done
+: > "$TEST_TMP/native-calls"
+OS_KIND=macos install_coding_agents >/dev/null
+[[ "$(cat "$TEST_TMP/native-calls")" == 'agy update' ]]
+reset_agents
+install_coding_agents >/dev/null
 
 for tool in claude codex copilot opencode agy; do
   printf '2.0.0\n' > "$TEST_TMP/versions/$tool"

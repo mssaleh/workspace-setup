@@ -21,6 +21,11 @@ mkdir -p "$HOME/.config/gh" "$HOME/.claude" "$HOME/.local/bin"
 # The check reads the *global* git config, so point git at a fixture rather
 # than the real one belonging to whoever runs the suite.
 export GIT_CONFIG_GLOBAL="$HOME/.gitconfig"
+fixture_keychain_status=0
+security() {
+  [[ "$*" == "find-generic-password -a ${USER:-$(id -un)} -s Claude Code-credentials" ]] || return 99
+  return "$fixture_keychain_status"
+}
 
 run_check() {
   POSTFLIGHT_PASSES=0
@@ -61,6 +66,14 @@ printf 'github.com:\n    users:\n        someone:\n    oauth_token: xxx\n' > "$H
 rm -f "$HOME/.claude/.credentials.json"
 run_check
 [[ "$POSTFLIGHT_FAILURES" == 1 ]] || { printf 'FAIL: Keychain-only Claude credentials were not reported\n' >&2; exit 1; }
+
+# A fresh install with no confirmed Keychain item is not an authenticated user.
+fixture_keychain_status=44
+run_check
+[[ "$POSTFLIGHT_FAILURES" == 0 ]] || { printf 'FAIL: missing Claude authentication blocked setup\n' >&2; exit 1; }
+fixture_keychain_status=1
+run_check
+[[ "$POSTFLIGHT_FAILURES" == 1 ]] || { printf 'FAIL: credential inspection failure was hidden\n' >&2; exit 1; }
 
 # Claude Code not installed is not a failure.
 rm -f "$HOME/.local/bin/claude"

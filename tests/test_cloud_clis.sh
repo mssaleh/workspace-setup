@@ -25,11 +25,13 @@ set -eu
 printf 'aws\n' >> "$CLI_TEST_LOG"
 test "$XDG_DATA_HOME" = "$HOME/.local/share"
 test "$XDG_BIN_HOME" = "$HOME/.local/bin"
-[[ ! -x "$XDG_DATA_HOME/aws-cli/v2/current/bin/aws" ]] || exit 0
-mkdir -p "$XDG_DATA_HOME/aws-cli/v2/current/bin"
-printf '#!/bin/sh\nprintf "aws-cli/2.0.0\\n"\n' > "$XDG_DATA_HOME/aws-cli/v2/current/bin/aws"
-chmod +x "$XDG_DATA_HOME/aws-cli/v2/current/bin/aws"
-ln -sf "$XDG_DATA_HOME/aws-cli/v2/current/bin/aws" "$XDG_BIN_HOME/aws"
+aws_dir="$XDG_DATA_HOME/aws-cli/v2/current/bin"
+[[ "$OS_KIND" != macos ]] || aws_dir="$XDG_DATA_HOME/aws-cli"
+[[ ! -x "$aws_dir/aws" ]] || exit 0
+mkdir -p "$aws_dir"
+printf '#!/bin/sh\nprintf "aws-cli/2.0.0\\n"\n' > "$aws_dir/aws"
+chmod +x "$aws_dir/aws"
+ln -sf "$aws_dir/aws" "$XDG_BIN_HOME/aws"
 SH
 cat > "$scratch/installers/gddy" <<'SH'
 #!/bin/bash
@@ -148,16 +150,30 @@ postflight_cloud_clis >/dev/null
 [[ "$POSTFLIGHT_FAILURES" == 2 ]]
 
 OS_KIND=macos
+BREW_PREFIX="$scratch/brew"
+mkdir -p "$BREW_PREFIX/bin" "$HOME/.local/share/google-cloud-sdk/bin"
+for tool in openai ant az; do
+  cp "$HOME/.local/bin/$tool" "$BREW_PREFIX/bin/$tool"
+  rm "$HOME/.local/bin/$tool"
+  ln -s "$BREW_PREFIX/bin/$tool" "$HOME/.local/bin/$tool"
+done
+cp "$HOME/.local/bin/gcloud" "$HOME/.local/share/google-cloud-sdk/bin/gcloud"
+rm "$HOME/.local/bin/gcloud"
+ln -s "$HOME/.local/share/google-cloud-sdk/bin/gcloud" "$HOME/.local/bin/gcloud"
+rm "$HOME/.local/bin/aws" "$HOME/.local/bin/aws_completer"
+install_google_cloud_macos() { return 0; }
+: > "$scratch/archives"
 install_cloud_clis >/dev/null
-grep -Fxq 'openai openai_{version}_macos_amd64.zip openai' "$scratch/archives"
-grep -Fxq 'ant ant_{version}_macos_amd64.zip ant' "$scratch/archives"
+[[ ! -s "$scratch/archives" ]]
+[[ "$HOME/.local/bin/aws" -ef "$HOME/.local/share/aws-cli/aws" ]]
 POSTFLIGHT_FAILURES=0
 postflight_cloud_clis >/dev/null
 [[ "$POSTFLIGHT_FAILURES" == 0 ]]
 fixture_arch=arm64
 install_cloud_clis >/dev/null
-grep -Fxq 'openai openai_{version}_macos_arm64.zip openai' "$scratch/archives"
-grep -Fxq 'ant ant_{version}_macos_arm64.zip ant' "$scratch/archives"
+[[ ! -s "$scratch/archives" ]]
+rm "$HOME/.local/bin/aws"
+ln -s "$HOME/.local/share/aws-cli/v2/current/bin/aws" "$HOME/.local/bin/aws"
 OS_KIND=linux fixture_arch=aarch64 install_cloud_clis >/dev/null
 grep -Fxq 'openai openai_{version}_linux_arm64.tar.gz openai' "$scratch/archives"
 grep -Fxq 'ant ant_{version}_linux_arm64.tar.gz ant' "$scratch/archives"

@@ -524,8 +524,10 @@ postflight_shell_paths() {
   else
     postflight_fail "bash Homebrew resolution is wrong (got '${brew_path:-missing}')"
   fi
-  if [[ "$uv_path" == "$HOME/.local/bin/uv" ]]; then
-    postflight_pass "bash resolves Astral's standalone uv before package-manager copies"
+  local expected_uv="$HOME/.local/bin/uv"
+  [[ "$OS_KIND" != macos ]] || expected_uv="$BREW_PREFIX/bin/uv"
+  if [[ -n "$uv_path" && "$uv_path" -ef "$expected_uv" ]]; then
+    postflight_pass "bash resolves the declared uv provider"
   else
     postflight_fail "bash uv PATH winner is wrong (got '${uv_path:-missing}')"
   fi
@@ -550,8 +552,8 @@ postflight_shell_paths() {
     else
       postflight_fail "zsh Homebrew resolution is wrong (got '${brew_path:-missing}')"
     fi
-    if [[ "$uv_path" == "$HOME/.local/bin/uv" ]]; then
-      postflight_pass "zsh resolves Astral's standalone uv before Homebrew uv"
+    if [[ -n "$uv_path" && "$uv_path" -ef "$expected_uv" ]]; then
+      postflight_pass "zsh resolves Homebrew uv"
     else
       postflight_fail "zsh uv PATH winner is wrong (got '${uv_path:-missing}')"
     fi
@@ -849,15 +851,27 @@ postflight_upstream_tools() {
   else
     postflight_fail "rustup or its active compiler is unavailable"
   fi
-  if [[ -x "$HOME/.local/bin/uv" && -x "$HOME/.local/bin/uvx" \
+  if [[ "$OS_KIND" == macos ]]; then
+    if [[ "$HOME/.local/bin/uv" -ef "$BREW_PREFIX/bin/uv" \
+          && "$HOME/.local/bin/uvx" -ef "$BREW_PREFIX/bin/uvx" ]]; then
+      postflight_pass "uv and uvx resolve to Homebrew"
+    else
+      postflight_fail "uv/uvx conflict with the declared Homebrew provider"
+    fi
+  elif [[ -x "$HOME/.local/bin/uv" && -x "$HOME/.local/bin/uvx" \
         && -f "$HOME/.config/uv/uv-receipt.json" ]]; then
     postflight_pass "uv standalone binaries and receipt exist"
   else
     postflight_fail "Astral standalone uv/uvx install is incomplete"
   fi
   local agent resolved artifact
-  for agent in claude codex copilot agy; do
+  local agents=(claude codex copilot agy)
+  [[ "$OS_KIND" != macos ]] || agents+=(opencode)
+  for agent in "${agents[@]}"; do
     artifact="$HOME/.local/bin/$agent"
+    if [[ "$OS_KIND" == macos && "$agent" != agy ]]; then
+      artifact="$BREW_PREFIX/bin/$agent"
+    fi
     resolved=$(command -v "$agent" 2>/dev/null || true)
     if [[ -x "$artifact" && -n "$resolved" && "$resolved" -ef "$artifact" ]] \
         && "$artifact" --version </dev/null >/dev/null 2>&1; then
@@ -866,7 +880,9 @@ postflight_upstream_tools() {
       postflight_fail "$agent native installation is missing, unusable, or shadowed: $artifact"
     fi
   done
-  if [[ -x "$HOME/.opencode/bin/opencode" && -x "$HOME/.local/bin/opencode" ]] \
+  if [[ "$OS_KIND" == macos ]]; then
+    :
+  elif [[ -x "$HOME/.opencode/bin/opencode" && -x "$HOME/.local/bin/opencode" ]] \
       && { [[ "$HOME/.local/bin/opencode" -ef "$HOME/.opencode/bin/opencode" ]] \
         || cmp -s "$HOME/.opencode/bin/opencode" "$HOME/.local/bin/opencode"; } \
       && [[ "$(command -v opencode)" -ef "$HOME/.local/bin/opencode" ]] \
@@ -1122,13 +1138,24 @@ postflight_headless_credentials() {
   # Claude Code prefers its file store when present and falls back to the
   # Keychain otherwise. A login performed at the desk writes only the Keychain.
   if [[ -x "$HOME/.local/bin/claude" ]]; then
-    local credentials_file credentials_argument
+    local credentials_file credentials_argument credential_status=0
     credentials_file="$(claude_config_home)/.credentials.json"
     if [[ -s "$credentials_file" ]]; then
       postflight_pass "Claude Code credentials are in its file store"
     else
-      printf -v credentials_argument '%q' "$credentials_file"
-      postflight_fail "Claude Code credentials are Keychain-only — unusable over ssh; from a desktop terminal run: security find-generic-password -a \"\$USER\" -s 'Claude Code-credentials' -w > $credentials_argument && chmod 600 $credentials_argument"
+      security find-generic-password -a "${USER:-$(id -un)}" -s 'Claude Code-credentials' \
+        >/dev/null 2>&1 </dev/null || credential_status=$?
+      # SecurityTool maps an unconfirmed search to errSecItemNotFound (-25300,
+      # shell status 44), including some search errors. Do not infer a login.
+      # https://github.com/apple-oss-distributions/Security/blob/main/SecurityTool/macOS/keychain_find.c
+      case "$credential_status" in
+        0)
+          printf -v credentials_argument '%q' "$credentials_file"
+          postflight_fail "Claude Code credentials are Keychain-only — unusable over ssh; from a desktop terminal run: touch $credentials_argument && chmod 600 $credentials_argument && security find-generic-password -a \"\$USER\" -s 'Claude Code-credentials' -w > $credentials_argument"
+          ;;
+        44) info "Claude Code login is unconfirmed; authenticate and verify its file credentials before remote use" ;;
+        *) postflight_fail "cannot inspect Claude Code credential storage (security status $credential_status)" ;;
+      esac
     fi
   fi
 }
@@ -1163,9 +1190,14 @@ postflight_cloud_clis() {
     fi
     expected=''
     case "$tool" in
-      openai|ant|gddy) expected="$HOME/.local/bin/$tool" ;;
+      openai|ant)
+        expected="$HOME/.local/bin/$tool"
+        [[ "$OS_KIND" != macos ]] || expected="$BREW_PREFIX/bin/$tool" ;;
+      gddy) expected="$HOME/.local/bin/$tool" ;;
       cf) expected="$HOME/.npm/packages/bin/cf" ;;
-      aws) [[ "$OS_KIND" == linux ]] && expected="$HOME/.local/bin/aws" ;;
+      aws) expected="$HOME/.local/bin/aws" ;;
+      gcloud) [[ "$OS_KIND" != macos ]] || expected="$HOME/.local/share/google-cloud-sdk/bin/gcloud" ;;
+      az) [[ "$OS_KIND" != macos ]] || expected="$BREW_PREFIX/bin/az" ;;
     esac
     if [[ -n "$expected" && ! "$resolved" -ef "$expected" ]]; then
       postflight_fail "$tool resolves to $resolved; expected $expected"

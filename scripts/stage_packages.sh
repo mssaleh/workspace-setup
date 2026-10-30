@@ -606,6 +606,9 @@ stage_packages() {
 
     for pkg in "${PACKAGES_BREW[@]}"; do
       [[ "$pkg" == container-compose && -n "${SKIP_CONTAINER:-}" ]] && continue
+      # Homebrew's package-level trust keeps vendor taps scoped to this inventory.
+      # https://docs.brew.sh/Tap-Trust
+      [[ "$pkg" != */* ]] || "$BREW_BIN" trust --formula "$pkg" || return 1
       if pkg_installed "$pkg"; then
         : # already installed
       else
@@ -620,6 +623,13 @@ stage_packages() {
     fi
 
     for pkg in "${PACKAGES_BREW_CLI_CASK[@]}"; do
+      [[ "$pkg" != */* ]] || "$BREW_BIN" trust --cask "$pkg" || return 1
+      # Microsoft's documented formula-to-cask migration preserves ~/.azure.
+      # https://learn.microsoft.com/cli/azure/install-azure-cli-macos
+      if [[ "$pkg" == azure-cli ]] && "$BREW_BIN" list --formula azure-cli >/dev/null 2>&1; then
+        "$BREW_BIN" fetch --cask azure-cli || return 1
+        "$BREW_BIN" uninstall --formula azure-cli || return 1
+      fi
       "$BREW_BIN" list --cask "$pkg" >/dev/null 2>&1 \
         || "$BREW_BIN" install --cask "$pkg" || return 1
     done
@@ -901,8 +911,7 @@ stage_packages() {
       fi
     fi
 
-    # uv is owned by Astral's standalone installer in stage_toolchains.sh, so
-    # it is deliberately absent from this stage on both platforms.
+    # Linux uv is installed by Astral's standalone installer in stage_toolchains.
 
     # --- apt name aliases: some apt packages install binaries under a different
     #     name than what the dotfiles or muscle memory expect. Create symlinks

@@ -40,6 +40,11 @@ Host providers belong in `lib/manifest.sh`; agent sources and targets belong in
 `manifests/`. Agent locations belong in `lib/agents/paths.sh`.
 Keep configuration ordinary and independent of the disposable payload.
 
+On macOS, prefer vendor-documented Homebrew methods. Otherwise use the vendor's
+direct installer. Foundational tools such as Bash, Python, and Node may use
+Homebrew without vendor endorsement; Homebrew is also acceptable when no vendor
+installation method exists. A community cask alone is not vendor documentation.
+
 Use native MCP commands to write agent configuration. Claude uses user scope;
 replacing a name requires native removal first. Codex and OpenCode named adds
 replace names. OpenCode V2 requires `--global`; V1 does not. Neither OpenCode

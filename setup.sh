@@ -29,7 +29,7 @@
 #                SSH and CI evidence always wins; normally leave this unset.
 #   SKIP_NERD_FONT — macOS only: set to 1 to skip the Nerd Font only
 #   SKIP_KITTY — macOS only: set to 1 to skip the Kitty application only
-#   SKIP_MACOS_APPS — macOS only: skip GUI casks other than the font
+#   SKIP_MACOS_APPS — macOS only: skip workstation apps other than the font
 #   INSTALL_CHATGPT_APP — set to 1 to install ChatGPT/Codex on a macOS workstation
 #   INSTALL_CLAUDE_DESKTOP — set to 1 to install Claude on a macOS workstation
 #   SKIP_TERMINAL_PROFILE — macOS only: skip Apple Terminal integration;
@@ -375,6 +375,9 @@ main() {
   # prefix again before any package or executable probe.
   detect_pkgmgr
   stage "packages: cross-platform CLI toolbox"     stage_packages
+  if [[ "$OS_KIND" == macos ]]; then
+    stage "commands: macOS CLI links"               stage_macos_cli
+  fi
   if [[ "$OS_KIND" == linux && -z "${SKIP_DOCKER:-}" ]]; then
     stage "docker: official Docker Engine (Linux)"    stage_docker
   fi
@@ -388,9 +391,6 @@ main() {
   fi
   if [[ "$OS_KIND" == macos && -z "${SKIP_CONTAINER:-}" ]]; then
     stage "containers: Apple Container (macOS)"      stage_container
-  fi
-  if [[ "$OS_KIND" == macos ]]; then
-    stage "commands: macOS CLI links"               stage_macos_cli
   fi
   if [[ "$OS_KIND" == macos && -z "${SKIP_COMPLETIONS:-}" ]]; then
     stage "completions: Homebrew + upstream CLIs"    stage_completions

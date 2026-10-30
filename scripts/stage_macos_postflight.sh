@@ -94,8 +94,6 @@ postflight_macos_packages() {
     else
       [[ -n "${SKIP_FONT:-}" || -n "${SKIP_MACOS_APPS:-}" ]] && continue
     fi
-    [[ "$pkg" == libreoffice && -n "${SKIP_LIBREOFFICE:-}" ]] && continue
-    [[ "$pkg" == visual-studio-code && -n "${SKIP_VSCODE:-}" ]] && continue
     "$BREW_BIN" list --cask "$pkg" >/dev/null 2>&1 && continue
     if brew_cask_existing_artifact "$pkg" >/dev/null; then
       postflight_pass "$pkg provided by an existing application outside Homebrew"
@@ -103,23 +101,27 @@ postflight_macos_packages() {
     fi
     missing+=("$pkg")
   done
-  if [[ -z "${SKIP_FONT:-}" && -z "${SKIP_MACOS_APPS:-}" ]]; then
-    if [[ "${INSTALL_CHATGPT_APP:-}" == 1 ]]; then
-      "$BREW_BIN" list --cask chatgpt >/dev/null 2>&1 \
-        || brew_cask_existing_artifact chatgpt >/dev/null \
-        || missing+=(chatgpt)
-    fi
-    if [[ "${INSTALL_CLAUDE_DESKTOP:-}" == 1 ]]; then
-      "$BREW_BIN" list --cask claude >/dev/null 2>&1 \
-        || brew_cask_existing_artifact claude >/dev/null \
-        || missing+=(claude)
-    fi
-  fi
   if ((${#missing[@]} == 0)); then
     postflight_pass "requested Homebrew casks are installed"
   else
     postflight_fail "missing Homebrew casks: ${missing[*]}"
   fi
+
+  [[ -z "${SKIP_FONT:-}" && -z "${SKIP_MACOS_APPS:-}" ]] || return 0
+  local app_path
+  local apps=("${MACOS_DIRECT_APPS[@]}")
+  [[ "${INSTALL_CHATGPT_APP:-}" != 1 ]] || apps+=(chatgpt)
+  [[ "${INSTALL_CLAUDE_DESKTOP:-}" != 1 ]] || apps+=(claude)
+  for pkg in "${apps[@]}"; do
+    [[ "$pkg" == libreoffice && -n "${SKIP_LIBREOFFICE:-}" ]] && continue
+    [[ "$pkg" == visual-studio-code && -n "${SKIP_VSCODE:-}" ]] && continue
+    app_path=$(macos_app_path "$pkg") || { postflight_fail "unknown application: $pkg"; continue; }
+    if [[ -d "$app_path/Contents/MacOS" ]] && codesign --verify --deep --strict "$app_path"; then
+      postflight_pass "$pkg application is installed and its signature verifies"
+    else
+      postflight_fail "$pkg application is missing or invalid at $app_path"
+    fi
+  done
 }
 
 postflight_macos_cli_paths() {

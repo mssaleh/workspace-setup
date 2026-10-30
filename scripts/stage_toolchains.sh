@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # scripts/stage_toolchains.sh — install rustup + uv + coding-agent CLIs and
 # the uv-managed Python applications.
-# These are deliberately owned by their upstream installers, not inferred from
-# whichever same-named executable happens to be on PATH.
+# Linux uses upstream installers. macOS uses vendor-documented Homebrew
+# providers where available; the remaining tools use vendor installers.
 
 stage_toolchains() {
   mkdir -p "$HOME/.local/bin"
@@ -37,10 +37,14 @@ stage_toolchains() {
     source "$HOME/.cargo/env"
   fi
 
-  # --- uv (self-install, wins on PATH over the brew formula) ---
-  # Do not use command -v here: on macOS that can find the intentional
-  # Homebrew backup and incorrectly skip Astral's standalone copy + receipt.
-  if [[ -x "$HOME/.local/bin/uv" && -x "$HOME/.local/bin/uvx" && -f "$HOME/.config/uv/uv-receipt.json" ]]; then
+  # Homebrew owns uv updates on macOS; self update is only for Linux installs.
+  if [[ "$OS_KIND" == macos ]]; then
+    if [[ ! "$HOME/.local/bin/uv" -ef "$BREW_PREFIX/bin/uv" \
+          || ! "$HOME/.local/bin/uvx" -ef "$BREW_PREFIX/bin/uvx" ]]; then
+      warn "user-local uv/uvx paths conflict with the declared Homebrew provider"
+      return 1
+    fi
+  elif [[ -x "$HOME/.local/bin/uv" && -x "$HOME/.local/bin/uvx" && -f "$HOME/.config/uv/uv-receipt.json" ]]; then
     # The receipt is what lets the standalone install update itself.
     local uv_installed uv_published uv_state
     uv_installed=$(upstream_installed_version "$HOME/.local/bin/uv" --version)
@@ -158,89 +162,99 @@ install_coding_agents() {
     fi
   done
 
-  # https://code.claude.com/docs/en/setup#install-a-specific-version
-  # Anthropic's stable channel skips releases with major regressions.
-  if [[ -x "$HOME/.local/bin/claude" ]]; then
-    "$HOME/.local/bin/claude" install stable </dev/null || return 1
+  if [[ "$OS_KIND" == macos ]]; then
+    for tool in claude codex copilot opencode; do
+      if [[ ! "$HOME/.local/bin/$tool" -ef "$BREW_PREFIX/bin/$tool" ]]; then
+        warn "$tool conflicts with its declared Homebrew provider at ~/.local/bin/$tool"
+        return 1
+      fi
+      "$BREW_PREFIX/bin/$tool" --version </dev/null || return 1
+    done
   else
-    tmp=$(mktemp -d) || return 1
-    status=0
-    if ! curl -fsSL "$CLAUDE_INSTALL_URL" -o "$tmp/install.sh" \
-        || ! bash "$tmp/install.sh" stable </dev/null; then
-      status=1
-    fi
-    rm -rf "$tmp"
-    ((status == 0)) || return 1
-  fi
-  "$HOME/.local/bin/claude" --version </dev/null || return 1
-
-  tmp=$(mktemp -d) || return 1
-  status=0
-  codex_home=$(agent_home codex)
-  # Codex 0.165's installer owns updates and package state, but can edit
-  # profiles when another package manager supplies codex. Isolate those edits.
-  # https://chatgpt.com/codex/install.sh
-  if ! curl -fsSL "$CODEX_INSTALL_URL" -o "$tmp/install.sh" \
-      || ! env HOME="$tmp" CODEX_HOME="$codex_home" \
-        CODEX_INSTALL_DIR="$HOME/.local/bin" CODEX_NON_INTERACTIVE=1 \
-        sh "$tmp/install.sh" --release latest </dev/null; then
-    status=1
-  fi
-  rm -rf "$tmp"
-  ((status == 0)) || return 1
-  "$HOME/.local/bin/codex" --version </dev/null || return 1
-
-  # https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli
-  # Copilot 1.0.105's updater exhausts anonymous GitHub API quota. The
-  # installer uses release download URLs; the shared comparison uses HEAD.
-  if upstream_artifact_needed copilot "$HOME/.local/bin/copilot" \
-      "$HOME/.local/bin/copilot" --version; then
-    tmp=$(mktemp -d) || return 1
-    status=0
-    if ! curl -fsSL "$COPILOT_INSTALL_URL" -o "$tmp/install.sh" \
-        || ! env HOME="$tmp" PREFIX="$HOME/.local" VERSION=latest \
-          bash "$tmp/install.sh" </dev/null; then
-      status=1
-    fi
-    rm -rf "$tmp"
-    ((status == 0)) || return 1
-  fi
-  "$HOME/.local/bin/copilot" --version </dev/null || return 1
-
-  opencode_bin="$HOME/.opencode/bin/opencode"
-  opencode_link="$HOME/.local/bin/opencode"
-  if [[ ( -e "$opencode_bin" || -L "$opencode_bin" ) && ! -x "$opencode_bin" ]]; then
-    warn "preserving an existing path that blocks OpenCode: $opencode_bin"
-    return 1
-  fi
-  version=$("$opencode_bin" --version </dev/null 2>/dev/null) || version=''
-  # V1's updater stays on V1. The V2 installer migrates that native location.
-  # https://opencode.ai/v2/docs/
-  case "$version" in
-    'opencode v2.'*|2.*) "$opencode_bin" upgrade --method curl </dev/null || return 1 ;;
-    *)
+    # https://code.claude.com/docs/en/setup#install-a-specific-version
+    # Anthropic's stable channel skips releases with major regressions.
+    if [[ -x "$HOME/.local/bin/claude" ]]; then
+      "$HOME/.local/bin/claude" install stable </dev/null || return 1
+    else
       tmp=$(mktemp -d) || return 1
       status=0
-      if ! curl -fsSL "$OPENCODE_INSTALL_URL" -o "$tmp/install.sh" \
-          || ! env VERSION= SHELL="${SHELL:-/bin/bash}" \
-            bash "$tmp/install.sh" --no-modify-path </dev/null; then
+      if ! curl -fsSL "$CLAUDE_INSTALL_URL" -o "$tmp/install.sh" \
+          || ! bash "$tmp/install.sh" stable </dev/null; then
         status=1
       fi
       rm -rf "$tmp"
-      ((status == 0)) || return 1 ;;
-  esac
-  "$opencode_bin" --version </dev/null || return 1
-  if [[ -e "$opencode_link" && "$opencode_link" -ef "$opencode_bin" ]]; then
-    :
-  elif [[ -e "$opencode_link" || -L "$opencode_link" ]]; then
-    if [[ ! -L "$opencode_link" ]] && cmp -s "$opencode_bin" "$opencode_link"; then
-      ok "$opencode_link matches the native artifact"
-    else
-      warn "preserving user-owned $opencode_link; cannot expose native OpenCode"
+      ((status == 0)) || return 1
+    fi
+    "$HOME/.local/bin/claude" --version </dev/null || return 1
+
+    tmp=$(mktemp -d) || return 1
+    status=0
+    codex_home=$(agent_home codex)
+    # Codex 0.165's installer owns updates and package state, but can edit
+    # profiles when another package manager supplies codex. Isolate those edits.
+    # https://chatgpt.com/codex/install.sh
+    if ! curl -fsSL "$CODEX_INSTALL_URL" -o "$tmp/install.sh" \
+        || ! env HOME="$tmp" CODEX_HOME="$codex_home" \
+          CODEX_INSTALL_DIR="$HOME/.local/bin" CODEX_NON_INTERACTIVE=1 \
+          sh "$tmp/install.sh" --release latest </dev/null; then
+      status=1
+    fi
+    rm -rf "$tmp"
+    ((status == 0)) || return 1
+    "$HOME/.local/bin/codex" --version </dev/null || return 1
+
+    # https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli
+    # Copilot 1.0.105's updater exhausts anonymous GitHub API quota. The
+    # installer uses release download URLs; the shared comparison uses HEAD.
+    if upstream_artifact_needed copilot "$HOME/.local/bin/copilot" \
+        "$HOME/.local/bin/copilot" --version; then
+      tmp=$(mktemp -d) || return 1
+      status=0
+      if ! curl -fsSL "$COPILOT_INSTALL_URL" -o "$tmp/install.sh" \
+          || ! env HOME="$tmp" PREFIX="$HOME/.local" VERSION=latest \
+            bash "$tmp/install.sh" </dev/null; then
+        status=1
+      fi
+      rm -rf "$tmp"
+      ((status == 0)) || return 1
+    fi
+    "$HOME/.local/bin/copilot" --version </dev/null || return 1
+
+    opencode_bin="$HOME/.opencode/bin/opencode"
+    opencode_link="$HOME/.local/bin/opencode"
+    if [[ ( -e "$opencode_bin" || -L "$opencode_bin" ) && ! -x "$opencode_bin" ]]; then
+      warn "preserving an existing path that blocks OpenCode: $opencode_bin"
       return 1
     fi
-  else
-    ln -s "$opencode_bin" "$opencode_link" || return 1
+    version=$("$opencode_bin" --version </dev/null 2>/dev/null) || version=''
+    # V1's updater stays on V1. The V2 installer migrates that native location.
+    # https://opencode.ai/v2/docs/
+    case "$version" in
+      'opencode v2.'*|2.*) "$opencode_bin" upgrade --method curl </dev/null || return 1 ;;
+      *)
+        tmp=$(mktemp -d) || return 1
+        status=0
+        if ! curl -fsSL "$OPENCODE_INSTALL_URL" -o "$tmp/install.sh" \
+            || ! env VERSION= SHELL="${SHELL:-/bin/bash}" \
+              bash "$tmp/install.sh" --no-modify-path </dev/null; then
+          status=1
+        fi
+        rm -rf "$tmp"
+        ((status == 0)) || return 1 ;;
+    esac
+    "$opencode_bin" --version </dev/null || return 1
+    if [[ -e "$opencode_link" && "$opencode_link" -ef "$opencode_bin" ]]; then
+      :
+    elif [[ -e "$opencode_link" || -L "$opencode_link" ]]; then
+      if [[ ! -L "$opencode_link" ]] && cmp -s "$opencode_bin" "$opencode_link"; then
+        ok "$opencode_link matches the native artifact"
+      else
+        warn "preserving user-owned $opencode_link; cannot expose native OpenCode"
+        return 1
+      fi
+    else
+      ln -s "$opencode_bin" "$opencode_link" || return 1
+    fi
   fi
 
   if [[ -x "$HOME/.local/bin/agy" ]]; then
@@ -262,20 +276,17 @@ install_coding_agents() {
 }
 
 install_cloud_clis() {
-  local platform arch extension=tar.gz tool tmp status=0 aws_bin
-  platform=linux
-  if [[ "$OS_KIND" == macos ]]; then
-    platform=macos
-    extension=zip
-  fi
+  local arch tool tmp status=0 aws_bin
   case "$(uname -m)" in
     x86_64|amd64) arch=amd64 ;;
     aarch64|arm64) arch=arm64 ;;
     *) warn "cloud CLI releases are unavailable for $(uname -m)"; return 1 ;;
   esac
-  for tool in openai ant; do
-    install_upstream_archive_tool "$tool" "${tool}_{version}_${platform}_${arch}.$extension" "$tool" || return 1
-  done
+  if [[ "$OS_KIND" == linux ]]; then
+    for tool in openai ant; do
+      install_upstream_archive_tool "$tool" "${tool}_{version}_linux_${arch}.tar.gz" "$tool" || return 1
+    done
+  fi
   if upstream_artifact_needed gddy "$HOME/.local/bin/gddy" "$HOME/.local/bin/gddy" --version; then
     tmp=$(mktemp -d) || return 1
     if ! curl -fsSL "$GODADDY_INSTALL_URL" -o "$tmp/install.sh" \
@@ -289,39 +300,43 @@ install_cloud_clis() {
   fi
   "$HOME/.local/bin/gddy" --version || return 1
 
-  if [[ "$OS_KIND" == linux ]]; then
-    for tool in aws aws_completer; do
-      aws_bin="$HOME/.local/share/aws-cli/v2/current/bin/$tool"
-      if [[ ( -e "$HOME/.local/bin/$tool" || -L "$HOME/.local/bin/$tool" ) \
-            && ! "$HOME/.local/bin/$tool" -ef "$aws_bin" ]]; then
-        if [[ ! -L "$HOME/.local/bin/$tool" \
-              || "$(readlink "$HOME/.local/bin/$tool")" != "$aws_bin" ]]; then
-          warn "preserving an existing path that blocks the AWS CLI installer: ~/.local/bin/$tool"
-          return 1
-        fi
+  if [[ "$OS_KIND" == macos ]]; then
+    install_google_cloud_macos || return 1
+  fi
+
+  local aws_dir="$HOME/.local/share/aws-cli/v2/current/bin"
+  [[ "$OS_KIND" == macos ]] && aws_dir="$HOME/.local/share/aws-cli"
+  for tool in aws aws_completer; do
+    aws_bin="$aws_dir/$tool"
+    if [[ ( -e "$HOME/.local/bin/$tool" || -L "$HOME/.local/bin/$tool" ) \
+          && ! "$HOME/.local/bin/$tool" -ef "$aws_bin" ]]; then
+      if [[ ! -L "$HOME/.local/bin/$tool" \
+            || "$(readlink "$HOME/.local/bin/$tool")" != "$aws_bin" ]]; then
+        warn "preserving an existing path that blocks the AWS CLI installer: ~/.local/bin/$tool"
+        return 1
       fi
-      # The native installer exits early for a current payload without
-      # restoring missing launchers. https://awscli.amazonaws.com/v2/install.sh
-      if [[ -x "$aws_bin" && ! -e "$HOME/.local/bin/$tool" && ! -L "$HOME/.local/bin/$tool" ]]; then
-        ln -s "$aws_bin" "$HOME/.local/bin/$tool" || return 1
-      fi
-    done
-    tmp=$(mktemp -d) || return 1
-    # The official installer verifies signatures and handles version comparison.
-    if ! curl -fsSL "$AWS_CLI_INSTALL_URL" -o "$tmp/install.sh"; then
-      if [[ -x "$HOME/.local/bin/aws" ]]; then
-        warn "AWS CLI is installed; its update installer could not be downloaded"
-      else
-        status=1
-      fi
-    elif ! XDG_DATA_HOME="$HOME/.local/share" XDG_BIN_HOME="$HOME/.local/bin" \
-        bash "$tmp/install.sh" </dev/null; then
+    fi
+    # The native installer exits early for a current payload without
+    # restoring missing launchers. https://awscli.amazonaws.com/v2/install.sh
+    if [[ -x "$aws_bin" && ! -e "$HOME/.local/bin/$tool" && ! -L "$HOME/.local/bin/$tool" ]]; then
+      ln -s "$aws_bin" "$HOME/.local/bin/$tool" || return 1
+    fi
+  done
+  tmp=$(mktemp -d) || return 1
+  # The official installer verifies signatures and handles version comparison.
+  if ! curl -fsSL "$AWS_CLI_INSTALL_URL" -o "$tmp/install.sh"; then
+    if [[ -x "$HOME/.local/bin/aws" ]]; then
+      warn "AWS CLI is installed; its update installer could not be downloaded"
+    else
       status=1
     fi
-    rm -rf "$tmp"
-    ((status == 0)) || return 1
-    "$HOME/.local/bin/aws" --version || return 1
+  elif ! XDG_DATA_HOME="$HOME/.local/share" XDG_BIN_HOME="$HOME/.local/bin" \
+      bash "$tmp/install.sh" </dev/null; then
+    status=1
   fi
+  rm -rf "$tmp"
+  ((status == 0)) || return 1
+  "$HOME/.local/bin/aws" --version || return 1
 
   # An explicit user prefix works before stage_npm_config on a fresh host.
   for tool in "${NPM_TOOLS_COMMON[@]}"; do

@@ -18,7 +18,7 @@ HOME="$TEST_TMP/home"
 USER='test'
 # Only the zsh dotfile is macOS-owned; the zsh assertions run wherever a zsh
 # exists, against the shipped file, so a Linux host still catches a regression.
-if macos_simulation_available; then
+if macos_tools_available; then
   OS_KIND=macos
   BREW_BIN=$(command -v brew)
 elif [[ "$(host_os_kind)" == macos ]]; then

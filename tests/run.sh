@@ -19,6 +19,7 @@ host_tests=(
   test_toolchain_providers.sh
   test_cloud_clis.sh
   test_macos_cli.sh
+  test_macos_installers.sh
   test_generated_completions.sh
   test_container_lifecycle.sh
   test_macos_update.sh

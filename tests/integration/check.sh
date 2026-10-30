@@ -50,6 +50,7 @@ versions() {
 }
 
 native_installers() (
+  export OS_KIND=linux
   export HOME="$HOME/native-installers"
   export CODEX_HOME="$HOME/.codex" CLAUDE_CONFIG_DIR="$HOME/.claude" \
     COPILOT_HOME="$HOME/.copilot" XDG_CONFIG_HOME="$HOME/.config" \

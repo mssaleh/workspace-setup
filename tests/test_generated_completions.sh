@@ -6,7 +6,7 @@ TEST_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 . "$TEST_ROOT/tests/helpers.sh"
 # shellcheck disable=SC2034 # consumed by test_skip from helpers.sh
 TEST_NAME='generated completion tests'
-macos_simulation_available || test_skip 'needs macOS Homebrew and zsh completion semantics'
+macos_tools_available || test_skip 'needs macOS Homebrew and zsh completion semantics'
 
 TEST_TMP=$(mktemp -d "${TMPDIR:-/tmp}/generated-completion-test.XXXXXX")
 trap 'rm -rf "$TEST_TMP"' EXIT

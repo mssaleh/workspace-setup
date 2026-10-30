@@ -16,11 +16,5 @@
 # used far more often than it is built.
 compile-bytecode = true
 
-# Prefer the interpreters uv manages over whatever the system happens to ship.
-#
-# This is already uv's default. It is stated explicitly so that a later edit
-# cannot switch it to "system" without someone noticing what that costs here:
-# this host's /usr/bin/python3 is Ubuntu 26.04's Python 3.14, new enough that
-# many packages still have no wheel for it, so an unpinned environment built
-# against it compiles from source or fails outright.
+# Prefer uv-managed interpreters; projects can select their required version.
 python-preference = "managed"

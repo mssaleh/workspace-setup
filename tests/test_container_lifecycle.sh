@@ -109,4 +109,17 @@ POSTFLIGHT_PASSES=0 POSTFLIGHT_FAILURES=0
 postflight_macos_containers >/dev/null 2>&1
 [[ "$POSTFLIGHT_FAILURES" == 1 ]]
 
+# Builder sizing delegates to Container and preserves every configuration key.
+mkdir -p "$TEST_TMP/home/.config/container"
+printf '[build]\ncpus = 2\n[registry]\ndomain = "registry.example"\n[machine]\nhomeMount = "ro"\n' \
+  > "$TEST_TMP/home/.config/container/config.toml"
+cp "$TEST_TMP/home/.config/container/config.toml" "$TEST_TMP/config.before"
+: > "$calls"
+HOME="$TEST_TMP/home" bash "$TEST_ROOT/dotfiles/agents/skills/apple-container-amd64/scripts/optimize-builder.sh" 4 8G
+cmp "$TEST_TMP/config.before" "$TEST_TMP/home/.config/container/config.toml"
+grep -Fxq 'builder start --cpus 4 --memory 8G' "$calls"
+if grep -Eq '^(system stop|builder stop)' "$calls"; then
+  fail_test 'builder sizing stopped services outside native resource reconciliation'
+fi
+
 printf 'container lifecycle tests: ok\n'

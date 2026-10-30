@@ -22,9 +22,9 @@ array_has() {
   return 1
 }
 
-# Deliberate dual ownership: Homebrew backup + Astral standalone PATH winner.
+# macOS uses one uv provider; Linux uses Astral's standalone installer.
 array_has uv "${PACKAGES_BREW[@]}"
-array_has uv-standalone "${PROVIDERS_COMMON_UPSTREAM[@]}"
+array_has uv-standalone "${PROVIDERS_LINUX_UPSTREAM[@]}"
 
 # Platform/runtime ownership must not drift into a blanket Brew strategy.
 array_has kitty "${PROVIDERS_COMMON_UPSTREAM[@]}"
@@ -38,8 +38,12 @@ if array_has container "${PACKAGES_BREW[@]}"; then
   printf 'Apple Container must not become Homebrew-owned\n' >&2
   exit 1
 fi
-array_has opencode "${PROVIDERS_COMMON_UPSTREAM[@]}"
-array_has copilot "${PROVIDERS_COMMON_UPSTREAM[@]}"
+array_has opencode "${PROVIDERS_LINUX_UPSTREAM[@]}"
+array_has copilot "${PROVIDERS_LINUX_UPSTREAM[@]}"
+array_has anomalyco/tap/opencode-v2 "${PACKAGES_BREW[@]}"
+for _agent_cask in claude-code codex copilot-cli; do
+  array_has "$_agent_cask" "${PACKAGES_BREW_CLI_CASK[@]}"
+done
 upstream_has_project copilot
 array_has neurosnap/tap/zmx "${PACKAGES_BREW[@]}"
 array_has zmx "${PROVIDERS_LINUX_UPSTREAM[@]}"
@@ -71,7 +75,11 @@ for _apt_node in nodejs npm; do
   fi
 done
 # macOS keeps its Homebrew node; the NodeSource repo is Linux-only.
-array_has node "${PACKAGES_BREW[@]}"
+array_has "node@$NODE_MAJOR" "${PACKAGES_BREW[@]}"
+if array_has node "${PACKAGES_BREW[@]}"; then
+  printf 'macOS must request only the declared Node major\n' >&2
+  exit 1
+fi
 [[ "${NODE_MAJOR:-}" =~ ^[0-9]+$ ]] || {
   printf 'NODE_MAJOR must be declared as a bare major version\n' >&2
   exit 1
@@ -143,9 +151,9 @@ array_has gh "${PROVIDERS_LINUX_OFFICIAL_REPO[@]}"
 array_has cmake "${PROVIDERS_LINUX_OFFICIAL_REPO[@]}"
 
 # The Codex app is the packaged desktop application and is distinct from the
-# Codex CLI, which stays upstream-owned on both platforms.
+# Codex CLI, which uses Homebrew on macOS and OpenAI's installer on Linux.
 array_has chatgpt "${PROVIDERS_LINUX_OFFICIAL_REPO[@]}"
-array_has codex "${PROVIDERS_COMMON_UPSTREAM[@]}"
+array_has codex "${PROVIDERS_LINUX_UPSTREAM[@]}"
 if array_has "$CODEX_APP_PACKAGE" "${PACKAGES_APT[@]}"; then
   printf 'the Codex app bootstraps its own repository; remove %s from PACKAGES_APT\n' \
     "$CODEX_APP_PACKAGE" >&2
@@ -201,16 +209,25 @@ for _uv_tool in "${UV_TOOLS_LINUX[@]}"; do
     exit 1
   fi
 done
-array_has azure-cli "${PACKAGES_BREW[@]}"
-array_has awscli "${PACKAGES_BREW[@]}"
-array_has gcloud-cli "${PACKAGES_BREW_CLI_CASK[@]}"
+array_has azure-cli "${PACKAGES_BREW_CLI_CASK[@]}"
+array_has aws-cli "${PROVIDERS_COMMON_UPSTREAM[@]}"
+array_has google-cloud-cli "${PROVIDERS_MACOS_UPSTREAM[@]}"
+for _unsupported in awscli azure-cli; do
+  if array_has "$_unsupported" "${PACKAGES_BREW[@]}"; then
+    printf 'incorrect Homebrew formula provider: %s\n' "$_unsupported" >&2
+    exit 1
+  fi
+done
 array_has cf "${NPM_TOOLS_COMMON[@]}"
-for _cloud_tool in openai ant gddy; do
-  array_has "$_cloud_tool" "${PROVIDERS_COMMON_UPSTREAM[@]}"
+for _cloud_tool in openai ant; do
+  array_has "$_cloud_tool" "${PROVIDERS_LINUX_UPSTREAM[@]}"
   upstream_has_project "$_cloud_tool"
 done
+array_has openai/tools/openai "${PACKAGES_BREW_CLI_CASK[@]}"
+array_has anthropics/tap/ant "${PACKAGES_BREW_CLI_CASK[@]}"
+array_has gddy "${PROVIDERS_COMMON_UPSTREAM[@]}"
+upstream_has_project gddy
 array_has agy "${PROVIDERS_COMMON_UPSTREAM[@]}"
-array_has aws-cli "${PROVIDERS_LINUX_UPSTREAM[@]}"
 array_has google-cloud-cli "${PROVIDERS_LINUX_OFFICIAL_REPO[@]}"
 array_has azure-cli "${PROVIDERS_LINUX_OFFICIAL_REPO[@]}"
 array_has ttscoff/thelab/apex "${PACKAGES_BREW[@]}"
@@ -228,8 +245,8 @@ fi
 # The opt-in desktop agents are recognised where a direct .dmg install already
 # provided them, so INSTALL_CHATGPT_APP/INSTALL_CLAUDE_DESKTOP never adds a
 # second copy of an application the user already has.
-array_has 'chatgpt:/Applications/ChatGPT.app' "${BREW_CASK_EXISTING_ARTIFACTS[@]}"
-array_has 'claude:/Applications/Claude.app' "${BREW_CASK_EXISTING_ARTIFACTS[@]}"
+array_has 'chatgpt:/Applications/ChatGPT.app' "${MACOS_APP_ARTIFACTS[@]}"
+array_has 'claude:/Applications/Claude.app' "${MACOS_APP_ARTIFACTS[@]}"
 
 # The docker group is created by the Docker postinst and joined by stage_docker.
 # Listing it here too would make a host without Docker report a missing group
@@ -274,7 +291,7 @@ esac
 # macOS. It must not appear in PACKAGES_APT, which would let the distribution
 # answer to the name if the vendor archive failed to register.
 array_has code "${PROVIDERS_LINUX_OFFICIAL_REPO[@]}"
-array_has visual-studio-code "${PACKAGES_BREW_CASK[@]}"
+array_has visual-studio-code "${MACOS_DIRECT_APPS[@]}"
 if array_has code "${PACKAGES_APT[@]}"; then
   printf 'code is vendor-archive-owned; remove it from PACKAGES_APT\n' >&2
   exit 1

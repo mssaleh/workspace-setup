@@ -28,7 +28,7 @@ stage_macos_bootstrap() {
   else
     info "installing Homebrew…"
     NONINTERACTIVE=1 /bin/bash -c \
-      "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+      "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" </dev/null
     refresh_brew_environment
     [[ -x "$BREW_BIN" ]] || fail "Homebrew installer completed but brew was not found"
   fi

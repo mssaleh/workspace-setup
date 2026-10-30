@@ -94,6 +94,99 @@ ensure_vscode_cli_links() {
   return 0
 }
 
+macos_app_download_url() {
+  local app="$1" arch version
+  case "$(uname -m)" in
+    arm64|aarch64) arch=arm64 ;;
+    x86_64|amd64) arch=x64 ;;
+    *) return 1 ;;
+  esac
+  case "$app" in
+    visual-studio-code)
+      [[ "$arch" == arm64 ]] && arch=darwin-arm64 || arch=darwin
+      printf '%s/%s/stable\n' "$VSCODE_MACOS_DOWNLOAD_BASE" "$arch" ;;
+    libreoffice)
+      version=$(curl -fsSL "$LIBREOFFICE_DOWNLOAD_BASE/" \
+        | sed -n 's/.*href="\([0-9][0-9.]*\)\/".*/\1/p' \
+        | jq -Rsr 'split("\n") | map(select(test("^[0-9]+(\\.[0-9]+)+$"))) | sort_by(split(".") | map(tonumber)) | last // empty') \
+        || return 1
+      [[ -n "$version" ]] || return 1
+      [[ "$arch" == arm64 ]] && arch=aarch64 || arch=x86-64
+      printf '%s/%s/mac/%s/LibreOffice_%s_MacOS_%s.dmg\n' \
+        "$LIBREOFFICE_DOWNLOAD_BASE" "$version" "$arch" "$version" "$arch"
+      ;;
+    chatgpt)
+      [[ "$arch" == arm64 ]] || { warn "OpenAI's documented macOS app download requires Apple silicon"; return 1; }
+      printf '%s\n' "$CHATGPT_MACOS_DOWNLOAD_URL" ;;
+    claude)
+      # Claude Desktop 4.4212's public update feed avoids the download page's
+      # interactive browser challenge. A changed feed fails URL resolution.
+      version=$(curl -fsSL "$CLAUDE_MACOS_RELEASES_URL" \
+        | jq -er '.releases | sort_by(.version | split(".") | map(tonumber)) | last.updateTo.url') || return 1
+      case "$version" in
+        https://downloads.claude.ai/releases/darwin/universal/*.zip) printf '%s\n' "$version" ;;
+        *) return 1 ;;
+      esac
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+# Native tools implement the vendors' extract/mount-and-copy installation.
+install_macos_app() {
+  local name="$1" destination url tmp app mount='' mounted=0 status=0 format=dmg
+  local -a move_command=(mv -n)
+  destination=$(macos_app_path "$name") || return 1
+  if [[ -d "$destination" ]]; then
+    ok "$name application already installed at $destination"
+    return 0
+  fi
+  if [[ -e "$destination" || -L "$destination" ]]; then
+    warn "preserving an existing path that blocks $name: $destination"
+    return 1
+  fi
+  url=$(macos_app_download_url "$name") || return 1
+  case "$name" in visual-studio-code|claude) format=zip ;; esac
+  tmp=$(mktemp -d) || return 1
+  if ! curl -fsSL "$url" -o "$tmp/download.$format"; then
+    status=1
+  elif [[ "$format" == zip ]]; then
+    ditto -x -k "$tmp/download.zip" "$tmp/extracted" || status=1
+    app="$tmp/extracted/${destination##*/}"
+  else
+    mount="$tmp/mount"
+    mkdir -p "$mount"
+    if hdiutil attach -quiet -nobrowse -readonly -mountpoint "$mount" "$tmp/download.dmg" </dev/null; then
+      mounted=1
+    else
+      status=1
+    fi
+    app="$mount/${destination##*/}"
+  fi
+  if ((status == 0)); then
+    if [[ ! -d "$app" ]] || ! spctl --assess --type execute "$app"; then
+      warn "$name download did not contain an accepted signed application"
+      status=1
+    else
+      [[ -w "$(dirname "$destination")" ]] || move_command=(sudo mv -n)
+      if ! ditto "$app" "$tmp/staged/${destination##*/}" \
+          || ! "${move_command[@]}" "$tmp/staged/${destination##*/}" "$(dirname "$destination")/" \
+          || [[ -e "$tmp/staged/${destination##*/}" ]]; then
+        status=1
+      fi
+    fi
+  fi
+  if ((mounted)) && ! hdiutil detach -quiet "$mount"; then
+    warn "could not detach $name disk image at $mount"
+    # Keep the mountpoint for manual recovery rather than deleting through it.
+    return 1
+  fi
+  rm -rf "$tmp"
+  ((status == 0)) || return 1
+  [[ -d "$destination/Contents/MacOS" ]] || return 1
+  ok "$name installed from its vendor download"
+}
+
 stage_macos_apps() {
   [[ "${OS_KIND:-}" == macos ]] || return 0
   if ! host_is_workstation || [[ -n "${SKIP_FONT:-}" || -n "${SKIP_MACOS_APPS:-}" ]]; then
@@ -104,12 +197,15 @@ stage_macos_apps() {
   local cask
   for cask in "${PACKAGES_BREW_CASK[@]}"; do
     [[ "$cask" == font-jetbrains-mono-nerd-font ]] && continue
-    [[ "$cask" == libreoffice && -n "${SKIP_LIBREOFFICE:-}" ]] && continue
-    [[ "$cask" == visual-studio-code && -n "${SKIP_VSCODE:-}" ]] && continue
     install_brew_cask_if_missing "$cask"
   done
-  [[ "${INSTALL_CHATGPT_APP:-}" == 1 ]] && install_brew_cask_if_missing chatgpt
-  [[ "${INSTALL_CLAUDE_DESKTOP:-}" == 1 ]] && install_brew_cask_if_missing claude
+  for cask in "${MACOS_DIRECT_APPS[@]}"; do
+    [[ "$cask" == libreoffice && -n "${SKIP_LIBREOFFICE:-}" ]] && continue
+    [[ "$cask" == visual-studio-code && -n "${SKIP_VSCODE:-}" ]] && continue
+    install_macos_app "$cask" || return 1
+  done
+  [[ "${INSTALL_CHATGPT_APP:-}" != 1 ]] || install_macos_app chatgpt || return 1
+  [[ "${INSTALL_CLAUDE_DESKTOP:-}" != 1 ]] || install_macos_app claude || return 1
   [[ -n "${SKIP_VSCODE:-}" ]] || ensure_vscode_cli_links
 }
 

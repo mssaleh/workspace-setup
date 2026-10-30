@@ -20,14 +20,6 @@ stage_macos_update() {
   for cask in "${PACKAGES_BREW_CASK[@]}" "${PACKAGES_BREW_CLI_CASK[@]+"${PACKAGES_BREW_CLI_CASK[@]}"}"; do
     "$BREW_BIN" list --cask "$cask" >/dev/null 2>&1 && managed_casks+=("$cask")
   done
-  if [[ "${INSTALL_CHATGPT_APP:-}" == 1 ]] \
-      && "$BREW_BIN" list --cask chatgpt >/dev/null 2>&1; then
-    managed_casks+=(chatgpt)
-  fi
-  if [[ "${INSTALL_CLAUDE_DESKTOP:-}" == 1 ]] \
-      && "$BREW_BIN" list --cask claude >/dev/null 2>&1; then
-    managed_casks+=(claude)
-  fi
 
   outdated_formulae=""
   if ((${#managed_formulae[@]})); then

@@ -8,13 +8,18 @@ HOME="$TEST_TMP/home"
 BREW_PREFIX="$TEST_TMP/brew"
 NODE_MAJOR=24
 export HOME BREW_PREFIX NODE_MAJOR
-mkdir -p "$HOME" "$BREW_PREFIX/opt/node@24/bin"
+. "$TEST_ROOT/lib/manifest.sh"
+mkdir -p "$HOME" "$BREW_PREFIX/opt/node@24/bin" "$BREW_PREFIX/bin" "$BREW_PREFIX/opt/python@3.14/bin"
+for command_name in "${BREW_CLI_COMMANDS[@]}"; do
+  printf '#!/bin/sh\n' > "$BREW_PREFIX/bin/$command_name"
+  chmod +x "$BREW_PREFIX/bin/$command_name"
+done
+cp "$BREW_PREFIX/bin/uv" "$BREW_PREFIX/opt/python@3.14/bin/python3.14"
 
 for command_name in node npm npx corepack; do
   printf '#!/bin/sh\n' > "$BREW_PREFIX/opt/node@24/bin/$command_name"
   chmod +x "$BREW_PREFIX/opt/node@24/bin/$command_name"
 done
-
 # shellcheck disable=SC1091
 . "$TEST_ROOT/lib/log.sh"
 # The stage links through the shared ensure_cli_symlink helper, exactly as
@@ -32,6 +37,10 @@ OS_KIND=linux stage_macos_cli >/dev/null
   || fail_test 'macOS CLI stage changed a Linux HOME'
 
 OS_KIND=macos stage_macos_cli >/dev/null
+for command_name in "${BREW_CLI_COMMANDS[@]}"; do
+  [[ "$HOME/.local/bin/$command_name" -ef "$BREW_PREFIX/bin/$command_name" ]]
+done
+[[ "$HOME/.local/bin/python3.14" -ef "$BREW_PREFIX/opt/python@3.14/bin/python3.14" ]]
 for command_name in node npm npx corepack; do
   [[ -L "$HOME/.local/bin/$command_name" ]]
   [[ "$HOME/.local/bin/$command_name" -ef "$BREW_PREFIX/opt/node@24/bin/$command_name" ]]

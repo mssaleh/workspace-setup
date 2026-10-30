@@ -19,7 +19,7 @@ USER='test'
 # them — which is what hardcoding OS_KIND=macos plus `BREW_BIN=$(command -v
 # brew)` did, dying on `set -e` before the first assertion — run as the host
 # this actually is and assert the macOS-owned artifacts only where they exist.
-if macos_simulation_available; then
+if macos_tools_available; then
   OS_KIND=macos
   BREW_BIN=$(command -v brew)
 elif [[ "$(host_os_kind)" == macos ]]; then

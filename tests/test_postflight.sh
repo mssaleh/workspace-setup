@@ -6,14 +6,10 @@ TEST_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 . "$TEST_ROOT/tests/helpers.sh"
 TEST_NAME='postflight tests'
 
-# This exercises the *macOS* postflight end to end: it runs every check with
-# OS_KIND=macos, which shells out to brew for the cask inventory and sources
-# the zsh dotfiles to verify their clean-shell PATH. Neither is meaningfully
-# stubbable, so on a host without them the honest result is "not verified
-# here". The Linux half of postflight has its own coverage in
-# test_linux_postflight.sh, which runs everywhere.
-macos_simulation_available \
-  || test_skip 'needs Homebrew and zsh to simulate a macOS host; see test_linux_postflight.sh for the Linux checks'
+# macOS shell integration uses native Homebrew and zsh with fixture commands.
+# Linux postflight is covered by test_linux_postflight.sh.
+macos_tools_available \
+  || test_skip 'needs macOS, Homebrew and zsh; see test_linux_postflight.sh for Linux checks'
 
 TEST_TMP=$(mktemp -d "${TMPDIR:-/tmp}/postflight-test.XXXXXX")
 trap 'rm -rf "$TEST_TMP"' EXIT
@@ -25,7 +21,7 @@ OS_KIND=macos
 DISTRO=macos
 PKGMGR=brew
 BREW_BIN=$(command -v brew)
-BREW_PREFIX=$("$BREW_BIN" --prefix)
+BREW_PREFIX="$TEST_TMP/providers"
 SKIP_FONT=1
 SKIP_CONTAINER=1
 SKIP_DOCKER=1
@@ -103,6 +99,19 @@ chmod +x "$HOME/.cargo/bin/rustup"
 # shellcheck disable=SC2016 # literal content for the fixture's future shell
 printf '%s\n' 'export PATH="$HOME/.cargo/bin:$PATH"' > "$HOME/.cargo/env"
 printf '%s\n' '{}' > "$HOME/.config/uv/uv-receipt.json"
+mkdir -p "$BREW_PREFIX/bin" "$BREW_PREFIX/opt/node@${NODE_MAJOR}/bin" "$BREW_PREFIX/opt/python@3.14/bin" \
+  "$HOME/.local/share/google-cloud-sdk/bin"
+for command_name in "${BREW_CLI_COMMANDS[@]}"; do
+  cp "$HOME/.local/bin/$command_name" "$BREW_PREFIX/bin/$command_name"
+  rm "$HOME/.local/bin/$command_name"
+  ln -s "$BREW_PREFIX/bin/$command_name" "$HOME/.local/bin/$command_name"
+done
+printf '#!/bin/sh\nprintf "v24.0.0\\n"\n' > "$BREW_PREFIX/opt/node@${NODE_MAJOR}/bin/node"
+chmod +x "$BREW_PREFIX/opt/node@${NODE_MAJOR}/bin/node"
+cp "$BREW_PREFIX/bin/uv" "$BREW_PREFIX/opt/python@3.14/bin/python3.14"
+cp "$HOME/.local/bin/gcloud" "$HOME/.local/share/google-cloud-sdk/bin/gcloud"
+rm "$HOME/.local/bin/gcloud"
+ln -s "$HOME/.local/share/google-cloud-sdk/bin/gcloud" "$HOME/.local/bin/gcloud"
 # The end-to-end fixture has no real terminal database under its isolated HOME.
 # A focused test exercises installation and TERMINFO isolation directly.
 infocmp() { [[ "${1:-}" == xterm-kitty ]]; }

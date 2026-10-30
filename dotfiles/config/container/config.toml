@@ -1,6 +1,5 @@
 # Apple Container policy shared by ordinary and amd64 workloads. CPU and memory
-# are deliberately absent: Apple's defaults remain in force until the user
-# explicitly runs the apple-container-amd64 optimizer for a heavy build.
+# use Apple's defaults; builder commands can supply workload-specific limits.
 [build]
 rosetta = true
 
