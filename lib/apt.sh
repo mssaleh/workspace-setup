@@ -112,12 +112,40 @@ apt_write_sources() {
   if [[ -r "$path" ]] && printf '%s\n' "$content" | cmp -s - "$path"; then
     return 0
   fi
-  sudo install -m 0755 -d "$(dirname "$path")"
+  sudo install -m 0755 -d "$(dirname "$path")" || return 1
   if ! printf '%s\n' "$content" | sudo tee "$path" >/dev/null; then
     warn "could not write the apt source list at $path"
     return 1
   fi
   printf 'changed\n'
+}
+
+# apt_write_repo_sources <path> <uri> <suite> <components> <architectures> <keyring>
+# APT 3.2's modernize-sources drops arch=; write the declared fields explicitly.
+# https://github.com/Debian/apt/blob/main/apt-private/private-sources.cc
+apt_write_repo_sources() {
+  local path="$1" uri="$2" suite="$3" components="$4" architectures="$5" keyring="$6"
+  local legacy="${1%.sources}.list" options="signed-by=$6" expected content changed
+  [[ -z "$architectures" ]] || options="arch=${architectures// /,} $options"
+  expected="deb [$options] $uri $suite${components:+ $components}"
+  if [[ -e "$legacy" || -L "$legacy" ]]; then
+    if [[ ! -f "$legacy" || ! -r "$legacy" || -L "$legacy" ]] \
+        || [[ "$(sed '/^[[:space:]]*#/d; /^[[:space:]]*$/d; s/^[[:space:]]*//; s/[[:space:]]*$//' "$legacy")" != "$expected" ]]; then
+      warn "preserving an unrecognized apt source at $legacy; reconcile it with $path"
+      return 1
+    fi
+  fi
+  content=$(printf 'Types: deb\nURIs: %s\nSuites: %s\n' "$uri" "$suite"
+    [[ -z "$components" ]] || printf 'Components: %s\n' "$components"
+    [[ -z "$architectures" ]] || printf 'Architectures: %s\n' "$architectures"
+    printf 'Signed-By: %s\n' "$keyring")
+  changed=$(apt_write_sources "$path" "$content") || return 1
+  if [[ -e "$legacy" ]]; then
+    sudo mv --backup=numbered -- "$legacy" "$legacy.bak" || return 1
+    changed=changed
+  fi
+  [[ -z "$changed" ]] || printf 'changed\n'
+  return 0
 }
 
 # apt_repo_is_configured <uri> — true when some apt source names this archive.
@@ -127,7 +155,8 @@ apt_write_sources() {
 # not reserved: Ubuntu owns `helm` as a source package for the unrelated Emacs
 # framework, and any release may start publishing a binary under these names.
 apt_repo_is_configured() {
-  grep -rqsF "$1" /etc/apt/sources.list.d /etc/apt/sources.list 2>/dev/null
+  grep -qsF "$1" /etc/apt/sources.list /etc/apt/sources.list.d/*.list \
+    /etc/apt/sources.list.d/*.sources 2>/dev/null
 }
 
 # apt_install_candidate <package> [label] — install the package, or upgrade it

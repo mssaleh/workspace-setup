@@ -45,6 +45,7 @@ else
   printf '#!/bin/sh\nprintf "gddy 1.0.0\\n"\n' > "$2/gddy"
 fi
 chmod +x "$2/gddy"
+[[ "$(command -v gddy)" -ef "$2/gddy" ]]
 SH
 
 fixture_download_failure=''

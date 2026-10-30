@@ -150,4 +150,81 @@ out=$(apt_preserve_application code 2>&1)
 # A confined runtime cannot satisfy host packages or their dpkg dependencies.
 SNAP_APPS=node
 apt_manifest_package_wanted nodejs || fail_application 'a Node Snap displaced the declared host runtime'
+(
+  tmp_root="$db/source-migration"
+  mkdir -p "$tmp_root"
+  sudo() { "$@"; }
+  fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
+  # Matching legacy entries migrate without changing architecture or key scope.
+  vendor_dir="$tmp_root/vendor-sources"
+  mkdir -p "$vendor_dir"
+  legacy="$vendor_dir/vendor.list"
+  modern="$vendor_dir/vendor.sources"
+  printf '# vendor comment\ndeb [arch=amd64,arm64 signed-by=/usr/share/keyrings/vendor.gpg] https://vendor.invalid/ stable main\n' > "$legacy"
+  cp "$legacy" "$tmp_root/legacy.saved"
+  [[ "$(apt_write_repo_sources "$modern" https://vendor.invalid/ stable main 'amd64 arm64' /usr/share/keyrings/vendor.gpg)" == changed ]] \
+    || fail 'a matching legacy source was not migrated'
+  [[ ! -e "$legacy" ]] && cmp -s "$legacy.bak" "$tmp_root/legacy.saved" \
+    || fail 'migration did not preserve the legacy source as an inactive backup'
+  grep -Fxq 'Architectures: amd64 arm64' "$modern" || fail 'migration lost architecture restrictions'
+  grep -Fxq 'Signed-By: /usr/share/keyrings/vendor.gpg' "$modern" || fail 'migration lost signing-key scope'
+  [[ -z "$(apt_write_repo_sources "$modern" https://vendor.invalid/ stable main 'amd64 arm64' /usr/share/keyrings/vendor.gpg)" ]] \
+    || fail 'a migrated source changed on rerun'
+
+  printf 'deb https://custom.invalid/ stable main\n' > "$vendor_dir/custom.list"
+  if apt_write_repo_sources "$vendor_dir/custom.sources" https://vendor.invalid/ stable main '' /usr/share/keyrings/vendor.gpg >/dev/null 2>&1; then
+    fail 'an unrecognized legacy source was overwritten'
+  fi
+  [[ ! -e "$vendor_dir/custom.sources" ]] && grep -Fxq 'deb https://custom.invalid/ stable main' "$vendor_dir/custom.list" \
+    || fail 'an unrecognized legacy source was changed or duplicated'
+  rm "$vendor_dir/custom.list"
+
+  # A failed write retains the active source; a retry completes the migration.
+  sed 's/stable main/testing main/' "$tmp_root/legacy.saved" > "$legacy"
+  sudo() { [[ "$1" != tee ]] || return 1; "$@"; }
+  if apt_write_repo_sources "$modern" https://vendor.invalid/ testing main 'amd64 arm64' /usr/share/keyrings/vendor.gpg >/dev/null 2>&1; then
+    fail 'a failed source write reported success'
+  fi
+  grep -Fxq 'Suites: stable' "$modern" && [[ -f "$legacy" ]] \
+    || fail 'a failed source write removed the active source'
+  sudo() { "$@"; }
+  apt_write_repo_sources "$modern" https://vendor.invalid/ testing main 'amd64 arm64' /usr/share/keyrings/vendor.gpg >/dev/null
+  [[ -f "$legacy.bak.~1~" && ! -e "$legacy" ]] || fail 'a retry lost an existing backup'
+
+  apt_write_repo_sources "$vendor_dir/flat.sources" https://flat.invalid/ / '' '' /usr/share/keyrings/flat.gpg >/dev/null
+  if grep -q '^Components:' "$vendor_dir/flat.sources"; then fail 'a flat archive acquired components'; fi
+  command -v apt-get >/dev/null || fail 'APT is required to verify repository declarations'
+  targets=$(apt-get -o Dir::Etc::sourcelist=/dev/null -o "Dir::Etc::sourceparts=$vendor_dir" \
+    -o "Dir::State::lists=$tmp_root/lists" -o APT::Architecture=amd64 \
+    -o APT::Architectures::=amd64 -o APT::Architectures::=arm64 -o APT::Architectures::=i386 \
+    indextargets --no-release-info --format '$(IDENTIFIER)|$(ARCHITECTURE)|$(REPO_URI)')
+  grep -Fxq 'Packages|amd64|https://vendor.invalid/' <<< "$targets" || fail 'APT could not read the amd64 source'
+  grep -Fxq 'Packages|arm64|https://vendor.invalid/' <<< "$targets" || fail 'APT could not read the arm64 source'
+  if grep -Fq 'Packages|i386|https://vendor.invalid/' <<< "$targets"; then fail 'APT ignored the architecture restriction'; fi
+  grep -Fq 'https://flat.invalid/' <<< "$targets" || fail 'APT could not read the flat archive'
+)
+(
+  # Installed desktop apps still need maintenance of their declared archives.
+  DISTRO=ubuntu
+  SKIP_LIBREOFFICE=1 SKIP_CLAUDE_DESKTOP='' SKIP_VSCODE=''
+  distro_codename() { printf 'resolute\n'; }
+  dpkg() { printf 'amd64\n'; }
+  sudo() { return 0; }
+  curl() { return 22; }
+  apt_gui_app_wanted() { return 1; }
+  apt_package_installed() { return 1; }
+  vendor_command_state() { printf 'foreign\n'; }
+  apt_repo_is_configured() { [[ "$1" == "$CLAUDE_DESKTOP_APT_URI" || "$1" == "$VSCODE_APT_URI" ]]; }
+  apt_trust_repo_key() { [[ "$1" == 'Claude Desktop' || "$1" == 'Visual Studio Code' ]]; }
+  apt_write_repo_sources() { printf '%s\n' "$1" >> "$db/registered-sources"; printf 'changed\n'; }
+  register_third_party_apt_repos >/dev/null
+  grep -Fxq '/etc/apt/sources.list.d/claude-desktop.sources' "$db/registered-sources" \
+    || fail_application 'an existing Claude Desktop archive was not maintained'
+  grep -Fxq '/etc/apt/sources.list.d/vscode.sources' "$db/registered-sources" \
+    || fail_application 'an existing VS Code archive was not maintained'
+  : > "$db/registered-sources"
+  SKIP_CLAUDE_DESKTOP=1 SKIP_VSCODE=1
+  register_third_party_apt_repos >/dev/null
+  [[ ! -s "$db/registered-sources" ]] || fail_application 'desktop opt-outs were ignored'
+)
 printf 'apt package state tests: ok\n'

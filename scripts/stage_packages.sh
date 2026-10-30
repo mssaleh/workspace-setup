@@ -251,7 +251,7 @@ ensure_xterm_kitty_terminfo() {
 # lists, refreshes the index once if any changed, and hands Kitware's keyring
 # to the package that carries its next rotation.
 register_third_party_apt_repos() {
-  local codename changed='' arch
+  local codename changed='' arch source_changed
   codename=$(distro_codename)
   arch=$(dpkg --print-architecture 2>/dev/null || printf 'amd64')
 
@@ -288,20 +288,21 @@ register_third_party_apt_repos() {
   # --- gh — GitHub's own archive (cli.github.com). ---
   if apt_trust_repo_key 'GitHub CLI' "$GITHUB_CLI_KEY_URL" \
       "$GITHUB_CLI_KEYRING" "${GITHUB_CLI_KEY_FINGERPRINTS[@]}"; then
-    if [[ -n $(apt_write_sources /etc/apt/sources.list.d/github-cli.list \
-        "$(printf 'deb [arch=%s signed-by=%s] %s stable main\n' \
-          "$arch" "$GITHUB_CLI_KEYRING" "$GITHUB_CLI_APT_URI")") ]]; then
+    source_changed=$(apt_write_repo_sources /etc/apt/sources.list.d/github-cli.sources \
+      "$GITHUB_CLI_APT_URI" stable main "$arch" "$GITHUB_CLI_KEYRING") || return 1
+    if [[ -n "$source_changed" ]]; then
       info "added the GitHub CLI apt repo (cli.github.com)"
       changed=1
     fi
   fi
 
   # --- kubectl — the Kubernetes project's archive (pkgs.k8s.io). ---
-  if [[ "$(vendor_command_state kubectl kubectl "$KUBERNETES_APT_URI")" == wanted ]] \
+  if [[ "$(vendor_command_state kubectl kubectl "$KUBERNETES_APT_URI")" != foreign ]] \
      && apt_trust_repo_key kubectl "$KUBERNETES_KEY_URL" \
         "$KUBERNETES_KEYRING" "$KUBERNETES_KEY_FINGERPRINT"; then
-    if [[ -n $(apt_write_sources /etc/apt/sources.list.d/kubernetes.list \
-        "$(printf 'deb [signed-by=%s] %s /\n' "$KUBERNETES_KEYRING" "$KUBERNETES_APT_URI")") ]]; then
+    source_changed=$(apt_write_repo_sources /etc/apt/sources.list.d/kubernetes.sources \
+      "$KUBERNETES_APT_URI" / '' '' "$KUBERNETES_KEYRING") || return 1
+    if [[ -n "$source_changed" ]]; then
       info "added the kubectl apt repo (pkgs.k8s.io, ${KUBERNETES_MINOR} stable)"
       changed=1
     fi
@@ -314,9 +315,9 @@ register_third_party_apt_repos() {
     apt_write_sources "$GOOGLE_CLOUD_KUBECTL_PREFERENCES_FILE" \
       "$(printf 'Package: kubectl\nPin: origin packages.cloud.google.com\nPin-Priority: -1\n')" \
       >/dev/null || return 1
-    if [[ -n $(apt_write_sources /etc/apt/sources.list.d/google-cloud-sdk.list \
-        "$(printf 'deb [arch=%s signed-by=%s] %s cloud-sdk main\n' \
-          "$arch" "$GOOGLE_CLOUD_KEYRING" "$GOOGLE_CLOUD_APT_URI")") ]]; then
+    source_changed=$(apt_write_repo_sources /etc/apt/sources.list.d/google-cloud-sdk.sources \
+      "$GOOGLE_CLOUD_APT_URI" cloud-sdk main "$arch" "$GOOGLE_CLOUD_KEYRING") || return 1
+    if [[ -n "$source_changed" ]]; then
       info "added the Google Cloud CLI apt repo"
       changed=1
     fi
@@ -327,9 +328,10 @@ register_third_party_apt_repos() {
      && curl -fsI "$AZURE_CLI_APT_URI/dists/$codename/Release" >/dev/null 2>&1; then
     if apt_trust_repo_key 'Azure CLI' "$AZURE_CLI_KEY_URL" \
         "$AZURE_CLI_KEYRING" "$AZURE_CLI_KEY_FINGERPRINT"; then
-      if [[ -n $(apt_write_sources /etc/apt/sources.list.d/azure-cli.sources \
+      source_changed=$(apt_write_sources /etc/apt/sources.list.d/azure-cli.sources \
           "$(printf 'Types: deb\nURIs: %s\nSuites: %s\nComponents: main\nArchitectures: %s\nSigned-By: %s\n' \
-            "$AZURE_CLI_APT_URI" "$codename" "$arch" "$AZURE_CLI_KEYRING")") ]]; then
+            "$AZURE_CLI_APT_URI" "$codename" "$arch" "$AZURE_CLI_KEYRING")") || return 1
+      if [[ -n "$source_changed" ]]; then
         info "added the Azure CLI apt repo ($codename)"
         changed=1
       fi
@@ -339,23 +341,25 @@ register_third_party_apt_repos() {
   fi
 
   # --- helm — helm.sh's current official archive (packages.buildkite.com). ---
-  if [[ "$(vendor_command_state helm helm "$HELM_APT_URI")" == wanted ]] \
+  if [[ "$(vendor_command_state helm helm "$HELM_APT_URI")" != foreign ]] \
      && apt_trust_repo_key helm "$HELM_KEY_URL" \
         "$HELM_KEYRING" "$HELM_KEY_FINGERPRINT"; then
-    if [[ -n $(apt_write_sources /etc/apt/sources.list.d/helm-stable-debian.list \
-        "$(printf 'deb [signed-by=%s] %s any main\n' "$HELM_KEYRING" "$HELM_APT_URI")") ]]; then
+    source_changed=$(apt_write_repo_sources /etc/apt/sources.list.d/helm-stable-debian.sources \
+      "$HELM_APT_URI" any main '' "$HELM_KEYRING") || return 1
+    if [[ -n "$source_changed" ]]; then
       info "added the helm apt repo (packages.buildkite.com)"
       changed=1
     fi
   fi
 
   # --- Claude Desktop — Anthropic's archive (downloads.claude.ai). ---
-  if apt_gui_app_wanted claude-desktop "${SKIP_CLAUDE_DESKTOP:-}"; then
+  if [[ -z "${SKIP_CLAUDE_DESKTOP:-}" ]] \
+     && { apt_gui_app_wanted claude-desktop '' || apt_repo_is_configured "$CLAUDE_DESKTOP_APT_URI"; }; then
     if apt_trust_repo_key 'Claude Desktop' "$CLAUDE_DESKTOP_KEY_URL" \
         "$CLAUDE_DESKTOP_KEYRING" "$CLAUDE_DESKTOP_KEY_FINGERPRINT"; then
-      if [[ -n $(apt_write_sources /etc/apt/sources.list.d/claude-desktop.list \
-          "$(printf 'deb [arch=amd64,arm64 signed-by=%s] %s stable main\n' \
-            "$CLAUDE_DESKTOP_KEYRING" "$CLAUDE_DESKTOP_APT_URI")") ]]; then
+      source_changed=$(apt_write_repo_sources /etc/apt/sources.list.d/claude-desktop.sources \
+        "$CLAUDE_DESKTOP_APT_URI" stable main 'amd64 arm64' "$CLAUDE_DESKTOP_KEYRING") || return 1
+      if [[ -n "$source_changed" ]]; then
         info "added the Claude Desktop apt repo (downloads.claude.ai)"
         changed=1
       fi
@@ -365,12 +369,13 @@ register_third_party_apt_repos() {
   fi
 
   # --- Visual Studio Code — packages.microsoft.com/repos/code. ---
-  if apt_gui_app_wanted code "${SKIP_VSCODE:-}"; then
+  if [[ -z "${SKIP_VSCODE:-}" ]] \
+     && { apt_gui_app_wanted code '' || apt_repo_is_configured "$VSCODE_APT_URI"; }; then
     if apt_trust_repo_key 'Visual Studio Code' "$VSCODE_KEY_URL" \
         "$VSCODE_KEYRING" "$VSCODE_KEY_FINGERPRINT"; then
-      if [[ -n $(apt_write_sources /etc/apt/sources.list.d/vscode.list \
-          "$(printf 'deb [arch=amd64,arm64 signed-by=%s] %s stable main\n' \
-            "$VSCODE_KEYRING" "$VSCODE_APT_URI")") ]]; then
+      source_changed=$(apt_write_repo_sources /etc/apt/sources.list.d/vscode.sources \
+        "$VSCODE_APT_URI" stable main 'amd64 arm64' "$VSCODE_KEYRING") || return 1
+      if [[ -n "$source_changed" ]]; then
         info "added the Visual Studio Code apt repo (packages.microsoft.com)"
         changed=1
       fi
@@ -389,9 +394,10 @@ register_third_party_apt_repos() {
     # archive is configured would leave the host with no installable Node at
     # all. It is written first so the two can never be out of step.
     install_nodesource_pin || return 1
-    if [[ -n $(apt_write_sources "$NODESOURCE_SOURCES" \
+    source_changed=$(apt_write_sources "$NODESOURCE_SOURCES" \
         "$(printf 'Types: deb\nURIs: %s\nSuites: nodistro\nComponents: main\nArchitectures: %s\nSigned-By: %s\n' \
-          "$NODESOURCE_APT_URI" "$arch" "$NODESOURCE_KEYRING")") ]]; then
+          "$NODESOURCE_APT_URI" "$arch" "$NODESOURCE_KEYRING")") || return 1
+    if [[ -n "$source_changed" ]]; then
       info "added the NodeSource apt repo (deb.nodesource.com, ${NODE_MAJOR}.x)"
       changed=1
     fi
@@ -402,16 +408,18 @@ register_third_party_apt_repos() {
   local kitware_registered=''
   if [[ "$DISTRO" == ubuntu && -n "$codename" ]]; then
     if apt_package_installed kitware-archive-keyring \
-       && [[ -f /etc/apt/sources.list.d/kitware.list ]]; then
+       && apt_repo_is_configured "$KITWARE_APT_URI"; then
       kitware_registered=1  # its own keyring package owns the key and rotation
     elif ! curl -fsI "${KITWARE_APT_URI}dists/${codename}/Release" >/dev/null 2>&1; then
       info "Kitware publishes no CMake archive for Ubuntu $codename — using the distribution package"
     elif apt_trust_repo_key CMake "$KITWARE_KEY_URL" \
         "$KITWARE_KEYRING" "$KITWARE_KEY_FINGERPRINT"; then
       kitware_registered=1
-      if [[ -n $(apt_write_sources /etc/apt/sources.list.d/kitware.list \
-          "$(printf 'deb [signed-by=%s] %s %s main\n' \
-            "$KITWARE_KEYRING" "$KITWARE_APT_URI" "$codename")") ]]; then
+    fi
+    if [[ -n "$kitware_registered" ]]; then
+      source_changed=$(apt_write_repo_sources /etc/apt/sources.list.d/kitware.sources \
+        "$KITWARE_APT_URI" "$codename" main '' "$KITWARE_KEYRING") || return 1
+      if [[ -n "$source_changed" ]]; then
         info "added the Kitware CMake apt repo (apt.kitware.com, $codename)"
         changed=1
       fi

@@ -134,6 +134,11 @@ This is automation for a conventional hand-configured machine, not a settings ma
 | MCP configuration | native agent commands, from `manifests/mcp.tsv` |
 | Claude plugins and marketplaces | `claude plugin`, from `manifests/plugins.tsv` |
 
+Vendor apt entries use deb822 `.sources` files. Matching legacy `.list`
+entries migrate with inactive `.list.bak` backups; existing backups are
+retained. Unrecognized legacy entries are preserved and stop setup for
+reconciliation. Sources belonging to other applications are left alone.
+
 Existing application providers are checked locally before apt installation.
 LibreOffice and VS Code accept their declared Snap and Flatpak equivalents;
 GNOME Extension Manager accepts its Flathub package. Store availability alone

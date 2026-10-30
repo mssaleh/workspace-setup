@@ -17,6 +17,20 @@ export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
 scratch=$(mktemp -d)
 trap 'rm -rf "$scratch"' EXIT
 
+printf '\n== Vendor apt source migration preserves index targets ==\n'
+source_dir=/etc/apt/sources.list.d
+apt-get indextargets --no-release-info --format '$(IDENTIFIER)|$(ARCHITECTURE)|$(REPO_URI)|$(COMPONENT)' \
+  | LC_ALL=C sort -u > "$scratch/targets.before"
+sudo mv "$source_dir/google-cloud-sdk.sources" "$scratch/google-cloud-sdk.sources"
+printf 'deb [arch=%s signed-by=%s] %s cloud-sdk main\n' \
+  "$(dpkg --print-architecture)" "$GOOGLE_CLOUD_KEYRING" "$GOOGLE_CLOUD_APT_URI" \
+  | sudo tee "$source_dir/google-cloud-sdk.list" >/dev/null
+bash "$HARNESS_REPO/setup.sh" host
+[[ ! -e "$source_dir/google-cloud-sdk.list" && -f "$source_dir/google-cloud-sdk.list.bak" ]]
+apt-get indextargets --no-release-info --format '$(IDENTIFIER)|$(ARCHITECTURE)|$(REPO_URI)|$(COMPONENT)' \
+  | LC_ALL=C sort -u > "$scratch/targets.after"
+cmp "$scratch/targets.before" "$scratch/targets.after"
+
 printf '\n== Existing rustup without its compiler is repaired ==\n'
 rustup toolchain uninstall stable
 rustup default none

@@ -290,7 +290,7 @@ install_cloud_clis() {
   if upstream_artifact_needed gddy "$HOME/.local/bin/gddy" "$HOME/.local/bin/gddy" --version; then
     tmp=$(mktemp -d) || return 1
     if ! curl -fsSL "$GODADDY_INSTALL_URL" -o "$tmp/install.sh" \
-        || ! bash "$tmp/install.sh" --prefix "$tmp/bin" </dev/null \
+        || ! PATH="$tmp/bin:$PATH" bash "$tmp/install.sh" --prefix "$tmp/bin" </dev/null \
         || ! "$tmp/bin/gddy" --version \
         || ! upstream_place_artifact gddy "$tmp/bin/gddy" "$HOME/.local/bin/gddy"; then
       status=1
