@@ -42,5 +42,6 @@ docker image inspect --format '{{.Id}}' "$image" > "$results/image-id"
 # sudo operates only inside this container. No host socket, credentials, ports,
 # devices, or writable host directories are attached.
 docker run --name "$container" --cap-drop NET_RAW --network bridge \
+  --env UV_CONCURRENT_DOWNLOADS \
   --volume "$results/source:/repo:ro" "$image" \
   bash /repo/tests/host-integration/check.sh 2>&1 | tee "$results/run.log"

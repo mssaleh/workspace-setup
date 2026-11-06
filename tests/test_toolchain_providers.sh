@@ -23,6 +23,9 @@ cat > "$HOME/.cargo/bin/rustup" <<EOF
 #!/bin/sh
 case "\$1 \$2" in
   'which rustc') test -f "$TEST_TMP/rust-toolchain" ;;
+  'update stable')
+    printf 'update stable\\n' >> "$TEST_TMP/rust-calls"
+    test ! -e "$TEST_TMP/fail-rust-update" ;;
   'default stable') touch "$TEST_TMP/rust-toolchain" ;;
   *) printf 'rustup 1.0.0\\n' ;;
 esac
@@ -43,6 +46,11 @@ cat > "$HOME/.local/bin/uv" <<EOF
 case "\$1 \$2" in
   "self update") : > "$TEST_TMP/uv-self-update" ;;
   "--version "*) printf 'uv 0.1.0 (x86_64-unknown-linux-gnu)\\n' ;;
+  "tool list") printf 'markitdown v0.1.0\\ncustom-tool v1.0.0\\n' ;;
+  "tool install")
+    test "\$3" = --upgrade || exit 8
+    printf '%s\\n' "\$4" >> "$TEST_TMP/uv-tool-calls"
+    test ! -e "$TEST_TMP/fail-uv-tool-update" ;;
 esac
 EOF
 chmod +x "$HOME/.local/bin/uv"
@@ -68,6 +76,19 @@ upstream_latest_version() { printf '%s\n' "$STUB_UV_RELEASE"; }
 
 stage_toolchains
 [[ ! -e "$TEST_TMP/uv-self-update" ]] || { printf 'FAIL: a current uv was updated\n' >&2; exit 1; }
+[[ "$(cat "$TEST_TMP/rust-calls")" == 'update stable' ]]
+[[ "$(cat "$TEST_TMP/uv-tool-calls")" == $'markitdown[all]\nazure-cli' ]]
+
+touch "$TEST_TMP/fail-rust-update"
+if stage_toolchains >/dev/null 2>&1; then
+  printf 'FAIL: a failed Rust update returned success\n' >&2; exit 1
+fi
+rm "$TEST_TMP/fail-rust-update"
+touch "$TEST_TMP/fail-uv-tool-update"
+if stage_toolchains >/dev/null 2>&1; then
+  printf 'FAIL: a failed uv tool update returned success\n' >&2; exit 1
+fi
+rm "$TEST_TMP/fail-uv-tool-update"
 
 # A standalone uv behind its release updates itself.
 STUB_UV_RELEASE=0.2.0

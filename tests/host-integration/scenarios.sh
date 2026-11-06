@@ -19,7 +19,7 @@ trap 'rm -rf "$scratch"' EXIT
 
 printf '\n== Vendor apt source migration preserves index targets ==\n'
 source_dir=/etc/apt/sources.list.d
-apt-get indextargets --no-release-info --format '$(IDENTIFIER)|$(ARCHITECTURE)|$(REPO_URI)|$(COMPONENT)' \
+apt-get indextargets --no-release-info --format "\$(IDENTIFIER)|\$(ARCHITECTURE)|\$(REPO_URI)|\$(COMPONENT)" \
   | LC_ALL=C sort -u > "$scratch/targets.before"
 sudo mv "$source_dir/google-cloud-sdk.sources" "$scratch/google-cloud-sdk.sources"
 printf 'deb [arch=%s signed-by=%s] %s cloud-sdk main\n' \
@@ -27,7 +27,7 @@ printf 'deb [arch=%s signed-by=%s] %s cloud-sdk main\n' \
   | sudo tee "$source_dir/google-cloud-sdk.list" >/dev/null
 bash "$HARNESS_REPO/setup.sh" host
 [[ ! -e "$source_dir/google-cloud-sdk.list" && -f "$source_dir/google-cloud-sdk.list.bak" ]]
-apt-get indextargets --no-release-info --format '$(IDENTIFIER)|$(ARCHITECTURE)|$(REPO_URI)|$(COMPONENT)' \
+apt-get indextargets --no-release-info --format "\$(IDENTIFIER)|\$(ARCHITECTURE)|\$(REPO_URI)|\$(COMPONENT)" \
   | LC_ALL=C sort -u > "$scratch/targets.after"
 cmp "$scratch/targets.before" "$scratch/targets.after"
 
@@ -38,6 +38,23 @@ if rustup which rustc >/dev/null 2>&1; then exit 1; fi
 stage_toolchains
 rustup which rustc
 rustc --version
+
+printf '\n== Declared tools update while custom toolchains and tools survive ==\n'
+rustup toolchain install 1.96 --profile minimal --no-self-update
+rustup default 1.96
+selected_rust=$(rustup show active-toolchain)
+uv tool install cowsay
+custom_uv=$(uv tool list | awk '$1 == "cowsay" { print }')
+npm install --global --prefix "$HOME/.npm/packages" cf@1.0.0-beta.25 semver@latest
+custom_npm=$(upstream_sha256 "$HOME/.npm/packages/lib/node_modules/semver/package.json")
+cf_latest=$(npm view cf@latest version)
+stage_toolchains
+[[ "$(rustup show active-toolchain)" == "$selected_rust" ]]
+[[ "$(uv tool list | awk '$1 == "cowsay" { print }')" == "$custom_uv" ]]
+[[ "$(upstream_sha256 "$HOME/.npm/packages/lib/node_modules/semver/package.json")" == "$custom_npm" ]]
+[[ "$(npm ls --global --prefix "$HOME/.npm/packages" --depth=0 --json cf \
+  | jq -r '.dependencies.cf.version')" == "$cf_latest" ]]
+rustup default stable
 
 printf '\n== Missing AWS launchers are restored from the managed payload ==\n'
 rm "$HOME/.local/bin/aws" "$HOME/.local/bin/aws_completer"

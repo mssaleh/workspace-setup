@@ -120,14 +120,14 @@ apt_write_sources() {
   printf 'changed\n'
 }
 
-# apt_write_repo_sources <path> <uri> <suite> <components> <architectures> <keyring>
+# apt_write_repo_sources <path> <uri> <suite> <components> <architectures> <keyring> [previous-uri]
 # APT 3.2's modernize-sources drops arch=; write the declared fields explicitly.
 # https://github.com/Debian/apt/blob/main/apt-private/private-sources.cc
 apt_write_repo_sources() {
   local path="$1" uri="$2" suite="$3" components="$4" architectures="$5" keyring="$6"
   local legacy="${1%.sources}.list" options="signed-by=$6" expected content changed
   [[ -z "$architectures" ]] || options="arch=${architectures// /,} $options"
-  expected="deb [$options] $uri $suite${components:+ $components}"
+  expected="deb [$options] ${7:-$uri} $suite${components:+ $components}"
   if [[ -e "$legacy" || -L "$legacy" ]]; then
     if [[ ! -f "$legacy" || ! -r "$legacy" || -L "$legacy" ]] \
         || [[ "$(sed '/^[[:space:]]*#/d; /^[[:space:]]*$/d; s/^[[:space:]]*//; s/[[:space:]]*$//' "$legacy")" != "$expected" ]]; then
@@ -240,6 +240,9 @@ libreoffice_installed() {
 apt_simulated_removals() {
   local verb="$1" simulation
   shift
+  if [[ "$verb" == install && "${INSTALL_RECOMMENDS:-1}" == 0 ]]; then
+    set -- --no-install-recommends "$@"
+  fi
   simulation=$(sudo "${APT_ENV[@]}" "$PKGMGR" "$verb" -s -y "$@") || {
     warn "could not simulate $PKGMGR $verb $*"
     return 1

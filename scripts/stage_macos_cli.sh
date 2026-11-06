@@ -22,11 +22,22 @@ stage_macos_cli() {
   fi
 
   for command_name in node npm npx corepack; do
+    if [[ -L "$HOME/.local/bin/$command_name" \
+          && "$(readlink "$HOME/.local/bin/$command_name")" == "$BREW_PREFIX/opt/node@24/bin/$command_name" ]]; then
+      if [[ -x "$node_bin/$command_name" ]]; then
+        ln -sfn "$node_bin/$command_name" "$HOME/.local/bin/$command_name" || return 1
+      else
+        rm -f "$HOME/.local/bin/$command_name" || return 1
+      fi
+    fi
     [[ -x "$node_bin/$command_name" ]] || continue
     ensure_cli_symlink "$node_bin/$command_name" "$HOME/.local/bin/$command_name"
   done
 
-  ensure_cli_symlink "$BREW_PREFIX/opt/python@3.14/bin/python3.14" "$HOME/.local/bin/python3.14"
+  ensure_cli_symlink "$BREW_PREFIX/opt/python@$PYTHON_MINOR/bin/python$PYTHON_MINOR" "$HOME/.local/bin/python$PYTHON_MINOR"
+  for command_name in python python3; do
+    ensure_cli_symlink "$BREW_PREFIX/opt/python@$PYTHON_MINOR/libexec/bin/$command_name" "$HOME/.local/bin/$command_name"
+  done
 }
 
 # https://docs.cloud.google.com/sdk/docs/install-sdk#mac

@@ -7,6 +7,10 @@
 # created under $HOME.
 # shellcheck disable=SC2034 # arrays are consumed by separately sourced stages
 
+# Host runtime release lines; package managers select their current patches.
+NODE_MAJOR=26
+PYTHON_MINOR=3.14
+
 # macOS system/toolbox formulae. This list is consumed only where PKGMGR is
 # brew, so it carries nothing a Mac does not want: xsel is an X11 clipboard
 # client and lives in PACKAGES_APT alone.
@@ -33,7 +37,7 @@ PACKAGES_BREW=(
   jq yq pandoc sevenzip
   direnv
   cmake ninja
-  node@24 python@3.14 uv ruff
+  "node@$NODE_MAJOR" "python@$PYTHON_MINOR" uv ruff
   helm kubernetes-cli cosign container-compose
   ffmpeg poppler nano
   himalaya ncdu smartmontools pkgconf
@@ -113,6 +117,7 @@ PACKAGES_APT=(
   jq pandoc 7zip
   direnv
   cmake ninja-build
+  "python$PYTHON_MINOR" "python$PYTHON_MINOR-venv"
   ffmpeg poppler-utils nano
   ncdu smartmontools xsel pkg-config
   ca-certificates gnupg lsb-release unzip xz-utils fontconfig ncurses-bin
@@ -260,11 +265,6 @@ APT_APPLICATION_EQUIVALENTS=(
 # provisioned over ssh and used at its own display later.
 PACKAGES_APT_GNOME=(gnome-shell-extension-manager)
 
-# The Node.js major series installed from NodeSource on Linux. Bump to move the
-# host onto a new release line; the stage reinstalls when the installed major
-# no longer matches.
-NODE_MAJOR=24
-
 # apt pin making NodeSource the only permitted source of the Node runtime. The
 # first stanza outranks an archive's default 500; the second denies every other
 # origin, so neither `apt install nodejs` nor `apt install npm` can reach the
@@ -277,22 +277,16 @@ NODESOURCE_PINNED_PACKAGES=(nodejs npm nodejs-doc libnode-dev)
 # on Ubuntu; the distribution trails it by two minor releases.
 PROVIDERS_UBUNTU_PPA=(libreoffice git)
 
-# Vendor-archive packages that also appear in PACKAGES_APT. Registered before
-# the batch install so a fresh host resolves to the newer candidate, then
-# re-checked so a host already carrying the distribution build moves across.
-APT_REPO_UPGRADED_PACKAGES=(git gh cmake)
-
 # ── vendor apt archives ────────────────────────────────────────────────────
 # One declaration per archive: key source, required fingerprint, keyring path,
 # and what the source line points at. All are registered before anything is
 # installed. A .asc keyring path keeps the key armoured, matching what that
 # publisher documents; apt accepts either form.
 
-# kubectl. Not in the distribution at all. The path pins a minor series; bump
-# KUBERNETES_MINOR to track a new one.
-KUBERNETES_MINOR=v1.36
-KUBERNETES_APT_URI="https://pkgs.k8s.io/core:/stable:/${KUBERNETES_MINOR}/deb"
-KUBERNETES_KEY_URL="https://pkgs.k8s.io/core:/stable:/${KUBERNETES_MINOR}/deb/Release.key"
+# kubectl resolves the stable release at install time, then uses its apt minor.
+# https://kubernetes.io/docs/tasks/tools/install-kubectl-linux/
+KUBERNETES_STABLE_URL=https://dl.k8s.io/release/stable.txt
+KUBERNETES_APT_URI=https://pkgs.k8s.io/core:/stable:
 KUBERNETES_KEYRING=/etc/apt/keyrings/kubernetes-apt-keyring.gpg
 KUBERNETES_KEY_FINGERPRINT=DE15B14486CD377B9E876E1A234654DA9A296436
 

@@ -6,19 +6,22 @@ TEST_TMP=$(mktemp -d "${TMPDIR:-/tmp}/macos-cli-test.XXXXXX")
 trap 'rm -rf "$TEST_TMP"' EXIT
 HOME="$TEST_TMP/home"
 BREW_PREFIX="$TEST_TMP/brew"
-NODE_MAJOR=24
-export HOME BREW_PREFIX NODE_MAJOR
+export HOME BREW_PREFIX
 . "$TEST_ROOT/lib/manifest.sh"
-mkdir -p "$HOME" "$BREW_PREFIX/opt/node@24/bin" "$BREW_PREFIX/bin" "$BREW_PREFIX/opt/python@3.14/bin"
+mkdir -p "$HOME" "$BREW_PREFIX/opt/node@$NODE_MAJOR/bin" "$BREW_PREFIX/bin" \
+  "$BREW_PREFIX/opt/python@$PYTHON_MINOR/bin" "$BREW_PREFIX/opt/python@$PYTHON_MINOR/libexec/bin"
 for command_name in "${BREW_CLI_COMMANDS[@]}"; do
   printf '#!/bin/sh\n' > "$BREW_PREFIX/bin/$command_name"
   chmod +x "$BREW_PREFIX/bin/$command_name"
 done
-cp "$BREW_PREFIX/bin/uv" "$BREW_PREFIX/opt/python@3.14/bin/python3.14"
+cp "$BREW_PREFIX/bin/uv" "$BREW_PREFIX/opt/python@$PYTHON_MINOR/bin/python$PYTHON_MINOR"
+for command_name in python python3; do
+  cp "$BREW_PREFIX/bin/uv" "$BREW_PREFIX/opt/python@$PYTHON_MINOR/libexec/bin/$command_name"
+done
 
-for command_name in node npm npx corepack; do
-  printf '#!/bin/sh\n' > "$BREW_PREFIX/opt/node@24/bin/$command_name"
-  chmod +x "$BREW_PREFIX/opt/node@24/bin/$command_name"
+for command_name in node npm npx; do
+  printf '#!/bin/sh\n' > "$BREW_PREFIX/opt/node@$NODE_MAJOR/bin/$command_name"
+  chmod +x "$BREW_PREFIX/opt/node@$NODE_MAJOR/bin/$command_name"
 done
 # shellcheck disable=SC1091
 . "$TEST_ROOT/lib/log.sh"
@@ -40,11 +43,32 @@ OS_KIND=macos stage_macos_cli >/dev/null
 for command_name in "${BREW_CLI_COMMANDS[@]}"; do
   [[ "$HOME/.local/bin/$command_name" -ef "$BREW_PREFIX/bin/$command_name" ]]
 done
-[[ "$HOME/.local/bin/python3.14" -ef "$BREW_PREFIX/opt/python@3.14/bin/python3.14" ]]
-for command_name in node npm npx corepack; do
-  [[ -L "$HOME/.local/bin/$command_name" ]]
-  [[ "$HOME/.local/bin/$command_name" -ef "$BREW_PREFIX/opt/node@24/bin/$command_name" ]]
+[[ "$HOME/.local/bin/python$PYTHON_MINOR" -ef "$BREW_PREFIX/opt/python@$PYTHON_MINOR/bin/python$PYTHON_MINOR" ]]
+for command_name in python python3; do
+  [[ "$HOME/.local/bin/$command_name" -ef "$BREW_PREFIX/opt/python@$PYTHON_MINOR/libexec/bin/$command_name" ]]
 done
+for command_name in node npm npx; do
+  [[ -L "$HOME/.local/bin/$command_name" ]]
+  [[ "$HOME/.local/bin/$command_name" -ef "$BREW_PREFIX/opt/node@$NODE_MAJOR/bin/$command_name" ]]
+done
+
+# Node 24 links migrate whether the old keg still exists or has been removed.
+mkdir -p "$BREW_PREFIX/opt/node@24/bin"
+cp "$BREW_PREFIX/bin/uv" "$BREW_PREFIX/opt/node@24/bin/node"
+cp "$BREW_PREFIX/bin/uv" "$BREW_PREFIX/opt/node@24/bin/corepack"
+for command_name in node npm npx corepack; do
+  ln -sfn "$BREW_PREFIX/opt/node@24/bin/$command_name" "$HOME/.local/bin/$command_name"
+done
+OS_KIND=macos stage_macos_cli >/dev/null
+for command_name in node npm npx; do
+  [[ "$HOME/.local/bin/$command_name" -ef "$BREW_PREFIX/opt/node@$NODE_MAJOR/bin/$command_name" ]]
+done
+[[ ! -e "$HOME/.local/bin/corepack" && ! -L "$HOME/.local/bin/corepack" ]]
+
+# Links to other providers are preserved.
+ln -sfn /user/chosen/node "$HOME/.local/bin/node"
+OS_KIND=macos stage_macos_cli >/dev/null 2>&1
+[[ "$(readlink "$HOME/.local/bin/node")" == /user/chosen/node ]]
 
 # A user-owned command is preserved, never replaced by a keg link.
 rm "$HOME/.local/bin/node"

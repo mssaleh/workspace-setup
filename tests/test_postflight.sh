@@ -99,16 +99,18 @@ chmod +x "$HOME/.cargo/bin/rustup"
 # shellcheck disable=SC2016 # literal content for the fixture's future shell
 printf '%s\n' 'export PATH="$HOME/.cargo/bin:$PATH"' > "$HOME/.cargo/env"
 printf '%s\n' '{}' > "$HOME/.config/uv/uv-receipt.json"
-mkdir -p "$BREW_PREFIX/bin" "$BREW_PREFIX/opt/node@${NODE_MAJOR}/bin" "$BREW_PREFIX/opt/python@3.14/bin" \
+mkdir -p "$BREW_PREFIX/bin" "$BREW_PREFIX/opt/node@${NODE_MAJOR}/bin" "$BREW_PREFIX/opt/python@$PYTHON_MINOR/bin" \
   "$HOME/.local/share/google-cloud-sdk/bin"
 for command_name in "${BREW_CLI_COMMANDS[@]}"; do
   cp "$HOME/.local/bin/$command_name" "$BREW_PREFIX/bin/$command_name"
   rm "$HOME/.local/bin/$command_name"
   ln -s "$BREW_PREFIX/bin/$command_name" "$HOME/.local/bin/$command_name"
 done
-printf '#!/bin/sh\nprintf "v24.0.0\\n"\n' > "$BREW_PREFIX/opt/node@${NODE_MAJOR}/bin/node"
+printf '#!/bin/sh\nprintf "v%s.0.0\\n"\n' "$NODE_MAJOR" > "$BREW_PREFIX/opt/node@${NODE_MAJOR}/bin/node"
 chmod +x "$BREW_PREFIX/opt/node@${NODE_MAJOR}/bin/node"
-cp "$BREW_PREFIX/bin/uv" "$BREW_PREFIX/opt/python@3.14/bin/python3.14"
+printf '#!/bin/sh\nprintf "Python %s.10\\n"\n' "$PYTHON_MINOR" > "$BREW_PREFIX/opt/python@$PYTHON_MINOR/bin/python$PYTHON_MINOR"
+chmod +x "$BREW_PREFIX/opt/python@$PYTHON_MINOR/bin/python$PYTHON_MINOR"
+ln -s "$BREW_PREFIX/opt/python@$PYTHON_MINOR/bin/python$PYTHON_MINOR" "$HOME/.local/bin/python3"
 cp "$HOME/.local/bin/gcloud" "$HOME/.local/share/google-cloud-sdk/bin/gcloud"
 rm "$HOME/.local/bin/gcloud"
 ln -s "$HOME/.local/share/google-cloud-sdk/bin/gcloud" "$HOME/.local/bin/gcloud"

@@ -171,6 +171,17 @@ apt_manifest_package_wanted nodejs || fail_application 'a Node Snap displaced th
   [[ -z "$(apt_write_repo_sources "$modern" https://vendor.invalid/ stable main 'amd64 arm64' /usr/share/keyrings/vendor.gpg)" ]] \
     || fail 'a migrated source changed on rerun'
 
+  printf 'deb [signed-by=%s] %s/v1.36/deb /\n' "$KUBERNETES_KEYRING" "$KUBERNETES_APT_URI" \
+    > "$tmp_root/kubernetes.list"
+  apt_write_repo_sources "$tmp_root/kubernetes.sources" "$KUBERNETES_APT_URI/v1.37/deb" \
+    / '' '' "$KUBERNETES_KEYRING" "$KUBERNETES_APT_URI/v1.36/deb" >/dev/null
+  [[ -f "$tmp_root/kubernetes.list.bak" && ! -e "$tmp_root/kubernetes.list" ]] \
+    || fail 'a Kubernetes minor change did not migrate the matching legacy source'
+  grep -Fxq "URIs: $KUBERNETES_APT_URI/v1.37/deb" "$tmp_root/kubernetes.sources" \
+    || fail 'a Kubernetes minor change retained the old archive'
+  [[ -z "$(apt_write_repo_sources "$tmp_root/kubernetes.sources" "$KUBERNETES_APT_URI/v1.37/deb" \
+    / '' '' "$KUBERNETES_KEYRING")" ]] || fail 'the current Kubernetes archive changed on rerun'
+
   printf 'deb https://custom.invalid/ stable main\n' > "$vendor_dir/custom.list"
   if apt_write_repo_sources "$vendor_dir/custom.sources" https://vendor.invalid/ stable main '' /usr/share/keyrings/vendor.gpg >/dev/null 2>&1; then
     fail 'an unrecognized legacy source was overwritten'

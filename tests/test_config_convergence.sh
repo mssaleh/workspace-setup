@@ -168,8 +168,8 @@ grep -Eq '^\[registry\]$' "$container_dst"
 [[ "$CONFIG_LAST_ACTION" == merged ]]
 
 # ~/.ssh/config is a file the setup tells you to edit, so an edited one must
-# converge rather than conflict forever. Only the two security directives are
-# asserted; connection tuning and host blocks are the user's.
+# converge rather than conflict forever. Baseline keys and terminal support
+# are added while connection tuning and host blocks remain the user's.
 ssh_src="$TEST_ROOT/dotfiles/ssh/config"
 ssh_dst="$TEST_TMP/ssh-config"
 # Host * is deliberately not the last block: a directive appended at end of
@@ -184,13 +184,14 @@ ssh -G -F "$ssh_dst" localhost >/dev/null 2>&1
 grep -Eq '^    ServerAliveCountMax 360$' "$ssh_dst"
 grep -Eq '^Host mini$' "$ssh_dst"
 grep -Eq '^Host trailing$' "$ssh_dst"
-# Neither directive may land in the specific block; both belong to Host *.
+# Baseline directives belong to Host *.
 awk '/^Host \*$/ { in_default = 1; next } /^Host /{ in_default = 0 }
-     /HashKnownHosts|UpdateHostKeys/ && !in_default { bad = 1 }
+     /HashKnownHosts|UpdateHostKeys|SetEnv/ && !in_default { bad = 1 }
      END { exit bad }' "$ssh_dst"
 # And they must be in force, not merely written.
 [[ "$(ssh -G -F "$ssh_dst" localhost 2>/dev/null | awk '$1 == "hashknownhosts" { print $2 }')" == yes ]]
 [[ "$(ssh -G -F "$ssh_dst" localhost 2>/dev/null | awk '$1 == "updatehostkeys" { print $2 }')" == true ]]
+[[ "$(ssh -G -F "$ssh_dst" localhost 2>/dev/null | awk '$1 == "setenv" { print $2 }')" == TERM=xterm-256color ]]
 
 # Re-running writes nothing.
 ssh_hash_before=$(config_sha256 "$ssh_dst")
@@ -207,6 +208,35 @@ grep -Eq '^[[:space:]]*HashKnownHosts no$' "$ssh_optout" || {
   exit 1
 }
 grep -Eq '^[[:space:]]*UpdateHostKeys yes$' "$ssh_optout"
+
+# Preserve other environment settings and explicit terminal choices.
+ssh_env="$TEST_TMP/ssh-config-env"
+printf '%s\n' 'Host *' '    HashKnownHosts yes' '    UpdateHostKeys yes' \
+  '    SetEnv COLORTERM=truecolor' > "$ssh_env"
+install_regular_file "$ssh_src" "$ssh_env" dotfiles/ssh/config 0600 merge_ssh_config
+ssh -G -F "$ssh_env" localhost 2>/dev/null > "$TEST_TMP/ssh-env-effective"
+grep -Fq 'COLORTERM=truecolor' "$TEST_TMP/ssh-env-effective"
+grep -Fq 'TERM=xterm-256color' "$TEST_TMP/ssh-env-effective"
+printf '%s\n' 'Host before' '    SetEnv "NOTE=before # pager"' \
+  'Host *' '    User fallback' 'Host after' '    SetEnv COLORTERM=truecolor' > "$ssh_env"
+install_regular_file "$ssh_src" "$ssh_env" dotfiles/ssh/config 0600 merge_ssh_config
+for env_host in before after localhost; do
+  ssh -G -F "$ssh_env" "$env_host" 2>/dev/null > "$TEST_TMP/ssh-env-effective"
+  grep -Fq 'TERM=xterm-256color' "$TEST_TMP/ssh-env-effective"
+  case "$env_host" in
+    before) grep -Fq 'NOTE=before # pager' "$TEST_TMP/ssh-env-effective" ;;
+    after) grep -Fq 'COLORTERM=truecolor' "$TEST_TMP/ssh-env-effective" ;;
+  esac
+done
+ssh_hash_before=$(config_sha256 "$ssh_env")
+install_regular_file "$ssh_src" "$ssh_env" dotfiles/ssh/config 0600 merge_ssh_config
+[[ "$CONFIG_LAST_ACTION" == unchanged ]]
+[[ "$(config_sha256 "$ssh_env")" == "$ssh_hash_before" ]]
+for explicit_term in 'SetEnv TERM=vt100' 'SetEnv="TERM=vt100"'; do
+  printf 'Host *\n    %s\n' "$explicit_term" > "$ssh_env"
+  install_regular_file "$ssh_src" "$ssh_env" dotfiles/ssh/config 0600 merge_ssh_config
+  [[ "$(ssh -G -F "$ssh_env" localhost 2>/dev/null | awk '$1 == "setenv" { print $2 }')" == TERM=vt100 ]]
+done
 
 # Without a Host * block there is nowhere a default can safely go, and a file
 # ssh cannot parse is not one to merge into. Both are reported, not guessed at.

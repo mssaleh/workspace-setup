@@ -373,8 +373,8 @@ function ds() {
   __ssh_restore_term $?
 }
 
-# Managed hosts install xterm-kitty terminfo without a GUI dependency, so plain
-# `ssh` preserves TERM. `s` advertises xterm-256color to unmanaged hosts.
+# OpenSSH config selects xterm-256color for plain SSH, including unmanaged hosts.
+# `s` also requests that terminal type explicitly.
 # -S none, as for ds: plain ssh keeps the shared connection.
 function s() { TERM=xterm-256color command ssh -S none "$@"; __ssh_restore_term $?; }
 

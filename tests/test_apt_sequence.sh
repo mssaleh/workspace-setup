@@ -47,7 +47,7 @@ branch=$(linux_branch)
 # ── 1. Registration precedes every install in the branch ───────────────────
 # Anything that puts a package on the host: the PACKAGES_APT batch, the
 # upgrade-to-candidate pass, and each vendor package installed by name.
-register_line=$(grep -n '^ *register_third_party_apt_repos$' <<< "$branch" | head -n1 | cut -d: -f1)
+register_line=$(grep -nE '^ *register_third_party_apt_repos( |$)' <<< "$branch" | head -n1 | cut -d: -f1)
 [[ -n "$register_line" ]] || fail 'the Linux branch never registers the vendor repositories'
 
 first_install=$(grep -nE 'apt_install_packages|apt_install_candidate|install_nodesource_package|install_codex_app|"\$PKGMGR" install' \
@@ -90,7 +90,7 @@ fi
 # ── 4. Every declared archive is registered in that phase ──────────────────
 # A new vendor repository added to the install half would reintroduce exactly
 # the ordering defect this file exists to prevent.
-for archive in KUBERNETES HELM CLAUDE_DESKTOP NODESOURCE KITWARE GITHUB_CLI GOOGLE_CLOUD AZURE_CLI; do
+for archive in HELM CLAUDE_DESKTOP NODESOURCE KITWARE GITHUB_CLI GOOGLE_CLOUD AZURE_CLI; do
   key_var="${archive}_KEY_URL"
   [[ -n "${!key_var:-}" ]] || fail "$key_var is not declared in the manifest"
   grep -q "\$$key_var" <<< "$register_body" \
@@ -126,6 +126,20 @@ fi
 # shellcheck disable=SC1091
 . "$TEST_ROOT/scripts/stage_packages.sh"
 sudo() { "$@"; }          # the fixtures are ordinary files in a temp directory
+
+# Kubernetes follows the stable endpoint across minors and rejects prereleases.
+(
+  stable_release=v1.37.2
+  curl() { [[ "$*" == "-fsSL $KUBERNETES_STABLE_URL" ]] && printf '%s\n' "$stable_release"; }
+  [[ "$(kubernetes_apt_uri)" == https://pkgs.k8s.io/core:/stable:/v1.37/deb ]]
+  stable_release=v1.38.0
+  [[ "$(kubernetes_apt_uri)" == https://pkgs.k8s.io/core:/stable:/v1.38/deb ]]
+  for stable_release in v1.38.0-rc.1 latest '' 'v1.37.2/other'; do
+    if kubernetes_apt_uri >/dev/null; then fail 'an invalid stable release selected a Kubernetes archive'; fi
+  done
+  curl() { return 22; }
+  if kubernetes_apt_uri >/dev/null; then fail 'a failed stable lookup selected a Kubernetes archive'; fi
+)
 
 # The fixture lives in a directory of its own: apt_write_sources ensures the
 # parent directory exists, and pointing that at a shared temp root would have

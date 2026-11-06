@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # scripts/stage_packages.sh — install the cross-platform CLI toolbox.
-# Installs the declared provider inventory. Idempotent: skips installed packages.
+# Installs the declared provider inventory and refreshes Linux apt candidates.
 #
 # Strategy:
 #   - Homebrew (macOS): one batch install of PACKAGES_BREW after adding the
@@ -241,6 +241,13 @@ ensure_xterm_kitty_terminfo() {
   ok "xterm-kitty terminfo installed for graphical and headless sessions"
 }
 
+kubernetes_apt_uri() {
+  local version
+  version=$(curl -fsSL "$KUBERNETES_STABLE_URL") || return 1
+  [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
+  printf '%s/%s/deb\n' "$KUBERNETES_APT_URI" "${version%.*}"
+}
+
 # Register every third-party archive, before a single package is fetched.
 #
 # apt resolves a name against the archives configured at that moment, so a
@@ -251,7 +258,7 @@ ensure_xterm_kitty_terminfo() {
 # lists, refreshes the index once if any changed, and hands Kitware's keyring
 # to the package that carries its next rotation.
 register_third_party_apt_repos() {
-  local codename changed='' arch source_changed
+  local codename changed='' arch source_changed kubernetes_uri previous_uri
   codename=$(distro_codename)
   arch=$(dpkg --print-architecture 2>/dev/null || printf 'amd64')
 
@@ -297,14 +304,24 @@ register_third_party_apt_repos() {
   fi
 
   # --- kubectl — the Kubernetes project's archive (pkgs.k8s.io). ---
-  if [[ "$(vendor_command_state kubectl kubectl "$KUBERNETES_APT_URI")" != foreign ]] \
-     && apt_trust_repo_key kubectl "$KUBERNETES_KEY_URL" \
-        "$KUBERNETES_KEYRING" "$KUBERNETES_KEY_FINGERPRINT"; then
-    source_changed=$(apt_write_repo_sources /etc/apt/sources.list.d/kubernetes.sources \
-      "$KUBERNETES_APT_URI" / '' '' "$KUBERNETES_KEYRING") || return 1
-    if [[ -n "$source_changed" ]]; then
-      info "added the kubectl apt repo (pkgs.k8s.io, ${KUBERNETES_MINOR} stable)"
-      changed=1
+  if [[ "$(vendor_command_state kubectl kubectl "$KUBERNETES_APT_URI")" != foreign ]]; then
+    if kubernetes_uri=$(kubernetes_apt_uri) \
+        && apt_trust_repo_key kubectl "$kubernetes_uri/Release.key" \
+          "$KUBERNETES_KEYRING" "$KUBERNETES_KEY_FINGERPRINT"; then
+      previous_uri=$(awk '$1 == "deb" { print $(NF - 1) }' \
+        /etc/apt/sources.list.d/kubernetes.list 2>/dev/null || true)
+      if [[ "$previous_uri" != "$KUBERNETES_APT_URI/"* \
+            || ! "${previous_uri#"$KUBERNETES_APT_URI/"}" =~ ^v[0-9]+\.[0-9]+/deb$ ]]; then
+        previous_uri=''
+      fi
+      source_changed=$(apt_write_repo_sources /etc/apt/sources.list.d/kubernetes.sources \
+        "$kubernetes_uri" / '' '' "$KUBERNETES_KEYRING" "$previous_uri") || return 1
+      if [[ -n "$source_changed" ]]; then
+        info "added the kubectl apt repo ($kubernetes_uri)"
+        changed=1
+      fi
+    else
+      warn "kubectl: could not resolve or trust the latest stable apt repository; keeping existing sources"
     fi
   fi
 
@@ -508,7 +525,7 @@ install_vendor_package() {
   local pkg="$1" cmd="$2" uri="$3" docs="$4"
   case "$(vendor_command_state "$pkg" "$cmd" "$uri")" in
     managed)
-      ok "$pkg official apt package already installed"
+      apt_install_candidate "$pkg" || return 1
       ;;
     foreign)
       warn "preserving $pkg from an unrecognized provider at $(command -v "$cmd")"
@@ -617,20 +634,25 @@ stage_packages() {
       # Homebrew's package-level trust keeps vendor taps scoped to this inventory.
       # https://docs.brew.sh/Tap-Trust
       [[ "$pkg" != */* ]] || "$BREW_BIN" trust --formula "$pkg" || return 1
-      if pkg_installed "$pkg"; then
+      # brew install upgrades outdated formulae; keep host runtime patches current.
+      # https://docs.brew.sh/Manpage#install-options-formulacask-
+      if pkg_installed "$pkg" \
+          && [[ "$pkg" != "node@$NODE_MAJOR" && "$pkg" != "python@$PYTHON_MINOR" ]]; then
         : # already installed
       else
         missing+=("$pkg")
       fi
     done
     if ((${#missing[@]})); then
-      info "installing ${#missing[@]} missing brew packages…"
-      "$BREW_BIN" install "${missing[@]}"
+      info "installing current Homebrew formulae: ${missing[*]}"
+      HOMEBREW_NO_ASK=1 HOMEBREW_NO_INSTALL_CLEANUP=1 \
+      HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1 \
+        "$BREW_BIN" install "${missing[@]}" || return 1
     else
       ok "all brew packages already installed"
     fi
 
-    for pkg in "${PACKAGES_BREW_CLI_CASK[@]}"; do
+    for pkg in ${PACKAGES_BREW_CLI_CASK[@]+"${PACKAGES_BREW_CLI_CASK[@]}"}; do
       [[ "$pkg" != */* ]] || "$BREW_BIN" trust --cask "$pkg" || return 1
       # Microsoft's documented formula-to-cask migration preserves ~/.azure.
       # https://learn.microsoft.com/cli/azure/install-azure-cli-macos
@@ -671,19 +693,18 @@ stage_packages() {
 
     # 1. Register every vendor archive, before a single package is fetched,
     #    with a single index refresh covering whatever it adds.
-    register_third_party_apt_repos
+    # Keep the verified provider across a Kubernetes minor's index replacement.
+    local kubectl_state
+    kubectl_state=$(vendor_command_state kubectl kubectl "$KUBERNETES_APT_URI")
+    register_third_party_apt_repos || return 1
 
-    # 2. apt-installable packages (only those actually in the default repos).
-    #    Filter out packages that aren't in this Ubuntu version's repos so a
-    #    missing name doesn't fail the whole batch; availability varies by
-    #    Ubuntu release.
+    # 2. apt selects current candidates for every declared package in one batch.
+    #    Unavailable packages use their declared fallback or are reported.
     local apt_pkgs=() fallback
     for pkg in "${PACKAGES_APT[@]}"; do
       apt_manifest_package_wanted "$pkg" || continue
       if apt-cache show "$pkg" >/dev/null 2>&1; then
-        if ! pkg_installed "$pkg"; then
-          apt_pkgs+=("$pkg")
-        fi
+        apt_pkgs+=("$pkg")
       elif fallback=$(apt_upstream_fallback "$pkg"); then
         info "apt: this release has no $pkg; $fallback comes from its upstream release below"
       else
@@ -691,22 +712,14 @@ stage_packages() {
       fi
     done
     if ((${#apt_pkgs[@]})); then
-      info "installing ${#apt_pkgs[@]} apt packages…"
-      apt_install_packages "${apt_pkgs[@]}"
+      info "ensuring declared apt packages are current…"
+      apt_report_removals install '' "${apt_pkgs[@]}" || return 1
+      apt_install_packages "${apt_pkgs[@]}" || return 1
     else
       ok "all apt packages already installed or unavailable (handled below)"
     fi
 
-    # 3. Packages the batch above skipped because a distribution build was
-    #    already installed. Their vendor archive is registered by now, so the
-    #    candidate is the newer one and this is what moves an existing host
-    #    across; on a converged host every one of them is a no-op.
-    local repo_pkg
-    for repo_pkg in "${APT_REPO_UPGRADED_PACKAGES[@]}"; do
-      apt_install_candidate "$repo_pkg" || return 1
-    done
-
-    # 4. Packages that exist only in a vendor archive. Each re-checks that its
+    # 3. Packages that exist only in a vendor archive. Each re-checks that its
     #    own archive is present, so a failed registration leaves the package
     #    uninstalled rather than letting another source answer to the name.
     if [[ -n "${SKIP_VSCODE:-}" ]]; then
@@ -741,8 +754,12 @@ stage_packages() {
 
     kubectl_leave_google_build \
       || warn "kubectl stays on Google Cloud's build; postflight reports it"
-    install_vendor_package kubectl kubectl "$KUBERNETES_APT_URI" \
-      https://kubernetes.io/docs/tasks/tools/install-kubectl-linux/
+    if [[ "$kubectl_state" == managed ]]; then
+      apt_install_candidate kubectl || return 1
+    else
+      install_vendor_package kubectl kubectl "$KUBERNETES_APT_URI" \
+        https://kubernetes.io/docs/tasks/tools/install-kubectl-linux/
+    fi
     install_vendor_package helm helm "$HELM_APT_URI" \
       https://helm.sh/docs/intro/install/
     install_vendor_package google-cloud-cli gcloud "$GOOGLE_CLOUD_APT_URI" \
@@ -751,7 +768,7 @@ stage_packages() {
       apt_install_candidate azure-cli || return 1
     fi
 
-    # 5. Node.js — the NodeSource build of the declared major. The repository
+    # 4. Node.js — the NodeSource build of the declared major. The repository
     #    and its pin went in at step 1, so apt cannot resolve `nodejs` to the
     #    distribution build here even as a dependency of something else.
     local node_installed node_major_installed=''
@@ -759,7 +776,7 @@ stage_packages() {
     [[ -n "$node_installed" ]] && node_major_installed=${node_installed%%.*}
 
     if [[ "$node_installed" == *nodesource* && "$node_major_installed" == "$NODE_MAJOR" ]]; then
-      ok "Node.js $node_installed already installed from NodeSource"
+      apt_install_candidate nodejs || return 1
     elif ! apt_repo_is_configured "$NODESOURCE_APT_URI"; then
       warn "Node.js: the NodeSource ${NODE_MAJOR}.x archive is not configured — leaving ${node_installed:-no Node} in place"
       warn "  see https://github.com/nodesource/distributions"
@@ -775,7 +792,7 @@ stage_packages() {
       install_nodesource_package || true
     fi
 
-    # 6. GUI applications. Each is opt-out for a headless host.
+    # 5. GUI applications. Each is opt-out for a headless host.
     if [[ -n "${SKIP_LIBREOFFICE:-}" ]]; then
       info "skipping LibreOffice (SKIP_LIBREOFFICE=1)"
     elif apt_preserve_application libreoffice; then
@@ -795,7 +812,7 @@ stage_packages() {
         || warn "  see https://code.claude.com/docs/en/desktop-linux"
     fi
 
-    # 7. The Codex app. This one cannot be pre-registered: OpenAI publish no
+    # 6. The Codex app. This one cannot be pre-registered: OpenAI publish no
     #    standalone signing key, so the package they publish is what installs
     #    the keyring and the source list. It is fetched only while that
     #    repository is absent; afterwards it is an ordinary apt package.
@@ -812,7 +829,7 @@ stage_packages() {
       esac
     fi
 
-    # 8. Tools NOT in apt at all — install via their official providers.
+    # 7. Tools NOT in apt at all — install via their official providers.
     #    Exact user-path artifacts are probed so another same-named command on
     #    PATH cannot accidentally satisfy the declared provider.
     mkdir -p "$HOME/.local/bin"

@@ -10,8 +10,9 @@ stage_toolchains() {
 
   # --- rustup ---
   if [[ -x "$HOME/.cargo/bin/rustup" && -f "$HOME/.cargo/env" ]]; then
+    "$HOME/.cargo/bin/rustup" update stable </dev/null || return 1
     if "$HOME/.cargo/bin/rustup" which rustc >/dev/null 2>&1; then
-      ok "rustup upstream install and active compiler already present"
+      ok "Rust stable is current; the selected compiler remains available"
     else
       info "rustup is present without an active compiler; installing stable…"
       "$HOME/.cargo/bin/rustup" default stable || return 1
@@ -70,9 +71,7 @@ stage_toolchains() {
   fi
 
   # --- Python applications owned by uv ---
-  # `uv tool install` is idempotent but still resolves the index on every call,
-  # so ask uv what it already has first. --upgrade is deliberately not passed:
-  # publisher-installed tools stay on their current release until asked to move.
+  # Inspect installed tools before migrating Azure to its apt provider.
   local uv_installed=""
   if [[ -x "$HOME/.local/bin/uv" ]]; then
     uv_installed=$("$HOME/.local/bin/uv" tool list 2>/dev/null | awk '/^[a-z]/ { print $1 }')
@@ -95,13 +94,9 @@ stage_toolchains() {
       fi
       continue
     fi
-    if [[ "$tool" == "$tool_name" ]] && grep -Fx "$tool_name" >/dev/null <<<"$uv_installed"; then
-      ok "$tool already installed by uv"
-    else
-      info "installing $tool (uv tool)…"
-      "$HOME/.local/bin/uv" tool install "$tool" \
-        || { warn "uv tool install $tool failed"; return 1; }
-    fi
+    info "ensuring $tool is current (uv tool)…"
+    "$HOME/.local/bin/uv" tool install --upgrade "$tool" \
+      || { warn "uv tool install $tool failed"; return 1; }
   done
 
   install_cloud_clis || return 1
@@ -344,6 +339,8 @@ install_cloud_clis() {
         || ! npm ls --global --prefix "$HOME/.npm/packages" --depth=0 --json "$tool" \
           | jq -e --arg name "$tool" '.dependencies[$name].version' >/dev/null; then
       npm install --global --prefix "$HOME/.npm/packages" "$tool@latest" </dev/null || return 1
+    else
+      npm update --global --prefix "$HOME/.npm/packages" --tag=latest "$tool" </dev/null || return 1
     fi
     "$HOME/.npm/packages/bin/$tool" --version || return 1
   done

@@ -164,12 +164,10 @@ and fails postflight rather than being lost. Supported JSON/TOML/Git/ssh formats
 get the required keys merged in and keep everything else.
 
 `~/.ssh/config` is a file this setup asks you to edit, so an edited one merges
-rather than conflicting. Exactly two directives are treated as a baseline and
-added to the `Host *` block when absent: `HashKnownHosts`, so a stolen
-`known_hosts` does not enumerate every host you reach, and `UpdateHostKeys`, so
-a server rotating its key is picked up instead of looking like an attack. A
-directive you have already written is left alone whatever its value, and
-connection behaviour — timeouts, multiplexing, keepalives — is never touched. A
+rather than conflicting. The `Host *` baseline adds `HashKnownHosts` for host
+privacy, `UpdateHostKeys` for key rotation, and `SetEnv TERM=xterm-256color`
+for terminal compatibility. Explicit TERM assignments and other environment
+values are preserved. Existing timeouts, multiplexing, and keepalives are left alone. A
 config without a `Host *` block, or one `ssh -G` cannot parse, is reported
 rather than guessed at.
 
@@ -504,18 +502,23 @@ lets the protocol work.
 installed when `SKIP_FONT=1`. Ubuntu uses the lightweight
 `kitty-terminfo` package; hosts without that package compile Kitty's official
 definition into `~/.terminfo`. Postflight resolves the entry with Kitty's
-private `TERMINFO` environment removed, matching a plain SSH session. On
+private `TERMINFO` environment removed, matching a headless session. On
 macOS the entry lives only in the user's `~/.terminfo`, so a process that runs
 with another `HOME`, such as `sudo` resetting it, cannot resolve
 `TERM=xterm-kitty`; prefix such a command with `TERM=xterm-256color`.
 
-For immediate recovery in a shell that reports
-`Error opening terminal: xterm-kitty`, use a universally available terminal
-description, rerun setup, and reconnect:
+Ordinary SSH uses `SetEnv TERM=xterm-256color` in the local `~/.ssh/config`.
+OpenSSH negotiates that terminal type with the remote PTY without requiring
+server `AcceptEnv` changes. Pagers and sudo work with the remote system's
+standard terminfo. This client setting copies no files to the remote host.
+Kitty's local terminal type remains `xterm-kitty`; the opt-in `ks` profile
+supplies its native terminal environment through Kitty's bootstrap.
+
+For immediate recovery in an existing remote shell that reports an unknown
+or partially functional terminal, set its terminal type for that session:
 
 ```bash
 export TERM=xterm-256color
-bash setup.sh
 ```
 
 Kitty owns tabs, splits, scrolling, keyboard, mouse, and clipboard access.
@@ -844,7 +847,7 @@ a conflict without merging or deleting content. Dry runs report these operations
 Agent-only dependencies are Bash 3.2+, coreutils, POSIX `awk`, `sed`, `npx`,
 Claude Code, Codex, and OpenCode. The skills CLI requires
 [Node.js 22.20+](https://github.com/vercel-labs/skills#install-a-skill), which the
-declared Node 24 line satisfies. Copilot is used when installed. Native commands
+declared Node 26 line satisfies. Copilot is used when installed. Native commands
 run with stdin closed. Verification establishes configuration, not remote
 service availability or authentication.
 
@@ -903,9 +906,9 @@ The script detects the OS and adapts:
 | Git | Homebrew `git` | `ppa:git-core/ppa`, the PPA git-scm.com names for the current stable Git |
 | GitHub CLI | Homebrew `gh` | GitHub's own archive (`cli.github.com`), every key in the downloaded keyring checked against the declared fingerprints. The vendor archive supplies current stable releases |
 | AWS CLI v2 (`aws`) | [AWS's installer](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html), with native package signature verification | The same vendor installer, with GPG verification. Both platforms install under `~/.local/share/aws-cli`, expose user-local launchers, restore missing links, and check for updates on each setup run |
-| Google Cloud CLI (`gcloud`) | [Google's SDK archive and installer](https://docs.cloud.google.com/sdk/docs/install-sdk#mac), under `~/.local/share/google-cloud-sdk`; uses Homebrew Python 3.14 and preserves shell profiles | Google's official apt archive. An apt preference excludes Google's `kubectl` so Kubernetes' declared minor retains ownership |
+| Google Cloud CLI (`gcloud`) | [Google's SDK archive and installer](https://docs.cloud.google.com/sdk/docs/install-sdk#mac), under `~/.local/share/google-cloud-sdk`; uses Homebrew Python 3.14 and preserves shell profiles | Google's official apt archive. An apt preference excludes Google's `kubectl` so the Kubernetes stable archive retains ownership |
 | Azure CLI (`az`) | Microsoft's documented [Homebrew cask](https://learn.microsoft.com/cli/azure/install-azure-cli-macos), `azure-cli`; an installed formula is replaced after fetching the cask | Microsoft's apt archive when it publishes the host's suite. An existing uv copy is removed only after the apt command works; otherwise uv remains the fallback |
-| Cloudflare CLI (`cf`, `cloudflare`) | npm package [`cf`](https://developers.cloudflare.com/cf/get-started/) in `~/.npm/packages` | same; installed when missing and uses the project's Node 24 runtime |
+| Cloudflare CLI (`cf`, `cloudflare`) | npm package [`cf`](https://developers.cloudflare.com/cf/get-started/) in `~/.npm/packages`; updated on reruns | same; uses the project's Node 26 runtime |
 | GoDaddy CLI (`gddy`) | [Official installer](https://developer.godaddy.com/en/docs/api-users/cli/set-up), with checksum verification and execution checked before placement in `~/.local/bin` | same; compares installed and published releases on each run |
 | OpenAI API CLI (`openai`) | Official [Homebrew cask `openai/tools/openai`](https://developers.openai.com/api/docs/libraries/openai-cli) | Official release to `~/.local/bin`, verified against its published digest |
 | Claude Code (`claude`) | Anthropic's documented [Homebrew cask `claude-code`](https://code.claude.com/docs/en/setup) | Native installer with the `stable` channel; `claude install stable` on reruns |
@@ -917,8 +920,8 @@ The script detects the OS and adapts:
 | Apex Markdown (`apex`) | Homebrew `ttscoff/thelab/apex` | [Official release](https://github.com/ApexMarkdown/apex) to `~/.local/bin`, checksum verified, with installed and published versions compared on each run |
 | Tools not in default apt repo (helm, kubectl, himalaya, ruff, yazi) | Homebrew formula | official apt repo (helm, kubectl) / official installer (himalaya) / GitHub release → `~/.local/bin` (ruff, yazi). Each run compares what is installed against what the project publishes and upgrades when the published version is newer — see below |
 | `yq` and `cosign` | Homebrew `yq` (mikefarah) and `cosign` | upstream release → `~/.local/bin`, checksum verified against the publisher's own list. **Not** the distribution packages: Ubuntu's `yq` is kislyuk's jq wrapper — a different program with a different command language — and upstream `cosign` supplies the selected current release. A setup for parity between a Mac and a Linux box cannot give the same command name to two different programs. A distribution build left installed alongside is preserved; `~/.local/bin` wins on PATH and postflight names the ambiguity |
-| Node.js | Homebrew `node@24`, exposed through user-local links. Postflight checks the resolved executable and declared major | NodeSource apt repo, major set by `NODE_MAJOR` in `lib/manifest.sh`. An apt preference excludes distribution runtime packages |
-| Python | Homebrew `python@3.14`; `python3.14` is exposed for Google Cloud's native interpreter discovery | Distribution Python and uv-managed project interpreters |
+| Node.js | Homebrew `node@26`, exposed through user-local links. Setup migrates its Node 24 links and checks current patches on reruns. Postflight checks the resolved executable and declared major | NodeSource apt repo, major set by `NODE_MAJOR` in `lib/manifest.sh`; reruns install the current candidate. An apt preference excludes distribution runtime packages |
+| Python | Homebrew `python@3.14`; `python`, `python3`, and `python3.14` receive user-local links | Ubuntu `python3.14` and `python3.14-venv`; reruns install current distribution patches. uv can install other project interpreters on either platform |
 | uv | Homebrew `uv` | Astral's standalone installer and receipt |
 | VS Code CLI | [Microsoft's ZIP download](https://code.visualstudio.com/docs/setup/mac) installs the application; bundled `code` and `code-tunnel` receive user-local links when free | Official `code` apt package, or a preserved existing Snap/Flatpak equivalent |
 | Clipboard CLI | `xsel` is absent from `PACKAGES_BREW`; native GUI/terminal clipboard paths are used | `xsel` is declared in `PACKAGES_APT` for supported X11 sessions |
@@ -943,6 +946,21 @@ forgotten.
 
 ### How it stays current
 
+Installers select the latest stable release available from their declared
+provider when they run. The host runtime exceptions are Node 26 and Python
+3.14, declared once in `lib/manifest.sh`; package managers select current
+patches within those lines. Ubuntu's Python package includes distribution
+patches and can trail upstream CPython's patch number. Use
+`uv python install 3.14` for the latest upstream 3.14 build, or request another
+Python version for a project. Setup does not replace Ubuntu's system interpreter with a uv build.
+PostgreSQL is supplied only as a container example: `postgres:18` with
+`--pull=always` selects the current 18 release and uses its documented
+`/var/lib/postgresql` volume.
+
+Reruns resolve current releases while preserving edited configuration and
+unrelated tools. Once the requested versions and settings are satisfied,
+their effective values remain unchanged; package-manager metadata can refresh.
+
 **Distribution packages** come from the vendor's own archive where the
 distribution's build is too far behind to use — `ppa:git-core/ppa`,
 `cli.github.com`, `apt.kitware.com`, `pkgs.k8s.io`, `packages.buildkite.com`,
@@ -951,6 +969,16 @@ distribution's build is too far behind to use — `ppa:git-core/ppa`,
 every archive is registered before any package is installed, so a name resolves
 to the vendor's build the first time rather than being installed from the
 distribution and replaced afterwards. One index refresh covers them all.
+Ordinary Linux reruns pass the declared apt inventory to `apt install` again:
+apt upgrades stale packages and retains packages already at their candidates.
+The removal simulation runs before the transaction. Packages outside this
+inventory follow the existing opt-in `UPDATE_SYSTEM=1` path.
+kubectl resolves the official
+[`stable.txt` endpoint](https://kubernetes.io/docs/tasks/tools/install-kubectl-linux/)
+on each setup run and selects that release's apt minor repository. Managed
+installations advance across minor releases; unrecognized providers are
+preserved. Failed release discovery retains the existing sources and reports
+that the latest release could not be confirmed.
 
 **Linux publisher-installed tools** — `ruff`, `yazi`, `himalaya`, `yq`,
 `cosign`, `openai`, `ant`, `gddy`, standalone `uv`, and `delta`, `eza` and `lazygit` where apt lacks them —
@@ -965,6 +993,10 @@ itself with `uv self update`. Nothing is replaced unless it identifies itself: a
 publisher, an unparseable version, or a file this project did not place all
 mean it is left alone and reported.
 
+Rust uses `rustup update stable` on reruns, preserving other toolchains and
+the selected default. Only the uv and npm tools declared in the manifest are
+refreshed during normal provisioning; additional installed tools are preserved.
+
 Linux coding-agent installations use the native update paths listed above.
 Claude follows its `stable` channel; Codex, Copilot, OpenCode V2, and Antigravity
 use their current public release channels. macOS coding-agent updates belong
@@ -972,8 +1004,10 @@ to Homebrew, except for Antigravity, which uses its native updater. Host postfli
 checks that the declared provider wins on PATH. Agent synchronization keeps
 Copilot optional when run separately on a host provisioned elsewhere.
 
-**Homebrew packages** are installed when missing but are not globally upgraded
-on an ordinary rerun. `UPDATE_HOMEBREW=1` runs Homebrew's global metadata/tap
+**Homebrew packages** are installed when missing. Node and Python also pass
+through `brew install` on reruns, which upgrades outdated formulae within
+their declared release lines. Other installed formulae and casks retain their
+versions on an ordinary rerun. `UPDATE_HOMEBREW=1` runs Homebrew's global metadata/tap
 refresh (which may include Homebrew migrations), then reports outdated items
 from this repository's installed inventory.
 `UPGRADE_HOMEBREW_FORMULAE=1` additionally previews, then upgrades, only those
@@ -981,6 +1015,10 @@ reported formulae while setting Homebrew's documented no-cleanup and
 no-installed-dependents-check guards. Casks remain report-only because their
 upgrade path may quit applications, and Apple Container remains under its
 separate signed-package lifecycle.
+
+The temporary JSONC helper uses `npm update` to resolve the current stable
+parser within its open dependency range; the repository lock file is the
+starting resolution rather than an install-time version ceiling.
 
 **Linux Node.js** comes only from NodeSource. `/etc/apt/preferences.d/nodesource.pref`
 puts the distribution's `nodejs`, `npm`, `nodejs-doc` and `libnode-dev` below
@@ -1124,10 +1162,12 @@ repeat runs. The integration job invokes the same
 
 The host container runner installs actual distribution packages and publisher
 artifacts as an ordinary user with sudo inside the container. It mounts only a
-read-only source snapshot. Docker Engine, desktop applications, and SSH key
+read-only source snapshot and forwards `UV_CONCURRENT_DOWNLOADS` when supplied
+for tuning package-download parallelism. Docker Engine, desktop applications, and SSH key
 generation are explicitly excluded from this container profile. Checks cover
 fresh provisioning, reruns, login-shell commands, Word conversion, missing
-Rust compiler recovery, JSONC comment preservation, malformed configuration, retained dpkg
+Rust compiler recovery and custom-default preservation, updates to declared npm
+tools while unrelated uv/npm tools survive, JSONC comment preservation, malformed configuration, retained dpkg
 configuration, missing AWS launcher recovery, Azure CLI migration from uv to apt, download failure, checksum mismatch, and edited shell files.
 It also qualifies streamed host execution and combined host/agent setup with
 native CLIs and reachable remote MCP discovery. The same `tests/run.sh` regression entry point runs inside the installed host.
@@ -1146,6 +1186,6 @@ source mounts are removed while the serial log and source archive remain.
 These Linux environments do not qualify macOS, arm64 binaries, desktop sessions,
 real remote authentication, firmware updates, or hardware-specific settings.
 Those require the corresponding native environment. JSONC parsing uses the
-Node runtime already installed by provisioning and the locked `jsonc-parser`
-dependency under `tools/jsonc`; npm installs it into disposable temporary state
+Node runtime already installed by provisioning and the `jsonc-parser`
+dependency declared under `tools/jsonc`; npm resolves it into disposable temporary state
 only when a configuration contains comments or trailing commas.

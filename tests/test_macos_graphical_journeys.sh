@@ -58,8 +58,7 @@ printf '%s\n' 'export PATH="$HOME/.local/bin:$PATH"' > "$HOME/.bashrc"
 printf '%s\n' 'export PATH="$HOME/.local/bin:$PATH"' > "$HOME/.zshenv"
 : > "$HOME/.zprofile"
 BREW_PREFIX="$TEST_TMP/brew"
-NODE_MAJOR=24
-export BREW_PREFIX NODE_MAJOR
+export BREW_PREFIX
 pkg_installed() { return 1; }
 chmod -x "$VSCODE_APP_BIN/code-tunnel"
 POSTFLIGHT_PASSES=0 POSTFLIGHT_FAILURES=0

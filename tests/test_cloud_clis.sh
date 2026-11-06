@@ -69,6 +69,7 @@ install_upstream_archive_tool() {
   printf '#!/bin/sh\nprintf "%s 1.0.0\\n"\n' "$1" > "$HOME/.local/bin/$1"
   chmod +x "$HOME/.local/bin/$1"
 }
+fixture_npm_update_failure=0
 npm() {
   case "$1" in
     ls)
@@ -82,6 +83,12 @@ npm() {
       printf '#!/bin/sh\nprintf "cf 1.0.0\\n"\n' > "$HOME/.npm/packages/bin/cf"
       chmod +x "$HOME/.npm/packages/bin/cf"
       ;;
+    update)
+      [[ "$*" == "update --global --prefix $HOME/.npm/packages --tag=latest cf" ]]
+      ((fixture_npm_update_failure == 0)) || return 1
+      printf 'cf-update\n' >> "$CLI_TEST_LOG"
+      printf '#!/bin/sh\nprintf "cf 2.0.0\\n"\n' > "$HOME/.npm/packages/bin/cf"
+      ;;
     *) return 1 ;;
   esac
 }
@@ -93,10 +100,14 @@ grep -Fxq 'ant ant_{version}_linux_amd64.tar.gz ant' "$scratch/archives"
 [[ "$HOME/.local/bin/aws" -ef "$HOME/.local/share/aws-cli/v2/current/bin/aws" ]]
 [[ "$(cat "$CLI_TEST_LOG")" == $'gddy\naws\ncf' ]]
 
-# AWS owns its update check; the other installed native/npm tools stay put.
+# Existing declared npm tools advance through npm's native updater.
 : > "$CLI_TEST_LOG"
 install_cloud_clis >/dev/null
-[[ "$(cat "$CLI_TEST_LOG")" == aws ]]
+[[ "$(cat "$CLI_TEST_LOG")" == $'aws\ncf-update' ]]
+[[ "$("$HOME/.npm/packages/bin/cf" --version)" == 'cf 2.0.0' ]]
+fixture_npm_update_failure=1
+if install_cloud_clis >/dev/null 2>&1; then exit 1; fi
+fixture_npm_update_failure=0
 
 fixture_download_failure=aws
 rm "$HOME/.local/bin/aws"

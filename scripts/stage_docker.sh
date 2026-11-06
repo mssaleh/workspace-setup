@@ -219,7 +219,7 @@ stage_docker() {
     1. Re-login or run:  newgrp docker   (so you can run docker without sudo)
     2. Try:  docker run --rm hello-world
     3. Databases-in-containers pattern:
-         docker run -d --name pg-dev -p 5432:5432 -v pg-dev-data:/var/lib/postgresql/data -e POSTGRES_PASSWORD=dev postgres:18
+         docker run --pull=always -d --name pg-dev -p 5432:5432 -v pg-dev-data:/var/lib/postgresql -e POSTGRES_PASSWORD=dev postgres:18
 
 SUMMARY
 }

@@ -79,6 +79,8 @@ make_executable "$TEST_TMP/system/helm"
 # with the declared major rather than merely exist.
 printf '%s\n' '#!/bin/sh' "printf 'v%s.0.0\\n' \"${NODE_MAJOR}\"" > "$TEST_TMP/system/node"
 chmod +x "$TEST_TMP/system/node"
+printf '#!/bin/sh\nprintf "Python %s.10\\n"\n' "$PYTHON_MINOR" > "$TEST_TMP/system/python3"
+chmod +x "$TEST_TMP/system/python3"
 
 # cmake and ninja are checked by resolving them and reading the version they
 # report, so the stubs have to answer --version rather than merely exist.
@@ -148,7 +150,7 @@ apt-cache() {
     "  Candidate: $nodejs_pkg_version" \
     '  Version table:' \
     " *** $nodejs_pkg_version 600" \
-    '        500 https://deb.nodesource.com/node_24.x nodistro/main amd64 Packages' \
+    "        500 $NODESOURCE_APT_URI nodistro/main amd64 Packages" \
     '        100 /var/lib/dpkg/status'
   [[ -z "$nodejs_extra_origin" ]] || printf '%s\n' \
     "     22.22.1+dfsg-1ubuntu1 $nodejs_extra_origin" \
@@ -159,14 +161,23 @@ POSTFLIGHT_PASSES=0
 POSTFLIGHT_FAILURES=0
 postflight_upstream_tools
 [[ "$POSTFLIGHT_FAILURES" == 0 ]]
-[[ "$POSTFLIGHT_PASSES" == 17 ]]
+[[ "$POSTFLIGHT_PASSES" == 18 ]]
+
+for python_release in 3.15.0 3.14.11rc1; do
+  printf '#!/bin/sh\nprintf "Python %s\\n"\n' "$python_release" > "$TEST_TMP/system/python3"
+  POSTFLIGHT_PASSES=0 POSTFLIGHT_FAILURES=0
+  postflight_upstream_tools > "$TEST_TMP/python-check" 2>&1
+  [[ "$POSTFLIGHT_FAILURES" == 1 ]]
+  grep -Fq 'expected stable 3.14' "$TEST_TMP/python-check"
+done
+printf '#!/bin/sh\nprintf "Python %s.10\\n"\n' "$PYTHON_MINOR" > "$TEST_TMP/system/python3"
 
 installed_packages='kubectl helm claude-desktop chatgpt'
 versioned_lo=1
 POSTFLIGHT_PASSES=0
 POSTFLIGHT_FAILURES=0
 postflight_upstream_tools >/dev/null
-[[ "$POSTFLIGHT_FAILURES" == 0 && "$POSTFLIGHT_PASSES" == 17 ]]
+[[ "$POSTFLIGHT_FAILURES" == 0 && "$POSTFLIGHT_PASSES" == 18 ]]
 installed_packages='kubectl helm libreoffice claude-desktop chatgpt'
 versioned_lo=0
 
@@ -196,7 +207,7 @@ POSTFLIGHT_PASSES=0
 POSTFLIGHT_FAILURES=0
 SKIP_LIBREOFFICE=1 SKIP_CLAUDE_DESKTOP=1 SKIP_CODEX_APP=1 postflight_upstream_tools
 [[ "$POSTFLIGHT_FAILURES" == 0 ]]
-[[ "$POSTFLIGHT_PASSES" == 14 ]]
+[[ "$POSTFLIGHT_PASSES" == 15 ]]
 
 # A missing GUI application on a host that expects it is a real failure.
 installed_packages='kubectl helm'

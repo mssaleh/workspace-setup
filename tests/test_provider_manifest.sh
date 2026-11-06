@@ -84,6 +84,9 @@ fi
   printf 'NODE_MAJOR must be declared as a bare major version\n' >&2
   exit 1
 }
+array_has "python@$PYTHON_MINOR" "${PACKAGES_BREW[@]}"
+array_has "python$PYTHON_MINOR" "${PACKAGES_APT[@]}"
+array_has "python$PYTHON_MINOR-venv" "${PACKAGES_APT[@]}"
 # "NodeSource-owned" has to mean the distribution build is unreachable, not
 # merely outranked: the pin covers the runtime and every distribution package
 # that would drag its own copy of the runtime back in.
@@ -140,11 +143,8 @@ fi
 # Vendor archives that supersede a distribution package only work if the
 # package is also requested from apt: the repository is registered first and
 # the batch install then resolves to the vendor's candidate.
-for _repo_pkg in "${APT_REPO_UPGRADED_PACKAGES[@]}"; do
-  if ! array_has "$_repo_pkg" "${PACKAGES_APT[@]}"; then
-    printf '%s has a vendor repository but is not requested from apt\n' "$_repo_pkg" >&2
-    exit 1
-  fi
+for _repo_pkg in git gh cmake; do
+  array_has "$_repo_pkg" "${PACKAGES_APT[@]}"
 done
 array_has git "${PROVIDERS_UBUNTU_PPA[@]}"
 array_has gh "${PROVIDERS_LINUX_OFFICIAL_REPO[@]}"

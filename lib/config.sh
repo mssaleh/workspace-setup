@@ -31,7 +31,7 @@ config_jsonc() {
   tmp=$(mktemp -d "${TMPDIR:-/tmp}/setup-jsonc.XXXXXX") || return 1
   cp "$tools_dir/package.json" "$tools_dir/package-lock.json" "$tmp/" || status=1
   if ((status == 0)); then
-    npm ci --prefix "$tmp" --cache "$tmp/cache" --ignore-scripts --no-audit --no-fund >&2 || status=1
+    npm update --prefix "$tmp" --cache "$tmp/cache" --ignore-scripts --no-audit --no-fund >&2 || status=1
   fi
   if ((status == 0)); then
     NODE_PATH="$tmp/node_modules" node "$tools_dir/config.cjs" "$@" || status=1

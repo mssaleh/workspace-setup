@@ -125,6 +125,9 @@ brew_fixture() {
     'uninstall --formula azure-cli') fixture_formula=0 ;;
     'list --cask azure-cli') [[ "$fixture_cask" == 1 ]] ;;
     'install --cask azure-cli') fixture_cask=1 ;;
+    "install node@$NODE_MAJOR python@$PYTHON_MINOR")
+      [[ "${HOMEBREW_NO_ASK:-}" == 1 && "${HOMEBREW_NO_INSTALL_CLEANUP:-}" == 1 \
+        && "${HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK:-}" == 1 && "$fixture_failure" != runtime ]] ;;
     *) return 1 ;;
   esac
 }
@@ -138,4 +141,14 @@ stage_packages >/dev/null
 fixture_formula=1 fixture_cask=0 fixture_failure=fetch
 if stage_packages >/dev/null 2>&1; then exit 1; fi
 [[ "$fixture_formula" == 1 && "$fixture_cask" == 0 ]]
+
+# Installed runtime formulae still resolve current patches without other upgrades.
+fixture_failure=''
+PACKAGES_BREW=(fixture "node@$NODE_MAJOR" "python@$PYTHON_MINOR")
+PACKAGES_BREW_CLI_CASK=()
+: > "$calls"
+stage_packages >/dev/null
+[[ "$(cat "$calls")" == "$(printf 'tap\ninstall node@%s python@%s' "$NODE_MAJOR" "$PYTHON_MINOR")" ]]
+fixture_failure=runtime
+if stage_packages >/dev/null 2>&1; then exit 1; fi
 printf 'macOS installer tests: ok\n'

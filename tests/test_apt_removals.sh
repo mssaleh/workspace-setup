@@ -143,6 +143,13 @@ reset_calls
 report=$(apt_report_removals remove 'unused note' containerd 2>&1)
 [[ -z "$report" ]]
 
+reset_calls
+INSTALL_RECOMMENDS=0 apt_report_removals install '' fixture
+[[ "$(calls)" == 'apt-get install -s -y --no-install-recommends fixture' ]]
+reset_calls
+INSTALL_RECOMMENDS=0 apt_install_packages fixture
+[[ "$(calls)" == 'apt-get install -y --no-install-recommends fixture' ]]
+
 sudo() { printf 'E: simulated resolver failure\n' >&2; return 100; }
 if apt_report_removals install '' broken > "$TEST_TMP/simulation.log" 2>&1; then
   printf 'FAIL: failed apt simulation was reported as an empty successful transaction\n' >&2

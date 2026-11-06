@@ -275,15 +275,10 @@ merge_opencode_settings() {
 
 # ~/.ssh/config is a file this setup asks you to edit — the shipped version
 # carries an example Host block and says so — which makes its content yours,
-# not ours. Only two settings are asserted as a baseline: HashKnownHosts, so a
-# stolen known_hosts does not enumerate every host you reach, and
-# UpdateHostKeys, so a server's key rotation is picked up rather than looking
-# like an attack. Connection behaviour — timeouts, multiplexing, keepalives —
-# belongs to whoever tuned it for their own network.
+# not ours. The baseline adds host-key privacy, key rotation, and a portable
+# terminal type. Connection tuning and explicit TERM assignments are preserved.
 #
 # A directive already written, with any value, is a decision and is left alone.
-# Both baseline directives are booleans; a non-boolean addition would need
-# ssh_config_is_enabled extended to check it.
 ssh_config_declares() {
   grep -Eiq "^[[:space:]]*$1([[:space:]]|=)" "$2"
 }
@@ -304,7 +299,7 @@ ssh_config_is_enabled() {
 }
 
 merge_ssh_config() {
-  local _src="$1" dst="$2" mode="$3" tmp keyword value
+  local src="$1" dst="$2" mode="$3" tmp keyword value terminal_env terminal_changed=0
   local -a added=()
 
   # An unparseable file is not something to merge into; postflight reports it.
@@ -339,7 +334,36 @@ HashKnownHosts yes
 UpdateHostKeys yes
 BASELINE
 
-  if ((${#added[@]} == 0)); then
+  terminal_env=$(ssh -G -F "$src" localhost 2>/dev/null \
+    | awk '$1 == "setenv" { for (i = 2; i <= NF; i++) if ($i ~ /^TERM=/) { print $i; exit } }') || {
+    rm -f "$tmp"
+    return 1
+  }
+  # SetEnv is a first-value-wins list. Extend existing lists and keep the
+  # fallback last so host-specific environment settings retain precedence.
+  if [[ -n "$terminal_env" ]]; then
+    if ! awk -v terminal_env="$terminal_env" '
+        tolower($1) == "host" || tolower($1) == "match" {
+          global = tolower($1) == "host" && $2 == "*" && (NF == 2 || $3 ~ /^#/)
+        }
+        tolower($0) ~ /^[[:space:]]*setenv([[:space:]]|=)/ {
+          if (global) has_global = 1
+          if ($0 !~ /[[:space:]"=]TERM=/) {
+            match($0, /^[[:space:]]*[^[:space:]=]+[[:space:]=]+/)
+            $0 = substr($0, 1, RLENGTH) terminal_env " " substr($0, RLENGTH + 1)
+          }
+        }
+        { print }
+        END { if (!has_global) printf "\nHost *\n    SetEnv %s\n", terminal_env }
+      ' "$tmp" > "$tmp.next"; then
+      rm -f "$tmp" "$tmp.next"
+      return 1
+    fi
+    if ! cmp -s "$tmp" "$tmp.next"; then terminal_changed=1; fi
+    mv -f "$tmp.next" "$tmp" || { rm -f "$tmp" "$tmp.next"; return 1; }
+  fi
+
+  if ((${#added[@]} == 0 && terminal_changed == 0)); then
     rm -f "$tmp"
     CONFIG_MERGE_ACTION=unchanged
     return 0
@@ -351,7 +375,7 @@ BASELINE
     rm -f "$tmp"
     return 1
   fi
-  for keyword in "${added[@]}"; do
+  for keyword in ${added[@]+"${added[@]}"}; do
     if ! ssh_config_is_enabled "$tmp" "$keyword"; then
       rm -f "$tmp"
       return 1

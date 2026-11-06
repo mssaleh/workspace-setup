@@ -845,6 +845,14 @@ postflight_vendor_toolchain_paths() {
 }
 
 postflight_upstream_tools() {
+  local python_version python_patch
+  python_version=$(python3 --version 2>/dev/null || true)
+  python_patch=${python_version#"Python $PYTHON_MINOR."}
+  if [[ "$python_version" == "Python $PYTHON_MINOR."* && "$python_patch" =~ ^[0-9]+$ ]]; then
+    postflight_pass "$python_version matches the declared $PYTHON_MINOR line"
+  else
+    postflight_fail "Python on PATH is ${python_version:-unavailable}; expected stable $PYTHON_MINOR"
+  fi
   if [[ -x "$HOME/.cargo/bin/rustup" && -f "$HOME/.cargo/env" ]] \
       && "$HOME/.cargo/bin/rustup" which rustc >/dev/null 2>&1; then
     postflight_pass "rustup upstream artifact, environment, and active compiler exist"

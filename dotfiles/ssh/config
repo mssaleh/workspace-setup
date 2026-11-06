@@ -10,7 +10,8 @@
 #     IdentitiesOnly yes
 
 # `ks <host>` is the managed-host profile: kitty ships its terminfo and shell
-# integration. `s <host>` is the legacy profile and advertises xterm-256color.
+# integration. Plain SSH advertises xterm-256color for unmanaged hosts and sudo.
+# `s <host>` also disables connection sharing and restores terminal modes.
 # `ds <host>` uses a separate ssh connection to attach to a zmx session.
 
 # Defaults for every host. Plain SSH fails a dead connection in about three
@@ -19,6 +20,9 @@
 # while keeping each master short-lived and its socket inside a private
 # directory.
 Host *
+    # TERM is negotiated with the PTY and does not require server AcceptEnv.
+    # https://man.openbsd.org/ssh_config#SetEnv
+    SetEnv TERM=xterm-256color
     AddKeysToAgent yes
     ConnectTimeout 10
     ConnectionAttempts 1

@@ -27,6 +27,10 @@ if command -v ssh >/dev/null 2>&1; then
   [[ "$(ssh -G -F "$TEST_TMP/ssh-with-ubuntu-default" example.invalid 2>/dev/null \
         | awk '$1 == "gssapiauthentication" { print $2 }')" == no ]] \
     || fail_test 'shipped ssh config leaves Ubuntu GSSAPI authentication on'
+  ssh -G -F "$TEST_TMP/shipped-ssh-config" example.invalid 2>/dev/null \
+    | awk '$1 == "setenv" { for (i = 2; i <= NF; i++) if ($i == "TERM=xterm-256color") found = 1 }
+           END { exit !found }' \
+    || fail_test 'plain SSH does not negotiate a portable terminal type'
 fi
 
 # Writes are deliberate; reads remain confirmation-gated to protect clipboard
@@ -79,9 +83,7 @@ grep -qE '^[[:space:]]*map[[:space:]]+ctrl\+shift\+f3[[:space:]]+command_palette
 grep -Fq 'zoxide init zsh' "$TEST_ROOT/dotfiles/zshrc" \
   || fail_test 'zsh does not initialize zoxide'
 
-# Plain ssh preserves the client TERM in both supported shells. Only the
-# explicit `s` compatibility helper advertises xterm-256color to an unmanaged
-# host that does not have the client's terminfo entry.
+# Plain ssh stays unwrapped; OpenSSH config owns its terminal negotiation.
 for shell_rc in bashrc zshrc; do
   if grep -qE '^[[:space:]]*function[[:space:]]+ssh\(' \
       "$TEST_ROOT/dotfiles/$shell_rc"; then
