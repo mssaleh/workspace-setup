@@ -87,24 +87,12 @@ postflight_macos_packages() {
   done
 
   host_is_workstation || return 0
-  missing=()
-  for pkg in "${PACKAGES_BREW_CASK[@]+"${PACKAGES_BREW_CASK[@]}"}"; do
-    if [[ "$pkg" == font-jetbrains-mono-nerd-font ]]; then
-      [[ -n "${SKIP_FONT:-}" || -n "${SKIP_NERD_FONT:-}" ]] && continue
+  if [[ -z "${SKIP_FONT:-}" && -z "${SKIP_NERD_FONT:-}" ]]; then
+    if "$BREW_BIN" list --cask font-jetbrains-mono-nerd-font >/dev/null 2>&1; then
+      postflight_pass "Nerd Font is installed"
     else
-      [[ -n "${SKIP_FONT:-}" || -n "${SKIP_MACOS_APPS:-}" ]] && continue
+      postflight_fail "Nerd Font is missing"
     fi
-    "$BREW_BIN" list --cask "$pkg" >/dev/null 2>&1 && continue
-    if brew_cask_existing_artifact "$pkg" >/dev/null; then
-      postflight_pass "$pkg provided by an existing application outside Homebrew"
-      continue
-    fi
-    missing+=("$pkg")
-  done
-  if ((${#missing[@]} == 0)); then
-    postflight_pass "requested Homebrew casks are installed"
-  else
-    postflight_fail "missing Homebrew casks: ${missing[*]}"
   fi
 
   [[ -z "${SKIP_FONT:-}" && -z "${SKIP_MACOS_APPS:-}" ]] || return 0
@@ -129,20 +117,33 @@ postflight_macos_cli_paths() {
 
   local clean_path=/usr/bin:/bin:/usr/sbin:/sbin current_user expected_node
   local bash_node zsh_node node_version node_major command_name resolved
+  local bash_paths zsh_paths bash_python zsh_python expected_python
   local vscode_app_bin
   current_user="${USER:-$(id -un)}"
   expected_node="$BREW_PREFIX/opt/node@${NODE_MAJOR}/bin/node"
   vscode_app_bin="${VSCODE_APP_BIN:-/Applications/Visual Studio Code.app/Contents/Resources/app/bin}"
 
-  # shellcheck disable=SC2016 # expansions belong to the clean child shell
-  bash_node=$(env -i HOME="$HOME" USER="$current_user" PATH="$clean_path" \
-    /bin/bash --noprofile --norc -c \
-    '. "$HOME/.bashrc"; command -v node 2>/dev/null || true' 2>/dev/null | tail -n 1)
-  # shellcheck disable=SC2016 # expansions belong to the clean child shell
-  zsh_node=$(env -i HOME="$HOME" USER="$current_user" PATH="$clean_path" \
-    /bin/zsh -dfc \
-    'source "$HOME/.zshenv"; source "$HOME/.zprofile"; command -v node 2>/dev/null || true' \
-    2>/dev/null | tail -n 1)
+  # shellcheck disable=SC2016 # expansions belong to the clean login shells
+  bash_paths=$(env -i HOME="$HOME" USER="$current_user" PATH="$clean_path" \
+    /bin/bash -lc \
+    'printf "%s|%s\n" "$(command -v node)" "$(command -v python3)"' 2>/dev/null | tail -n 1)
+  # shellcheck disable=SC2016 # expansions belong to the clean login shells
+  zsh_paths=$(env -i HOME="$HOME" USER="$current_user" PATH="$clean_path" \
+    /bin/zsh -lc \
+    'printf "%s|%s\n" "$(command -v node)" "$(command -v python3)"' 2>/dev/null | tail -n 1)
+  bash_node=${bash_paths%%|*}
+  zsh_node=${zsh_paths%%|*}
+  bash_python=${bash_paths#*|}
+  zsh_python=${zsh_paths#*|}
+  expected_python="$BREW_PREFIX/opt/python@$PYTHON_MINOR/libexec/bin/python3"
+  if [[ -x "$expected_python" ]]; then
+    if [[ -n "$bash_python" && -n "$zsh_python" \
+          && "$bash_python" -ef "$expected_python" && "$zsh_python" -ef "$expected_python" ]]; then
+      postflight_pass "Bash and Zsh login shells resolve Python $PYTHON_MINOR"
+    else
+      postflight_fail "Python login PATH winner is wrong (bash=${bash_python:-missing}, zsh=${zsh_python:-missing})"
+    fi
+  fi
 
   if [[ -x "$expected_node" && -n "$bash_node" && -n "$zsh_node" \
         && "$bash_node" -ef "$expected_node" && "$zsh_node" -ef "$expected_node" ]]; then
@@ -382,10 +383,10 @@ postflight_macos_containers() {
   local container_bin="${APPLE_CONTAINER_BIN:-/usr/local/bin/container}"
   if [[ -x "$container_bin" ]] \
       && pkgutil --pkg-info com.apple.container-installer >/dev/null 2>&1 \
-      && [[ "$(command -v container 2>/dev/null)" == "$container_bin" ]]; then
-    postflight_pass "Apple Container signed-pkg artifact exists"
+      && [[ "$(command -v container 2>/dev/null)" -ef "$container_bin" ]]; then
+    postflight_pass "Apple Container resolves to its signed-package provider"
   else
-    postflight_fail "Apple Container binary, installer receipt, or PATH ownership is incomplete"
+    postflight_fail "Apple Container signed package or PATH ownership is incomplete"
     return 0
   fi
   if "$container_bin" system status >/dev/null 2>&1; then

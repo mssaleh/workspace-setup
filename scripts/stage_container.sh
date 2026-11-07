@@ -84,31 +84,33 @@ stage_container() {
       return 1
       ;;
   esac
-  local container_bin
+  local container_bin installed published state conflicting_container
   container_bin=$(apple_container_bin 2>/dev/null || true)
+  conflicting_container=$(command -v container 2>/dev/null || true)
+  if [[ -n "$conflicting_container" && ! "$conflicting_container" -ef "$container_bin" ]]; then
+    warn "preserving a different Container provider at $conflicting_container; migrate it before continuing"
+    return 1
+  fi
   if [[ -n "$container_bin" ]] \
       && pkgutil --pkg-info com.apple.container-installer >/dev/null 2>&1; then
-    ok "Apple Container already installed ($("$container_bin" --version 2>/dev/null || echo present))"
-    if [[ "${UPDATE_CONTAINER:-}" == 1 ]]; then
+    installed=$(upstream_installed_version "$container_bin" --version)
+    published=$(upstream_latest_version "$(upstream_project_repo container)" 2>/dev/null || true)
+    state=$(upstream_artifact_state container "$installed" "$published")
+    upstream_report_state container "$state" "$installed" "$published"
+    if [[ "$state" == stale ]]; then
       if "$container_bin" system status >/dev/null 2>&1; then
-        fail "UPDATE_CONTAINER=1 requires a stopped Container system; stop workloads and run 'container system stop' first"
+        warn "Container update is deferred until its running system is stopped"
+      else
+        install_apple_container_pkg || return 1
+        container_bin=$(apple_container_bin) || return 1
       fi
-      info "updating Apple Container from the latest signed package by explicit request…"
-      install_apple_container_pkg
-      container_bin=$(apple_container_bin)
     fi
   elif [[ -n "$container_bin" ]]; then
-    warn "preserving an existing container executable without Apple's installer receipt: $container_bin"
+    warn "preserving a container executable without Apple's installer receipt: $container_bin"
     return 1
   else
-    local conflicting_container
-    conflicting_container=$(command -v container 2>/dev/null || true)
-    if [[ -n "$conflicting_container" ]]; then
-      warn "preserving a non-Apple Container executable at $conflicting_container"
-      return 1
-    fi
-    install_apple_container_pkg
-    container_bin=$(apple_container_bin)
+    install_apple_container_pkg || return 1
+    container_bin=$(apple_container_bin) || return 1
   fi
 
   if ! rosetta_installed; then

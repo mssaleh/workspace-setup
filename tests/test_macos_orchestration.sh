@@ -87,6 +87,7 @@ run_macos_setup() {
 
 expected_default=$(cat <<'EXPECTED'
 stage_macos_bootstrap
+stage_macos_update
 stage_packages
 stage_macos_cli
 stage_toolchains
@@ -111,11 +112,10 @@ if grep -Eq '^stage_(bootstrap|docker|groups|flatpak|fonts_terminal|terminal_pro
   fail_test 'macOS setup entered an established Linux stage implementation'
 fi
 
-run_macos_setup UPDATE_HOMEBREW=1
 update_line=$(grep -n '^stage_macos_update$' "$calls" | cut -d: -f1)
-postflight_line=$(grep -n '^stage_macos_postflight$' "$calls" | cut -d: -f1)
-[[ -n "$update_line" && "$update_line" -lt "$postflight_line" ]] \
-  || fail_test 'bounded Homebrew update no longer precedes macOS postflight'
+packages_line=$(grep -n '^stage_packages$' "$calls" | cut -d: -f1)
+[[ -n "$update_line" && "$update_line" -lt "$packages_line" ]] \
+  || fail_test 'Homebrew metadata was not refreshed before package resolution'
 
 run_macos_setup SKIP_CONTAINER=1 SKIP_COMPLETIONS=1 SKIP_SSH=1 SKIP_REMOTE_AUDIT=1
 if grep -Eq '^stage_(container|completions|ssh|macos_remote_audit)$' "$calls"; then

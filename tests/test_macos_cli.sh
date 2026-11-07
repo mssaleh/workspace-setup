@@ -14,9 +14,9 @@ for command_name in "${BREW_CLI_COMMANDS[@]}"; do
   printf '#!/bin/sh\n' > "$BREW_PREFIX/bin/$command_name"
   chmod +x "$BREW_PREFIX/bin/$command_name"
 done
-cp "$BREW_PREFIX/bin/uv" "$BREW_PREFIX/opt/python@$PYTHON_MINOR/bin/python$PYTHON_MINOR"
+cp "$BREW_PREFIX/bin/opencode" "$BREW_PREFIX/opt/python@$PYTHON_MINOR/bin/python$PYTHON_MINOR"
 for command_name in python python3; do
-  cp "$BREW_PREFIX/bin/uv" "$BREW_PREFIX/opt/python@$PYTHON_MINOR/libexec/bin/$command_name"
+  cp "$BREW_PREFIX/bin/opencode" "$BREW_PREFIX/opt/python@$PYTHON_MINOR/libexec/bin/$command_name"
 done
 
 for command_name in node npm npx; do
@@ -54,8 +54,8 @@ done
 
 # Node 24 links migrate whether the old keg still exists or has been removed.
 mkdir -p "$BREW_PREFIX/opt/node@24/bin"
-cp "$BREW_PREFIX/bin/uv" "$BREW_PREFIX/opt/node@24/bin/node"
-cp "$BREW_PREFIX/bin/uv" "$BREW_PREFIX/opt/node@24/bin/corepack"
+cp "$BREW_PREFIX/bin/opencode" "$BREW_PREFIX/opt/node@24/bin/node"
+cp "$BREW_PREFIX/bin/opencode" "$BREW_PREFIX/opt/node@24/bin/corepack"
 for command_name in node npm npx corepack; do
   ln -sfn "$BREW_PREFIX/opt/node@24/bin/$command_name" "$HOME/.local/bin/$command_name"
 done

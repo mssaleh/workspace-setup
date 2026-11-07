@@ -4,21 +4,6 @@
 # its own graphical stages from these helpers in stage_macos_graphical.sh and
 # stage_macos_cli.sh; stage_fonts_terminal itself is the Linux journey.
 
-install_brew_cask_if_missing() {
-  local cask="$1" existing_artifact=""
-  if "$BREW_BIN" list --cask "$cask" >/dev/null 2>&1; then
-    ok "$cask already installed"
-  else
-    existing_artifact=$(brew_cask_existing_artifact "$cask") || existing_artifact=""
-    if [[ -n "$existing_artifact" ]]; then
-      warn "preserving an existing non-Homebrew application at $existing_artifact"
-      return 0
-    fi
-    info "installing $cask (Homebrew cask)…"
-    "$BREW_BIN" install --cask "$cask"
-  fi
-}
-
 ensure_cli_symlink() {
   local target="$1" link="$2"
   mkdir -p "$(dirname "$link")"

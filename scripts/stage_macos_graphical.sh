@@ -115,6 +115,7 @@ macos_app_download_url() {
       printf '%s/%s/mac/%s/LibreOffice_%s_MacOS_%s.dmg\n' \
         "$LIBREOFFICE_DOWNLOAD_BASE" "$version" "$arch" "$version" "$arch"
       ;;
+    maccy) printf '%s\n' "$MACCY_MACOS_DOWNLOAD_URL" ;;
     chatgpt)
       [[ "$arch" == arm64 ]] || { warn "OpenAI's documented macOS app download requires Apple silicon"; return 1; }
       printf '%s\n' "$CHATGPT_MACOS_DOWNLOAD_URL" ;;
@@ -146,7 +147,7 @@ install_macos_app() {
     return 1
   fi
   url=$(macos_app_download_url "$name") || return 1
-  case "$name" in visual-studio-code|claude) format=zip ;; esac
+  case "$name" in visual-studio-code|claude|maccy) format=zip ;; esac
   tmp=$(mktemp -d) || return 1
   if ! curl -fsSL "$url" -o "$tmp/download.$format"; then
     status=1
@@ -194,15 +195,11 @@ stage_macos_apps() {
     return 0
   fi
 
-  local cask
-  for cask in "${PACKAGES_BREW_CASK[@]}"; do
-    [[ "$cask" == font-jetbrains-mono-nerd-font ]] && continue
-    install_brew_cask_if_missing "$cask"
-  done
-  for cask in "${MACOS_DIRECT_APPS[@]}"; do
-    [[ "$cask" == libreoffice && -n "${SKIP_LIBREOFFICE:-}" ]] && continue
-    [[ "$cask" == visual-studio-code && -n "${SKIP_VSCODE:-}" ]] && continue
-    install_macos_app "$cask" || return 1
+  local app
+  for app in "${MACOS_DIRECT_APPS[@]}"; do
+    [[ "$app" != libreoffice || -z "${SKIP_LIBREOFFICE:-}" ]] || continue
+    [[ "$app" != visual-studio-code || -z "${SKIP_VSCODE:-}" ]] || continue
+    install_macos_app "$app" || return 1
   done
   [[ "${INSTALL_CHATGPT_APP:-}" != 1 ]] || install_macos_app chatgpt || return 1
   [[ "${INSTALL_CLAUDE_DESKTOP:-}" != 1 ]] || install_macos_app claude || return 1
@@ -215,7 +212,7 @@ stage_macos_fonts() {
     info "Nerd Font not requested"
     return 0
   fi
-  install_brew_cask_if_missing font-jetbrains-mono-nerd-font
+  ensure_brew_cask font-jetbrains-mono-nerd-font
 }
 
 stage_macos_kitty() {

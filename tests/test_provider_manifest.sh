@@ -22,28 +22,28 @@ array_has() {
   return 1
 }
 
-# macOS uses one uv provider; Linux uses Astral's standalone installer.
-array_has uv "${PACKAGES_BREW[@]}"
-array_has uv-standalone "${PROVIDERS_LINUX_UPSTREAM[@]}"
-
-# Platform/runtime ownership must not drift into a blanket Brew strategy.
-array_has kitty "${PROVIDERS_COMMON_UPSTREAM[@]}"
-if array_has kitty "${PACKAGES_BREW[@]}" \
-    || array_has kitty "${PACKAGES_BREW_CASK[@]}"; then
-  printf 'kitty must remain upstream-owned\n' >&2
-  exit 1
-fi
-array_has apple-container-signed-pkg "${PROVIDERS_MACOS_UPSTREAM[@]}"
-if array_has container "${PACKAGES_BREW[@]}"; then
-  printf 'Apple Container must not become Homebrew-owned\n' >&2
-  exit 1
-fi
-array_has opencode "${PROVIDERS_LINUX_UPSTREAM[@]}"
-array_has copilot "${PROVIDERS_LINUX_UPSTREAM[@]}"
-array_has anomalyco/tap/opencode-v2 "${PACKAGES_BREW[@]}"
-for _agent_cask in claude-code codex copilot-cli; do
-  array_has "$_agent_cask" "${PACKAGES_BREW_CLI_CASK[@]}"
+# Native managers must not compete with Homebrew launchers.
+for _native in rustup uv-standalone kitty aws-cli claude codex copilot agy; do
+  array_has "$_native" "${PROVIDERS_COMMON_UPSTREAM[@]}"
 done
+for _native in rustup uv ruff awscli container; do
+  if array_has "$_native" "${PACKAGES_BREW[@]}"; then
+    printf 'native provider also requested from Homebrew: %s\n' "$_native" >&2
+    exit 1
+  fi
+done
+array_has apple-container-signed-pkg "${PROVIDERS_MACOS_UPSTREAM[@]}"
+upstream_has_project container
+array_has opencode "${PROVIDERS_LINUX_UPSTREAM[@]}"
+array_has anomalyco/tap/opencode-v2 "${PACKAGES_BREW[@]}"
+array_has anomalyco/tap "${BREW_TAPS[@]}"
+for _desktop in kitty visual-studio-code libreoffice maccy chatgpt claude; do
+  if array_has "$_desktop" "${PACKAGES_BREW_CASK[@]}"; then
+    printf 'desktop app requested from Homebrew: %s\n' "$_desktop" >&2
+    exit 1
+  fi
+done
+array_has font-jetbrains-mono-nerd-font "${PACKAGES_BREW_CASK[@]}"
 upstream_has_project copilot
 array_has neurosnap/tap/zmx "${PACKAGES_BREW[@]}"
 array_has zmx "${PROVIDERS_LINUX_UPSTREAM[@]}"
@@ -61,7 +61,7 @@ array_has ncurses-bin "${PACKAGES_APT[@]}"
 [[ "$KITTY_TERMINFO_SOURCE_URL" == \
   https://raw.githubusercontent.com/kovidgoyal/kitty/*/terminfo/kitty.terminfo ]]
 
-# Compose is intentionally the narrow Homebrew compatibility layer.
+# Compose accompanies Apple's native Container package.
 array_has container-compose "${PACKAGES_BREW[@]}"
 
 # Node.js is NodeSource-owned on Linux. Leaving either name in PACKAGES_APT
@@ -151,7 +151,7 @@ array_has gh "${PROVIDERS_LINUX_OFFICIAL_REPO[@]}"
 array_has cmake "${PROVIDERS_LINUX_OFFICIAL_REPO[@]}"
 
 # The Codex app is the packaged desktop application and is distinct from the
-# Codex CLI, which uses Homebrew on macOS and OpenAI's installer on Linux.
+# Codex CLI, which uses OpenAI's installer on both platforms.
 array_has chatgpt "${PROVIDERS_LINUX_OFFICIAL_REPO[@]}"
 array_has codex "${PROVIDERS_LINUX_UPSTREAM[@]}"
 if array_has "$CODEX_APP_PACKAGE" "${PACKAGES_APT[@]}"; then
@@ -191,6 +191,7 @@ array_has zsh-syntax-highlighting "${PACKAGES_BREW[@]}"
 
 # MarkItDown is uv-owned. Azure uses uv only without a matching Microsoft suite.
 array_has 'markitdown[all]' "${UV_TOOLS_COMMON[@]}"
+array_has ruff "${UV_TOOLS_MACOS[@]}"
 array_has azure-cli "${UV_TOOLS_LINUX[@]}"
 
 # Cross-platform uv tools must not also be packaged, or two launchers compete.
@@ -210,14 +211,11 @@ for _uv_tool in "${UV_TOOLS_LINUX[@]}"; do
   fi
 done
 array_has azure-cli "${PACKAGES_BREW_CLI_CASK[@]}"
-array_has aws-cli "${PROVIDERS_COMMON_UPSTREAM[@]}"
 array_has google-cloud-cli "${PROVIDERS_MACOS_UPSTREAM[@]}"
-for _unsupported in awscli azure-cli; do
-  if array_has "$_unsupported" "${PACKAGES_BREW[@]}"; then
-    printf 'incorrect Homebrew formula provider: %s\n' "$_unsupported" >&2
-    exit 1
-  fi
-done
+if array_has azure-cli "${PACKAGES_BREW[@]}"; then
+  printf 'Azure CLI must use the declared Homebrew cask\n' >&2
+  exit 1
+fi
 array_has cf "${NPM_TOOLS_COMMON[@]}"
 for _cloud_tool in openai ant; do
   array_has "$_cloud_tool" "${PROVIDERS_LINUX_UPSTREAM[@]}"
@@ -227,7 +225,6 @@ array_has openai/tools/openai "${PACKAGES_BREW_CLI_CASK[@]}"
 array_has anthropics/tap/ant "${PACKAGES_BREW_CLI_CASK[@]}"
 array_has gddy "${PROVIDERS_COMMON_UPSTREAM[@]}"
 upstream_has_project gddy
-array_has agy "${PROVIDERS_COMMON_UPSTREAM[@]}"
 array_has google-cloud-cli "${PROVIDERS_LINUX_OFFICIAL_REPO[@]}"
 array_has azure-cli "${PROVIDERS_LINUX_OFFICIAL_REPO[@]}"
 array_has ttscoff/thelab/apex "${PACKAGES_BREW[@]}"
@@ -287,11 +284,13 @@ case "$FLATHUB_REMOTE_URL" in
   *) printf 'FLATHUB_REMOTE_URL must be the official Flathub repo file\n' >&2; exit 1 ;;
 esac
 
-# Visual Studio Code comes from Microsoft's own archive on Linux and Homebrew on
-# macOS. It must not appear in PACKAGES_APT, which would let the distribution
+# Visual Studio Code comes from Microsoft's downloads. It must not appear in
+# PACKAGES_APT, which would let the distribution
 # answer to the name if the vendor archive failed to register.
 array_has code "${PROVIDERS_LINUX_OFFICIAL_REPO[@]}"
-array_has visual-studio-code "${MACOS_DIRECT_APPS[@]}"
+for _app in visual-studio-code libreoffice maccy; do
+  array_has "$_app" "${MACOS_DIRECT_APPS[@]}"
+done
 if array_has code "${PACKAGES_APT[@]}"; then
   printf 'code is vendor-archive-owned; remove it from PACKAGES_APT\n' >&2
   exit 1

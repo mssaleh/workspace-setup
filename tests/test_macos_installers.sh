@@ -9,6 +9,7 @@ export HOME OS_KIND
 mkdir -p "$HOME/.local/bin" "$TEST_TMP/Applications"
 . "$TEST_ROOT/lib/log.sh"
 . "$TEST_ROOT/lib/manifest.sh"
+. "$TEST_ROOT/lib/macos.sh"
 . "$TEST_ROOT/scripts/stage_fonts_terminal.sh"
 . "$TEST_ROOT/scripts/stage_macos_graphical.sh"
 . "$TEST_ROOT/scripts/stage_toolchains.sh"
@@ -17,6 +18,8 @@ MACOS_APP_ARTIFACTS=(
   "visual-studio-code:$TEST_TMP/Applications/Visual Studio Code.app"
   "libreoffice:$TEST_TMP/Applications/LibreOffice.app"
   "claude:$TEST_TMP/Applications/Claude.app"
+  "maccy:$TEST_TMP/Applications/Maccy.app"
+  "chatgpt:$TEST_TMP/Applications/ChatGPT.app"
 )
 calls="$TEST_TMP/calls"
 fixture_arch=arm64
@@ -61,6 +64,11 @@ fixture_arch=x86_64
 fixture_arch=arm64
 [[ "$(macos_app_download_url libreoffice)" == */26.8.2/mac/aarch64/LibreOffice_26.8.2_MacOS_aarch64.dmg ]]
 [[ "$(macos_app_download_url claude)" == https://downloads.claude.ai/releases/darwin/universal/4.0.1/Claude.zip ]]
+[[ "$(macos_app_download_url maccy)" == https://github.com/p0deje/Maccy/releases/latest/download/Maccy.app.zip ]]
+[[ "$(macos_app_download_url chatgpt)" == "$CHATGPT_MACOS_DOWNLOAD_URL" ]]
+fixture_arch=x86_64
+if macos_app_download_url chatgpt >/dev/null 2>&1; then exit 1; fi
+fixture_arch=arm64
 
 install_macos_app visual-studio-code >/dev/null
 [[ -d "$TEST_TMP/Applications/Visual Studio Code.app/Contents/MacOS" ]]
@@ -87,9 +95,16 @@ fixture_app=Claude.app
 install_macos_app claude >/dev/null
 [[ -d "$TEST_TMP/Applications/Claude.app/Contents/MacOS" ]]
 
+fixture_app=Maccy.app
+install_macos_app maccy >/dev/null
+[[ -d "$TEST_TMP/Applications/Maccy.app/Contents/MacOS" ]]
+: > "$calls"
+install_macos_app maccy >/dev/null
+[[ ! -s "$calls" ]]
+
 # The SDK installer receives explicit noninteractive, profile-preserving flags.
 mkdir -p "$TEST_TMP/payload/google-cloud-sdk/bin"
-for tool in gcloud bq gsutil git-credential-gcloud docker-credential-gcloud; do
+for tool in gcloud bq gsutil git-credential-gcloud.sh docker-credential-gcloud; do
   printf '#!/bin/sh\nprintf "Google Cloud SDK 591.0.0\\n"\n' > "$TEST_TMP/payload/google-cloud-sdk/bin/$tool"
   chmod +x "$TEST_TMP/payload/google-cloud-sdk/bin/$tool"
 done
@@ -98,24 +113,40 @@ cat > "$TEST_TMP/payload/google-cloud-sdk/install.sh" <<'SH'
 test "$*" = '--quiet --path-update=false --command-completion=false --install-python=false'
 SH
 chmod +x "$TEST_TMP/payload/google-cloud-sdk/install.sh"
+export GCLOUD_TEST_CALLS="$TEST_TMP/gcloud-calls"
+cat > "$TEST_TMP/payload/google-cloud-sdk/bin/gcloud" <<'SH'
+#!/bin/sh
+printf '%s\n' "$*" >> "$GCLOUD_TEST_CALLS"
+case "$*" in
+  'components update --quiet') exit 0 ;;
+  --version) printf 'Google Cloud SDK 591.0.0\n' ;;
+  *) exit 1 ;;
+esac
+SH
 tar -czf "$TEST_TMP/sdk.tar.gz" -C "$TEST_TMP/payload" google-cloud-sdk
 printf 'user shell settings\n' > "$HOME/.zshrc"
 install_google_cloud_macos >/dev/null
 [[ "$HOME/.local/bin/gcloud" -ef "$HOME/.local/share/google-cloud-sdk/bin/gcloud" ]]
+[[ "$HOME/.local/bin/git-credential-gcloud" -ef "$HOME/.local/share/google-cloud-sdk/bin/git-credential-gcloud.sh" ]]
 [[ "$(cat "$HOME/.zshrc")" == 'user shell settings' ]]
 : > "$calls"
 install_google_cloud_macos >/dev/null
 [[ ! -s "$calls" ]]
 
-# An Azure formula migrates only after the replacement cask is downloadable.
-. "$TEST_ROOT/scripts/stage_packages.sh"
+[[ "$(cat "$GCLOUD_TEST_CALLS")" == "$(printf 'components update --quiet\n--version\ncomponents update --quiet\n--version')" ]]
+
+# An Azure formula migrates only after its replacement is downloadable.
 PKGMGR=brew
 BREW_BIN=brew_fixture
+. "$TEST_ROOT/scripts/stage_packages.sh"
 BREW_TAPS=(fixture/tap)
-PACKAGES_BREW=(fixture)
+PACKAGES_BREW=(fixture "node@$NODE_MAJOR" "python@$PYTHON_MINOR" container-compose)
 PACKAGES_BREW_CLI_CASK=(azure-cli)
+SKIP_CONTAINER=1
+: > "$calls"
 fixture_formula=1
 fixture_cask=0
+fixture_failure=''
 brew_fixture() {
   printf '%s\n' "$*" >> "$calls"
   case "$*" in
@@ -125,30 +156,27 @@ brew_fixture() {
     'uninstall --formula azure-cli') fixture_formula=0 ;;
     'list --cask azure-cli') [[ "$fixture_cask" == 1 ]] ;;
     'install --cask azure-cli') fixture_cask=1 ;;
-    "install node@$NODE_MAJOR python@$PYTHON_MINOR")
+    "install --formula fixture node@$NODE_MAJOR python@$PYTHON_MINOR")
       [[ "${HOMEBREW_NO_ASK:-}" == 1 && "${HOMEBREW_NO_INSTALL_CLEANUP:-}" == 1 \
         && "${HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK:-}" == 1 && "$fixture_failure" != runtime ]] ;;
     *) return 1 ;;
   esac
 }
-pkg_installed() { return 0; }
 ensure_xterm_kitty_terminfo() { :; }
 remove_legacy_tmux() { :; }
-: > "$calls"
 stage_packages >/dev/null
 [[ "$fixture_formula" == 0 && "$fixture_cask" == 1 ]]
-[[ "$(sed -n '/^fetch /p; /^uninstall /p; /^install /p' "$calls")" == $'fetch --cask azure-cli\nuninstall --formula azure-cli\ninstall --cask azure-cli' ]]
+[[ "$(sed -n '/^fetch /p; /^uninstall /p; /^install --cask /p' "$calls")" == $'fetch --cask azure-cli\nuninstall --formula azure-cli\ninstall --cask azure-cli' ]]
 fixture_formula=1 fixture_cask=0 fixture_failure=fetch
 if stage_packages >/dev/null 2>&1; then exit 1; fi
 [[ "$fixture_formula" == 1 && "$fixture_cask" == 0 ]]
 
-# Installed runtime formulae still resolve current patches without other upgrades.
+# Every declared formula resolves current versions on a normal rerun.
 fixture_failure=''
-PACKAGES_BREW=(fixture "node@$NODE_MAJOR" "python@$PYTHON_MINOR")
 PACKAGES_BREW_CLI_CASK=()
 : > "$calls"
 stage_packages >/dev/null
-[[ "$(cat "$calls")" == "$(printf 'tap\ninstall node@%s python@%s' "$NODE_MAJOR" "$PYTHON_MINOR")" ]]
+grep -Fxq "install --formula fixture node@$NODE_MAJOR python@$PYTHON_MINOR" "$calls"
 fixture_failure=runtime
 if stage_packages >/dev/null 2>&1; then exit 1; fi
 printf 'macOS installer tests: ok\n'

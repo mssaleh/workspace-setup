@@ -10,6 +10,7 @@ TEST_TMP=$(mktemp -d "${TMPDIR:-/tmp}/macos-graphical-test.XXXXXX")
 trap 'rm -rf "$TEST_TMP"' EXIT
 HOME="$TEST_TMP/home"
 OS_KIND=macos
+BREW_BIN=false
 HOST_PROFILE=workstation
 SESSION_KIND=ssh
 export HOME OS_KIND HOST_PROFILE SESSION_KIND
@@ -79,28 +80,27 @@ chmod +x "$VSCODE_APP_BIN/code-tunnel"
 
 # Replace mutation points with recorders; the stage selection itself remains
 # real. A workstation provisioned through SSH must install its applications.
-install_brew_cask_if_missing() { printf 'cask:%s\n' "$1" >> "$calls"; }
-install_macos_app() { printf 'direct:%s\n' "$1" >> "$calls"; }
+install_macos_app() { printf 'app:%s\n' "$1" >> "$calls"; }
 ensure_vscode_cli_links() { printf 'vscode-links\n' >> "$calls"; }
 stage_macos_apps >/dev/null
-grep -Fxq 'direct:visual-studio-code' "$calls"
-grep -Fxq 'cask:maccy' "$calls"
-grep -Fxq 'direct:libreoffice' "$calls"
+grep -Fxq 'app:visual-studio-code' "$calls"
+grep -Fxq 'app:maccy' "$calls"
+grep -Fxq 'app:libreoffice' "$calls"
 grep -Fxq 'vscode-links' "$calls"
 if grep -Fq 'font-jetbrains-mono-nerd-font' "$calls"; then
   fail_test 'application stage still owns the Nerd Font cask'
 fi
-if grep -Eq 'direct:(chatgpt|claude)$' "$calls"; then
+if grep -Eq 'app:(chatgpt|claude)$' "$calls"; then
   fail_test 'optional desktop agents were installed without an explicit request'
 fi
 
 # Explicit optional applications are exact and independently selectable.
 : > "$calls"
 INSTALL_CHATGPT_APP=1 INSTALL_CLAUDE_DESKTOP=1 stage_macos_apps >/dev/null
-grep -Fxq 'direct:chatgpt' "$calls"
-grep -Fxq 'direct:claude' "$calls"
+grep -Fxq 'app:chatgpt' "$calls"
+grep -Fxq 'app:claude' "$calls"
 
-# A headless profile installs no GUI cask even in a local session.
+# A headless profile installs no GUI app even in a local session.
 : > "$calls"
 HOST_PROFILE=headless SESSION_KIND=local stage_macos_apps >/dev/null
 [[ ! -s "$calls" ]] || fail_test 'headless host profile installed workstation applications'

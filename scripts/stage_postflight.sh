@@ -525,7 +525,6 @@ postflight_shell_paths() {
     postflight_fail "bash Homebrew resolution is wrong (got '${brew_path:-missing}')"
   fi
   local expected_uv="$HOME/.local/bin/uv"
-  [[ "$OS_KIND" != macos ]] || expected_uv="$BREW_PREFIX/bin/uv"
   if [[ -n "$uv_path" && "$uv_path" -ef "$expected_uv" ]]; then
     postflight_pass "bash resolves the declared uv provider"
   else
@@ -553,7 +552,7 @@ postflight_shell_paths() {
       postflight_fail "zsh Homebrew resolution is wrong (got '${brew_path:-missing}')"
     fi
     if [[ -n "$uv_path" && "$uv_path" -ef "$expected_uv" ]]; then
-      postflight_pass "zsh resolves Homebrew uv"
+      postflight_pass "zsh resolves the declared uv provider"
     else
       postflight_fail "zsh uv PATH winner is wrong (got '${uv_path:-missing}')"
     fi
@@ -855,18 +854,11 @@ postflight_upstream_tools() {
   fi
   if [[ -x "$HOME/.cargo/bin/rustup" && -f "$HOME/.cargo/env" ]] \
       && "$HOME/.cargo/bin/rustup" which rustc >/dev/null 2>&1; then
-    postflight_pass "rustup upstream artifact, environment, and active compiler exist"
+    postflight_pass "rustup native artifact, environment, and active compiler are usable"
   else
     postflight_fail "rustup or its active compiler is unavailable"
   fi
-  if [[ "$OS_KIND" == macos ]]; then
-    if [[ "$HOME/.local/bin/uv" -ef "$BREW_PREFIX/bin/uv" \
-          && "$HOME/.local/bin/uvx" -ef "$BREW_PREFIX/bin/uvx" ]]; then
-      postflight_pass "uv and uvx resolve to Homebrew"
-    else
-      postflight_fail "uv/uvx conflict with the declared Homebrew provider"
-    fi
-  elif [[ -x "$HOME/.local/bin/uv" && -x "$HOME/.local/bin/uvx" \
+  if [[ -x "$HOME/.local/bin/uv" && -x "$HOME/.local/bin/uvx" \
         && -f "$HOME/.config/uv/uv-receipt.json" ]]; then
     postflight_pass "uv standalone binaries and receipt exist"
   else
@@ -874,10 +866,10 @@ postflight_upstream_tools() {
   fi
   local agent resolved artifact
   local agents=(claude codex copilot agy)
-  [[ "$OS_KIND" != macos ]] || agents+=(opencode)
+  [[ "$OS_KIND" != macos ]] || agents+=(opencode ruff)
   for agent in "${agents[@]}"; do
     artifact="$HOME/.local/bin/$agent"
-    if [[ "$OS_KIND" == macos && "$agent" != agy ]]; then
+    if [[ "$OS_KIND" == macos && "$agent" == opencode ]]; then
       artifact="$BREW_PREFIX/bin/$agent"
     fi
     resolved=$(command -v "$agent" 2>/dev/null || true)
@@ -1054,9 +1046,9 @@ postflight_upstream_tools() {
           && -L "$HOME/.local/bin/kitty" && -L "$HOME/.local/bin/kitten" \
           && "$HOME/.local/bin/kitty" -ef "$kitty_bin" \
           && "$HOME/.local/bin/kitten" -ef "$kitten_bin" ]]; then
-      postflight_pass "upstream kitty app and CLI links are complete"
+      postflight_pass "declared kitty provider and CLI links are complete"
     else
-      postflight_fail "upstream kitty installation or CLI links are incomplete"
+      postflight_fail "declared kitty installation or CLI links are incomplete"
     fi
     if [[ "$OS_KIND" == linux ]]; then
       if ls "$HOME/.local/share/fonts"/JetBrainsMonoNerdFontMono-*.ttf >/dev/null 2>&1; then

@@ -4,7 +4,6 @@ set -euo pipefail
 TEST_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # shellcheck disable=SC1091
 . "$TEST_ROOT/tests/helpers.sh"
-TEST_NAME='postflight tests'
 
 # macOS shell integration uses native Homebrew and zsh with fixture commands.
 # Linux postflight is covered by test_linux_postflight.sh.
@@ -82,11 +81,11 @@ mkdir -p "$HOME/.opencode/bin"
 printf '#!/bin/sh\nexit 0\n' > "$HOME/.opencode/bin/opencode"
 chmod +x "$HOME/.opencode/bin/opencode"
 ln -s "$HOME/.opencode/bin/opencode" "$HOME/.local/bin/opencode"
-for command_name in uv uvx claude codex copilot delta; do
+for command_name in uv uvx claude codex copilot agy ruff delta; do
   printf '%s\n' '#!/bin/sh' 'exit 0' > "$HOME/.local/bin/$command_name"
   chmod +x "$HOME/.local/bin/$command_name"
 done
-for command_name in gh gcloud az kubectl gddy openai ant agy; do
+for command_name in gh kubectl gddy "${BREW_CLI_COMMANDS[@]}"; do
   printf '%s\n' '#!/bin/sh' 'printf "cli 1.0.0\n"' > "$HOME/.local/bin/$command_name"
   chmod +x "$HOME/.local/bin/$command_name"
 done
@@ -94,13 +93,16 @@ printf '%s\n' '#!/bin/sh' 'printf "aws-cli/2.0.0\n"' > "$HOME/.local/bin/aws"
 chmod +x "$HOME/.local/bin/aws"
 mkdir -p "$HOME/.npm/packages/bin"
 cp "$HOME/.local/bin/gddy" "$HOME/.npm/packages/bin/cf"
+mkdir -p "$HOME/.local/share/google-cloud-sdk/bin"
+cp "$HOME/.local/bin/gddy" "$HOME/.local/share/google-cloud-sdk/bin/gcloud"
+ln -s "$HOME/.local/share/google-cloud-sdk/bin/gcloud" "$HOME/.local/bin/gcloud"
 printf '%s\n' '#!/bin/sh' 'exit 0' > "$HOME/.cargo/bin/rustup"
 chmod +x "$HOME/.cargo/bin/rustup"
 # shellcheck disable=SC2016 # literal content for the fixture's future shell
 printf '%s\n' 'export PATH="$HOME/.cargo/bin:$PATH"' > "$HOME/.cargo/env"
 printf '%s\n' '{}' > "$HOME/.config/uv/uv-receipt.json"
 mkdir -p "$BREW_PREFIX/bin" "$BREW_PREFIX/opt/node@${NODE_MAJOR}/bin" "$BREW_PREFIX/opt/python@$PYTHON_MINOR/bin" \
-  "$HOME/.local/share/google-cloud-sdk/bin"
+  "$BREW_PREFIX/opt/python@$PYTHON_MINOR/libexec/bin"
 for command_name in "${BREW_CLI_COMMANDS[@]}"; do
   cp "$HOME/.local/bin/$command_name" "$BREW_PREFIX/bin/$command_name"
   rm "$HOME/.local/bin/$command_name"
@@ -111,9 +113,10 @@ chmod +x "$BREW_PREFIX/opt/node@${NODE_MAJOR}/bin/node"
 printf '#!/bin/sh\nprintf "Python %s.10\\n"\n' "$PYTHON_MINOR" > "$BREW_PREFIX/opt/python@$PYTHON_MINOR/bin/python$PYTHON_MINOR"
 chmod +x "$BREW_PREFIX/opt/python@$PYTHON_MINOR/bin/python$PYTHON_MINOR"
 ln -s "$BREW_PREFIX/opt/python@$PYTHON_MINOR/bin/python$PYTHON_MINOR" "$HOME/.local/bin/python3"
-cp "$HOME/.local/bin/gcloud" "$HOME/.local/share/google-cloud-sdk/bin/gcloud"
-rm "$HOME/.local/bin/gcloud"
-ln -s "$HOME/.local/share/google-cloud-sdk/bin/gcloud" "$HOME/.local/bin/gcloud"
+for command_name in python python3; do
+  ln -s "$BREW_PREFIX/opt/python@$PYTHON_MINOR/bin/python$PYTHON_MINOR" \
+    "$BREW_PREFIX/opt/python@$PYTHON_MINOR/libexec/bin/$command_name"
+done
 # The end-to-end fixture has no real terminal database under its isolated HOME.
 # A focused test exercises installation and TERMINFO isolation directly.
 infocmp() { [[ "${1:-}" == xterm-kitty ]]; }
@@ -131,5 +134,16 @@ stage_dotfiles
 stage_macos_cli
 stage_macos_postflight
 [[ "$POSTFLIGHT_FAILURES" == 0 ]]
+
+# A user profile can put another Python ahead of the declared provider after
+# .bashrc succeeds; postflight must inspect the final login-shell environment.
+mkdir -p "$TEST_TMP/other-python"
+printf '#!/bin/sh\nprintf "Python 3.15.2\\n"\n' > "$TEST_TMP/other-python/python3"
+chmod +x "$TEST_TMP/other-python/python3"
+printf '\nexport PATH="%s:$PATH"\n' "$TEST_TMP/other-python" >> "$HOME/.bash_profile"
+POSTFLIGHT_PASSES=0 POSTFLIGHT_FAILURES=0
+postflight_macos_cli_paths > "$TEST_TMP/login-conflict" 2>&1
+[[ "$POSTFLIGHT_FAILURES" == 1 ]]
+grep -Fq 'Python login PATH winner is wrong' "$TEST_TMP/login-conflict"
 
 printf 'postflight tests: ok\n'

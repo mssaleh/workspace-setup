@@ -185,10 +185,6 @@ stage_completions
 # The bounded Homebrew updater is also inert if called directly on Linux.
 # shellcheck disable=SC1091
 . "$TEST_ROOT/scripts/stage_macos_update.sh"
-# shellcheck disable=SC2034 # consumed dynamically by stage_macos_update
-UPDATE_HOMEBREW=1
-# shellcheck disable=SC2034 # consumed dynamically by stage_macos_update
-UPGRADE_HOMEBREW_FORMULAE=1
 BREW_BIN=false
 stage_macos_update
 

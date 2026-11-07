@@ -99,6 +99,22 @@ rm "$TEST_TMP/rust-toolchain"
 stage_toolchains >/dev/null
 [[ -f "$TEST_TMP/rust-toolchain" ]] || { printf 'FAIL: rustup without a compiler was not repaired\n' >&2; exit 1; }
 
+# macOS uses the same native managers and installs Ruff through uv.
+BREW_PREFIX="$TEST_TMP/brew"
+: > "$TEST_TMP/uv-tool-calls"
+OS_KIND=macos stage_toolchains >/dev/null
+[[ "$(cat "$TEST_TMP/uv-tool-calls")" == $'markitdown[all]\nruff' ]]
+
+# A Homebrew-linked manager must not receive a native self-update.
+mkdir -p "$BREW_PREFIX/bin"
+mv "$HOME/.local/bin/uv" "$BREW_PREFIX/bin/uv"
+ln -s "$BREW_PREFIX/bin/uv" "$HOME/.local/bin/uv"
+: > "$TEST_TMP/rust-calls"
+if OS_KIND=macos stage_toolchains >/dev/null 2>&1; then exit 1; fi
+[[ ! -s "$TEST_TMP/rust-calls" && "$HOME/.local/bin/uv" -ef "$BREW_PREFIX/bin/uv" ]]
+rm "$HOME/.local/bin/uv"
+mv "$BREW_PREFIX/bin/uv" "$HOME/.local/bin/uv"
+
 # Native installer routing, updates, profile preservation, and failure handling.
 . "$TEST_ROOT/lib/upstream.sh"
 upstream_latest_version() { printf '2.2.1\n'; }
@@ -194,17 +210,21 @@ for tool in claude codex copilot opencode agy; do printf '2.2.1\n' > "$TEST_TMP/
 install_coding_agents >/dev/null
 [[ "$(cat "$TEST_TMP/native-calls")" == $'claude install stable\ncodex install\nopencode upgrade --method curl\nagy update' ]]
 
-# macOS executes the declared Homebrew artifacts without native installers.
-BREW_PREFIX="$TEST_TMP/brew"
-mkdir -p "$BREW_PREFIX/bin"
-for tool in claude codex copilot opencode; do
-  cp "$TEST_TMP/current/$tool" "$BREW_PREFIX/bin/$tool"
-  rm "$HOME/.local/bin/$tool"
-  ln -s "$BREW_PREFIX/bin/$tool" "$HOME/.local/bin/$tool"
-done
+# macOS uses the vendor tap only for OpenCode; other agents update natively.
+cp "$TEST_TMP/current/opencode" "$BREW_PREFIX/bin/opencode"
+rm "$HOME/.local/bin/opencode"
+ln -s "$BREW_PREFIX/bin/opencode" "$HOME/.local/bin/opencode"
 : > "$TEST_TMP/native-calls"
 OS_KIND=macos install_coding_agents >/dev/null
-[[ "$(cat "$TEST_TMP/native-calls")" == 'agy update' ]]
+[[ "$(cat "$TEST_TMP/native-calls")" == $'claude install stable\ncodex install\nagy update' ]]
+
+# Do not send a native updater through a Homebrew-owned agent launcher.
+cp "$TEST_TMP/current/claude" "$BREW_PREFIX/bin/claude"
+rm "$HOME/.local/bin/claude"
+ln -s "$BREW_PREFIX/bin/claude" "$HOME/.local/bin/claude"
+: > "$TEST_TMP/native-calls"
+if OS_KIND=macos install_coding_agents >/dev/null 2>&1; then exit 1; fi
+[[ ! -s "$TEST_TMP/native-calls" && "$HOME/.local/bin/claude" -ef "$BREW_PREFIX/bin/claude" ]]
 reset_agents
 install_coding_agents >/dev/null
 

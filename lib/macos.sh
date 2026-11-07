@@ -2,6 +2,20 @@
 # lib/macos.sh — macOS host-role and invocation-context policy.
 # Sourced only after setup.sh has positively detected Darwin.
 
+brew_managed() {
+  HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ASK=1 HOMEBREW_NO_INSTALL_CLEANUP=1 \
+  HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1 "$BREW_BIN" "$@" </dev/null
+}
+
+ensure_brew_cask() {
+  local cask="$1"
+  if "$BREW_BIN" list --cask "$cask" >/dev/null 2>&1; then
+    brew_managed upgrade --cask "$cask"
+  else
+    brew_managed install --cask "$cask"
+  fi
+}
+
 detect_host_context() {
   HOST_PROFILE=${HOST_PROFILE:-workstation}
   case "$HOST_PROFILE" in

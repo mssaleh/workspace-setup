@@ -30,7 +30,7 @@
 #   SKIP_NERD_FONT — macOS only: set to 1 to skip the Nerd Font only
 #   SKIP_KITTY — macOS only: set to 1 to skip the Kitty application only
 #   SKIP_MACOS_APPS — macOS only: skip workstation apps other than the font
-#   INSTALL_CHATGPT_APP — set to 1 to install ChatGPT/Codex on a macOS workstation
+#   INSTALL_CHATGPT_APP — set to 1 to install ChatGPT on a macOS workstation
 #   INSTALL_CLAUDE_DESKTOP — set to 1 to install Claude on a macOS workstation
 #   SKIP_TERMINAL_PROFILE — macOS only: skip Apple Terminal integration;
 #                Linux Ptyxis remains governed by the existing SKIP_FONT path
@@ -43,8 +43,6 @@
 #   SKIP_CONTAINER — set to 1 to skip Apple Container (macOS only)
 #   CONTAINER_START — set to 1 to start Apple Container; default is installed,
 #                configured, and stopped for on-demand laptop use
-#   UPDATE_CONTAINER — set to 1 to reinstall the latest Apple-signed package;
-#                refuses to stop a running system automatically
 #   SKIP_LIBREOFFICE — set to 1 to skip LibreOffice (both platforms)
 #   CONFIG_ADOPT — replace preserved conflicts and kept shell files with the
 #                shipped version. Either `all` or a colon-separated list of
@@ -53,10 +51,6 @@
 #   UPDATE_SYSTEM — set to 1 to also apply system updates (Linux only): apt
 #                full-upgrade, autoremove, snap, flatpak, uv. Off by default
 #                because full-upgrade may remove packages.
-#   UPDATE_HOMEBREW — set to 1 to refresh Homebrew metadata and report outdated
-#                repository-managed formulae/casks without upgrading them
-#   UPGRADE_HOMEBREW_FORMULAE — set to 1 to also upgrade only outdated formulae
-#                declared here. Never upgrades casks or runs brew cleanup.
 #   UPDATE_FIRMWARE — set to 1 to also apply firmware updates. Off by default:
 #                on a host with a TPM-sealed LUKS key this changes PCR 7 and the
 #                next boot asks for the recovery key.
@@ -374,6 +368,9 @@ main() {
   # Homebrew may have been installed by the preceding stage. Resolve its real
   # prefix again before any package or executable probe.
   detect_pkgmgr
+  if [[ "$OS_KIND" == macos ]]; then
+    stage "update: Homebrew metadata" stage_macos_update
+  fi
   stage "packages: cross-platform CLI toolbox"     stage_packages
   if [[ "$OS_KIND" == macos ]]; then
     stage "commands: macOS CLI links"               stage_macos_cli
@@ -420,10 +417,6 @@ main() {
   fi
   if [[ "$OS_KIND" == linux ]]; then
     stage "apparmor: converge Edge profile"          stage_apparmor
-  fi
-  if [[ "$OS_KIND" == macos ]] \
-      && [[ "${UPDATE_HOMEBREW:-}" == 1 || "${UPGRADE_HOMEBREW_FORMULAE:-}" == 1 ]]; then
-    stage "update: report/apply managed Homebrew formulae" stage_macos_update
   fi
 
   if [[ "$OS_KIND" == macos ]]; then

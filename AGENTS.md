@@ -40,10 +40,14 @@ Host providers belong in `lib/manifest.sh`; agent sources and targets belong in
 `manifests/`. Agent locations belong in `lib/agents/paths.sh`.
 Keep configuration ordinary and independent of the disposable payload.
 
-On macOS, prefer vendor-documented Homebrew methods. Otherwise use the vendor's
-direct installer. Foundational tools such as Bash, Python, and Node may use
-Homebrew without vendor endorsement; Homebrew is also acceptable when no vendor
-installation method exists. A community cask alone is not vendor documentation.
+On macOS, "official Homebrew" means maintained by the software vendor, not
+merely listed in homebrew/core or homebrew/cask. Prefer vendor-maintained taps,
+then practical vendor installers. Homebrew remains the baseline CLI/runtime
+fallback where a practical first-party Mac installer is unavailable. Do not
+classify a community package as first-party because a vendor documents it.
+Normal host runs update declared CLI providers within the selected runtime
+lines. Install missing desktop apps from vendor downloads, preserve existing
+apps, and leave their updates to the apps' own mechanisms.
 
 Use native MCP commands to write agent configuration. Claude uses user scope;
 replacing a name requires native removal first. Codex and OpenCode named adds

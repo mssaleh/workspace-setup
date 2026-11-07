@@ -1,14 +1,22 @@
 #!/usr/bin/env bash
 # scripts/stage_toolchains.sh — install rustup + uv + coding-agent CLIs and
 # the uv-managed Python applications.
-# Linux uses upstream installers. macOS uses vendor-documented Homebrew
-# providers where available; the remaining tools use vendor installers.
+# First-party installers own native tools; macOS uses vendor taps where available.
 
 stage_toolchains() {
   mkdir -p "$HOME/.local/bin"
   export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH:$HOME/.npm/packages/bin"
 
   # --- rustup ---
+  if [[ "$OS_KIND" == macos ]]; then
+    local native_path
+    for native_path in "$HOME/.cargo/bin/rustup" "$HOME/.local/bin/uv" "$HOME/.local/bin/uvx"; do
+      if [[ -L "$native_path" && "$(readlink "$native_path")" == "$BREW_PREFIX/"* ]]; then
+        warn "preserving Homebrew launcher $native_path; back it up before installing the native provider"
+        return 1
+      fi
+    done
+  fi
   if [[ -x "$HOME/.cargo/bin/rustup" && -f "$HOME/.cargo/env" ]]; then
     "$HOME/.cargo/bin/rustup" update stable </dev/null || return 1
     if "$HOME/.cargo/bin/rustup" which rustc >/dev/null 2>&1; then
@@ -38,14 +46,8 @@ stage_toolchains() {
     source "$HOME/.cargo/env"
   fi
 
-  # Homebrew owns uv updates on macOS; self update is only for Linux installs.
-  if [[ "$OS_KIND" == macos ]]; then
-    if [[ ! "$HOME/.local/bin/uv" -ef "$BREW_PREFIX/bin/uv" \
-          || ! "$HOME/.local/bin/uvx" -ef "$BREW_PREFIX/bin/uvx" ]]; then
-      warn "user-local uv/uvx paths conflict with the declared Homebrew provider"
-      return 1
-    fi
-  elif [[ -x "$HOME/.local/bin/uv" && -x "$HOME/.local/bin/uvx" && -f "$HOME/.config/uv/uv-receipt.json" ]]; then
+  # Astral's standalone installer owns uv updates on both platforms.
+  if [[ -x "$HOME/.local/bin/uv" && -x "$HOME/.local/bin/uvx" && -f "$HOME/.config/uv/uv-receipt.json" ]]; then
     # The receipt is what lets the standalone install update itself.
     local uv_installed uv_published uv_state
     uv_installed=$(upstream_installed_version "$HOME/.local/bin/uv" --version)
@@ -79,7 +81,11 @@ stage_toolchains() {
   # azure-cli is Homebrew-owned on macOS; adding uv's copy there would put a
   # second launcher ahead of Homebrew's on PATH.
   local uv_tools=("${UV_TOOLS_COMMON[@]}")
-  [[ "$OS_KIND" == linux ]] && uv_tools+=("${UV_TOOLS_LINUX[@]}")
+  if [[ "$OS_KIND" == linux ]]; then
+    uv_tools+=("${UV_TOOLS_LINUX[@]}")
+  else
+    uv_tools+=("${UV_TOOLS_MACOS[@]}")
+  fi
 
   local tool tool_name
   for tool in "${uv_tools[@]}"; do
@@ -150,6 +156,11 @@ install_coding_agents() {
   mkdir -p "$HOME/.local/bin" || return 1
   export PATH="$HOME/.local/bin:$PATH"
   for tool in claude codex copilot agy; do
+    if [[ "$OS_KIND" == macos && -L "$HOME/.local/bin/$tool" \
+          && "$(readlink "$HOME/.local/bin/$tool")" == "$BREW_PREFIX/"* ]]; then
+      warn "preserving Homebrew launcher ~/.local/bin/$tool; back it up before installing the native provider"
+      return 1
+    fi
     if [[ ( -e "$HOME/.local/bin/$tool" || -L "$HOME/.local/bin/$tool" ) \
           && ! -x "$HOME/.local/bin/$tool" ]]; then
       warn "preserving an existing path that blocks $tool: ~/.local/bin/$tool"
@@ -157,64 +168,62 @@ install_coding_agents() {
     fi
   done
 
-  if [[ "$OS_KIND" == macos ]]; then
-    for tool in claude codex copilot opencode; do
-      if [[ ! "$HOME/.local/bin/$tool" -ef "$BREW_PREFIX/bin/$tool" ]]; then
-        warn "$tool conflicts with its declared Homebrew provider at ~/.local/bin/$tool"
-        return 1
-      fi
-      "$BREW_PREFIX/bin/$tool" --version </dev/null || return 1
-    done
+  # https://code.claude.com/docs/en/setup#install-a-specific-version
+  # Anthropic's stable channel skips releases with major regressions.
+  if [[ -x "$HOME/.local/bin/claude" ]]; then
+    "$HOME/.local/bin/claude" install stable </dev/null || return 1
   else
-    # https://code.claude.com/docs/en/setup#install-a-specific-version
-    # Anthropic's stable channel skips releases with major regressions.
-    if [[ -x "$HOME/.local/bin/claude" ]]; then
-      "$HOME/.local/bin/claude" install stable </dev/null || return 1
-    else
-      tmp=$(mktemp -d) || return 1
-      status=0
-      if ! curl -fsSL "$CLAUDE_INSTALL_URL" -o "$tmp/install.sh" \
-          || ! bash "$tmp/install.sh" stable </dev/null; then
-        status=1
-      fi
-      rm -rf "$tmp"
-      ((status == 0)) || return 1
-    fi
-    "$HOME/.local/bin/claude" --version </dev/null || return 1
-
     tmp=$(mktemp -d) || return 1
     status=0
-    codex_home=$(agent_home codex)
-    # Codex 0.165's installer owns updates and package state, but can edit
-    # profiles when another package manager supplies codex. Isolate those edits.
-    # https://chatgpt.com/codex/install.sh
-    if ! curl -fsSL "$CODEX_INSTALL_URL" -o "$tmp/install.sh" \
-        || ! env HOME="$tmp" CODEX_HOME="$codex_home" \
-          CODEX_INSTALL_DIR="$HOME/.local/bin" CODEX_NON_INTERACTIVE=1 \
-          sh "$tmp/install.sh" --release latest </dev/null; then
+    if ! curl -fsSL "$CLAUDE_INSTALL_URL" -o "$tmp/install.sh" \
+        || ! bash "$tmp/install.sh" stable </dev/null; then
       status=1
     fi
     rm -rf "$tmp"
     ((status == 0)) || return 1
-    "$HOME/.local/bin/codex" --version </dev/null || return 1
+  fi
+  "$HOME/.local/bin/claude" --version </dev/null || return 1
 
-    # https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli
-    # Copilot 1.0.105's updater exhausts anonymous GitHub API quota. The
-    # installer uses release download URLs; the shared comparison uses HEAD.
-    if upstream_artifact_needed copilot "$HOME/.local/bin/copilot" \
-        "$HOME/.local/bin/copilot" --version; then
-      tmp=$(mktemp -d) || return 1
-      status=0
-      if ! curl -fsSL "$COPILOT_INSTALL_URL" -o "$tmp/install.sh" \
-          || ! env HOME="$tmp" PREFIX="$HOME/.local" VERSION=latest \
-            bash "$tmp/install.sh" </dev/null; then
-        status=1
-      fi
-      rm -rf "$tmp"
-      ((status == 0)) || return 1
+  tmp=$(mktemp -d) || return 1
+  status=0
+  codex_home=$(agent_home codex)
+  # Codex 0.165's installer owns updates and package state, but can edit
+  # profiles when another package manager supplies codex. Isolate those edits.
+  # https://chatgpt.com/codex/install.sh
+  if ! curl -fsSL "$CODEX_INSTALL_URL" -o "$tmp/install.sh" \
+      || ! env HOME="$tmp" CODEX_HOME="$codex_home" \
+        CODEX_INSTALL_DIR="$HOME/.local/bin" CODEX_NON_INTERACTIVE=1 \
+        sh "$tmp/install.sh" --release latest </dev/null; then
+    status=1
+  fi
+  rm -rf "$tmp"
+  ((status == 0)) || return 1
+  "$HOME/.local/bin/codex" --version </dev/null || return 1
+
+  # https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli
+  # Copilot 1.0.105's updater exhausts anonymous GitHub API quota. The
+  # installer uses release download URLs; the shared comparison uses HEAD.
+  if upstream_artifact_needed copilot "$HOME/.local/bin/copilot" \
+      "$HOME/.local/bin/copilot" --version; then
+    tmp=$(mktemp -d) || return 1
+    status=0
+    if ! curl -fsSL "$COPILOT_INSTALL_URL" -o "$tmp/install.sh" \
+        || ! env HOME="$tmp" PREFIX="$HOME/.local" VERSION=latest \
+          bash "$tmp/install.sh" </dev/null; then
+      status=1
     fi
-    "$HOME/.local/bin/copilot" --version </dev/null || return 1
+    rm -rf "$tmp"
+    ((status == 0)) || return 1
+  fi
+  "$HOME/.local/bin/copilot" --version </dev/null || return 1
 
+  if [[ "$OS_KIND" == macos ]]; then
+    if [[ ! "$HOME/.local/bin/opencode" -ef "$BREW_PREFIX/bin/opencode" ]]; then
+      warn "OpenCode conflicts with its vendor Homebrew provider"
+      return 1
+    fi
+    "$BREW_PREFIX/bin/opencode" --version </dev/null || return 1
+  else
     opencode_bin="$HOME/.opencode/bin/opencode"
     opencode_link="$HOME/.local/bin/opencode"
     if [[ ( -e "$opencode_bin" || -L "$opencode_bin" ) && ! -x "$opencode_bin" ]]; then
@@ -300,7 +309,7 @@ install_cloud_clis() {
   fi
 
   local aws_dir="$HOME/.local/share/aws-cli/v2/current/bin"
-  [[ "$OS_KIND" == macos ]] && aws_dir="$HOME/.local/share/aws-cli"
+  [[ "$OS_KIND" != macos ]] || aws_dir="$HOME/.local/share/aws-cli"
   for tool in aws aws_completer; do
     aws_bin="$aws_dir/$tool"
     if [[ ( -e "$HOME/.local/bin/$tool" || -L "$HOME/.local/bin/$tool" ) \

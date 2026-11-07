@@ -30,8 +30,10 @@ aws_dir="$XDG_DATA_HOME/aws-cli/v2/current/bin"
 [[ ! -x "$aws_dir/aws" ]] || exit 0
 mkdir -p "$aws_dir"
 printf '#!/bin/sh\nprintf "aws-cli/2.0.0\\n"\n' > "$aws_dir/aws"
-chmod +x "$aws_dir/aws"
+printf '#!/bin/sh\nexit 0\n' > "$aws_dir/aws_completer"
+chmod +x "$aws_dir/aws" "$aws_dir/aws_completer"
 ln -sf "$aws_dir/aws" "$XDG_BIN_HOME/aws"
+ln -sf "$aws_dir/aws_completer" "$XDG_BIN_HOME/aws_completer"
 SH
 cat > "$scratch/installers/gddy" <<'SH'
 #!/bin/bash
@@ -129,6 +131,7 @@ if install_cloud_clis >/dev/null 2>&1; then exit 1; fi
 rm "$HOME/.local/bin/aws"
 install_cloud_clis >/dev/null
 
+rm "$HOME/.local/bin/aws_completer"
 printf 'user completer\n' > "$HOME/.local/bin/aws_completer"
 if install_cloud_clis >/dev/null 2>&1; then exit 1; fi
 [[ "$(cat "$HOME/.local/bin/aws_completer")" == 'user completer' ]]
@@ -163,29 +166,34 @@ postflight_cloud_clis >/dev/null
 
 OS_KIND=macos
 BREW_PREFIX="$scratch/brew"
-mkdir -p "$BREW_PREFIX/bin" "$HOME/.local/share/google-cloud-sdk/bin"
+mkdir -p "$BREW_PREFIX/bin"
 for tool in openai ant az; do
   cp "$HOME/.local/bin/$tool" "$BREW_PREFIX/bin/$tool"
   rm "$HOME/.local/bin/$tool"
   ln -s "$BREW_PREFIX/bin/$tool" "$HOME/.local/bin/$tool"
 done
-cp "$HOME/.local/bin/gcloud" "$HOME/.local/share/google-cloud-sdk/bin/gcloud"
-rm "$HOME/.local/bin/gcloud"
-ln -s "$HOME/.local/share/google-cloud-sdk/bin/gcloud" "$HOME/.local/bin/gcloud"
+install_google_cloud_macos() {
+  mkdir -p "$HOME/.local/share/google-cloud-sdk/bin"
+  cp "$BREW_PREFIX/bin/openai" "$HOME/.local/share/google-cloud-sdk/bin/gcloud"
+  rm -f "$HOME/.local/bin/gcloud"
+  ln -s "$HOME/.local/share/google-cloud-sdk/bin/gcloud" "$HOME/.local/bin/gcloud"
+}
 rm "$HOME/.local/bin/aws" "$HOME/.local/bin/aws_completer"
-install_google_cloud_macos() { return 0; }
 : > "$scratch/archives"
 install_cloud_clis >/dev/null
 [[ ! -s "$scratch/archives" ]]
 [[ "$HOME/.local/bin/aws" -ef "$HOME/.local/share/aws-cli/aws" ]]
+[[ "$HOME/.local/bin/gcloud" -ef "$HOME/.local/share/google-cloud-sdk/bin/gcloud" ]]
 POSTFLIGHT_FAILURES=0
 postflight_cloud_clis >/dev/null
 [[ "$POSTFLIGHT_FAILURES" == 0 ]]
 fixture_arch=arm64
 install_cloud_clis >/dev/null
 [[ ! -s "$scratch/archives" ]]
-rm "$HOME/.local/bin/aws"
-ln -s "$HOME/.local/share/aws-cli/v2/current/bin/aws" "$HOME/.local/bin/aws"
+for tool in aws aws_completer; do
+  rm "$HOME/.local/bin/$tool"
+  ln -s "$HOME/.local/share/aws-cli/v2/current/bin/$tool" "$HOME/.local/bin/$tool"
+done
 OS_KIND=linux fixture_arch=aarch64 install_cloud_clis >/dev/null
 grep -Fxq 'openai openai_{version}_linux_arm64.tar.gz openai' "$scratch/archives"
 grep -Fxq 'ant ant_{version}_linux_arm64.tar.gz ant' "$scratch/archives"

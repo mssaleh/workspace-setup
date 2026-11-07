@@ -634,22 +634,11 @@ stage_packages() {
       # Homebrew's package-level trust keeps vendor taps scoped to this inventory.
       # https://docs.brew.sh/Tap-Trust
       [[ "$pkg" != */* ]] || "$BREW_BIN" trust --formula "$pkg" || return 1
-      # brew install upgrades outdated formulae; keep host runtime patches current.
-      # https://docs.brew.sh/Manpage#install-options-formulacask-
-      if pkg_installed "$pkg" \
-          && [[ "$pkg" != "node@$NODE_MAJOR" && "$pkg" != "python@$PYTHON_MINOR" ]]; then
-        : # already installed
-      else
-        missing+=("$pkg")
-      fi
+      missing+=("$pkg")
     done
     if ((${#missing[@]})); then
-      info "installing current Homebrew formulae: ${missing[*]}"
-      HOMEBREW_NO_ASK=1 HOMEBREW_NO_INSTALL_CLEANUP=1 \
-      HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1 \
-        "$BREW_BIN" install "${missing[@]}" || return 1
-    else
-      ok "all brew packages already installed"
+      info "ensuring declared Homebrew formulae are current…"
+      brew_managed install --formula "${missing[@]}" || return 1
     fi
 
     for pkg in ${PACKAGES_BREW_CLI_CASK[@]+"${PACKAGES_BREW_CLI_CASK[@]}"}; do
@@ -657,11 +646,10 @@ stage_packages() {
       # Microsoft's documented formula-to-cask migration preserves ~/.azure.
       # https://learn.microsoft.com/cli/azure/install-azure-cli-macos
       if [[ "$pkg" == azure-cli ]] && "$BREW_BIN" list --formula azure-cli >/dev/null 2>&1; then
-        "$BREW_BIN" fetch --cask azure-cli || return 1
-        "$BREW_BIN" uninstall --formula azure-cli || return 1
+        brew_managed fetch --cask azure-cli || return 1
+        brew_managed uninstall --formula azure-cli || return 1
       fi
-      "$BREW_BIN" list --cask "$pkg" >/dev/null 2>&1 \
-        || "$BREW_BIN" install --cask "$pkg" || return 1
+      ensure_brew_cask "$pkg" || return 1
     done
 
   else  # Linux (apt)

@@ -15,9 +15,8 @@ PYTHON_MINOR=3.14
 # brew, so it carries nothing a Mac does not want: xsel is an X11 clipboard
 # client and lives in PACKAGES_APT alone.
 #
-# Prefer vendor-documented Homebrew methods on macOS. Node stays on the
-# selected major; stage_macos_cli exposes its keg and the Homebrew CLIs.
-# https://docs.astral.sh/uv/getting-started/installation/#homebrew
+# These taps are maintained by the software's authors. The core toolbox below
+# uses Homebrew as a fallback; catalog membership does not imply vendor ownership.
 # https://developers.openai.com/api/docs/libraries/openai-cli
 # https://platform.claude.com/docs/en/cli-sdks-libraries/cli/quickstart
 # https://opencode.ai/v2/docs/
@@ -37,7 +36,7 @@ PACKAGES_BREW=(
   jq yq pandoc sevenzip
   direnv
   cmake ninja
-  "node@$NODE_MAJOR" "python@$PYTHON_MINOR" uv ruff
+  "node@$NODE_MAJOR" "python@$PYTHON_MINOR"
   helm kubernetes-cli cosign container-compose
   ffmpeg poppler nano
   himalaya ncdu smartmontools pkgconf
@@ -45,54 +44,31 @@ PACKAGES_BREW=(
   ttscoff/thelab/apex
 )
 
-# Maccy's documented Homebrew cask also accepts an existing direct install.
-# https://github.com/p0deje/Maccy#install
-BREW_CASK_EXISTING_ARTIFACTS=(
-  "maccy:/Applications/Maccy.app"
-)
-
-# brew_cask_existing_artifact <cask> — the .app a direct install would leave,
-# printed only when it is actually present.
-brew_cask_existing_artifact() {
-  local cask="$1" entry path
-  for entry in "${BREW_CASK_EXISTING_ARTIFACTS[@]}"; do
-    [[ "${entry%%:*}" == "$cask" ]] || continue
-    path="${entry#*:}"
-    [[ -e "$path" ]] && printf '%s\n' "$path" && return 0
-    return 1
-  done
-  return 1
-}
-
 PACKAGES_BREW_CASK=(
   font-jetbrains-mono-nerd-font
-  maccy
 )
 
-# CLI casks also install on headless Macs.
+# Vendor-maintained CLI casks, plus Microsoft's documented Homebrew fallback
+# for Azure CLI. Documentation alone does not make that cask first-party.
 # https://learn.microsoft.com/cli/azure/install-azure-cli-macos
-# https://code.claude.com/docs/en/setup
-# https://learn.chatgpt.com/docs/codex/cli
-# https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli
-PACKAGES_BREW_CLI_CASK=(azure-cli claude-code codex copilot-cli openai/tools/openai anthropics/tap/ant)
-BREW_CLI_COMMANDS=(uv uvx claude codex copilot opencode openai ant az)
+PACKAGES_BREW_CLI_CASK=(azure-cli openai/tools/openai anthropics/tap/ant)
+BREW_CLI_COMMANDS=(opencode openai ant az)
 
-# These vendors document direct application downloads, not Homebrew.
-# https://code.visualstudio.com/docs/setup/mac
-# https://www.libreoffice.org/get-help/install-howto/macos/
-# https://learn.chatgpt.com/docs/app
-# https://claude.com/download
-MACOS_DIRECT_APPS=(visual-studio-code libreoffice)
+MACOS_DIRECT_APPS=(visual-studio-code libreoffice maccy)
 MACOS_APP_ARTIFACTS=(
   "visual-studio-code:/Applications/Visual Studio Code.app"
   "libreoffice:/Applications/LibreOffice.app"
   "chatgpt:/Applications/ChatGPT.app"
   "claude:/Applications/Claude.app"
+  "maccy:/Applications/Maccy.app"
 )
 VSCODE_MACOS_DOWNLOAD_BASE=https://update.code.visualstudio.com/latest
 LIBREOFFICE_DOWNLOAD_BASE=https://download.documentfoundation.org/libreoffice/stable
+# OpenAI's desktop download link; the disk image contains ChatGPT.app.
+# https://learn.chatgpt.com/docs/app
 CHATGPT_MACOS_DOWNLOAD_URL=https://persistent.oaistatic.com/codex-app-prod/Codex.dmg
 CLAUDE_MACOS_RELEASES_URL=https://downloads.claude.ai/releases/darwin/universal/RELEASES.json
+MACCY_MACOS_DOWNLOAD_URL=https://github.com/p0deje/Maccy/releases/latest/download/Maccy.app.zip
 GOOGLE_CLOUD_MACOS_DOWNLOAD_BASE=https://dl.google.com/dl/cloudsdk/channels/rapid/downloads
 
 macos_app_path() {
@@ -159,6 +135,7 @@ UPSTREAM_RELEASE_PROJECTS=(
   ant:anthropics/anthropic-cli
   gddy:godaddy/cli
   apex:ApexMarkdown/apex
+  container:apple/container
 )
 
 # Packages with upstream providers when the configured apt archive lacks them.
@@ -171,6 +148,7 @@ APT_UPSTREAM_FALLBACKS=(git-delta:delta eza:eza lazygit:lazygit)
 #
 # MarkItDown's documented Python installation supports the requested extras.
 UV_TOOLS_COMMON=('markitdown[all]')
+UV_TOOLS_MACOS=(ruff)
 # Azure uses uv only when Microsoft publishes no apt suite for this host.
 # macOS uses the Homebrew cask.
 UV_TOOLS_LINUX=(azure-cli)
@@ -233,8 +211,8 @@ KITTY_TERMINFO_SOURCE_URL=https://raw.githubusercontent.com/kovidgoyal/kitty/mas
 
 # Documentation/inventory for non-default-repository providers. These names
 # are intentionally not fed to brew or apt.
-PROVIDERS_COMMON_UPSTREAM=(rustup kitty gddy agy aws-cli)
-PROVIDERS_MACOS_UPSTREAM=(apple-container-signed-pkg rosetta google-cloud-cli visual-studio-code libreoffice chatgpt claude-desktop)
+PROVIDERS_COMMON_UPSTREAM=(rustup uv-standalone kitty gddy agy aws-cli claude codex copilot)
+PROVIDERS_MACOS_UPSTREAM=(apple-container-signed-pkg rosetta google-cloud-cli visual-studio-code libreoffice maccy chatgpt claude-desktop)
 # yq and cosign are packaged by the distribution, but not as the same software
 # macOS gets: Ubuntu's `yq` is kislyuk's jq wrapper rather than the mikefarah
 # program, and its `cosign` is a major behind. Both come from the upstream

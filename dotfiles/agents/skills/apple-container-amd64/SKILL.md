@@ -13,7 +13,8 @@ description: >-
 # Building amd64 images with Apple Container
 
 Use Apple's `container` CLI on macOS 27 with Apple silicon and Rosetta 2.
-Install the signed package from <https://github.com/apple/container/releases>.
+Install Apple's signed package from <https://github.com/apple/container/releases>.
+Stop Container before upgrading.
 This guidance follows [Container 1.6.1's command reference](https://github.com/apple/container/blob/1.6.1/docs/command-reference.md)
 and [builder implementation](https://github.com/apple/container/blob/1.6.1/Sources/ContainerBuild/Builder%2BStart.swift).
 Check the installed command's `--help` before using version-dependent flags.

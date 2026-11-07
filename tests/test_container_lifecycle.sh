@@ -9,6 +9,8 @@ export OS_KIND
 
 # shellcheck disable=SC1091
 . "$TEST_ROOT/lib/log.sh"
+. "$TEST_ROOT/lib/manifest.sh"
+. "$TEST_ROOT/lib/upstream.sh"
 # shellcheck disable=SC1091
 . "$TEST_ROOT/scripts/stage_container.sh"
 # shellcheck disable=SC1091
@@ -41,21 +43,37 @@ case "$1:$2" in
 esac
 CONTAINER
 chmod +x "$container_stub"
+PATH="$TEST_TMP:$PATH"
+export PATH
 
 apple_container_bin() { printf '%s\n' "$container_stub"; }
-pkgutil() { return 0; }
+container_published=1.1.0
+upstream_latest_version() { printf '%s\n' "$container_published"; }
+pkgutil() { [[ "$*" == '--pkg-info com.apple.container-installer' ]]; }
+install_apple_container_pkg() { printf 'install-package\n' >> "$calls"; }
 uname() { [[ "${1:-}" == -m ]] && printf 'arm64\n' || printf 'Darwin\n'; }
 sw_vers() { printf '27.0.1\n'; }
 rosetta_installed() { return 0; }
-install_apple_container_pkg() { printf 'install-package\n' >> "$calls"; }
+
+# A second provider must be detected before inspecting or updating the package.
+mkdir -p "$TEST_TMP/foreign"
+cp "$container_stub" "$TEST_TMP/foreign/container"
+: > "$calls"
+if PATH="$TEST_TMP/foreign:$PATH" stage_container >/dev/null 2>&1; then
+  fail_test 'Container stage accepted a conflicting PATH provider'
+fi
+[[ ! -s "$calls" ]] || fail_test 'Container stage inspected a shadowed package'
 
 # Installed + stopped is healthy by default and must not start a service.
 : > "$calls"
 rm -f "$state"
-unset CONTAINER_START UPDATE_CONTAINER CONTAINER_CONFIG_CHANGED
+unset CONTAINER_START CONTAINER_CONFIG_CHANGED
 stage_container >/dev/null
 if grep -Fq 'system start' "$calls"; then
   fail_test 'default container stage started the control plane'
+fi
+if grep -Fq 'install-package' "$calls"; then
+  fail_test 'a current Container package was reinstalled'
 fi
 
 # Starting is available through one exact positive opt-in.
@@ -73,24 +91,20 @@ if grep -Fq 'system stop' "$calls"; then
   fail_test 'container stage stopped active workloads'
 fi
 
-# Updating refuses to infer permission to interrupt a running system.
+# Apple's installer requires a stopped runtime.
+container_published=1.2.0
 : > "$calls"
 : > "$state"
-if (UPDATE_CONTAINER=1 stage_container) >/dev/null 2>&1; then
-  fail_test 'container update proceeded while the system was running'
-fi
+stage_container >/dev/null 2>&1
 if grep -Fq 'install-package' "$calls"; then
-  fail_test 'container package changed before running workloads were rejected'
+  fail_test 'Container upgrade interrupted a running system'
 fi
-
-# Once explicitly stopped, the explicit update reaches only the signed-package
-# installer and does not imply that services should be restarted.
 : > "$calls"
 rm -f "$state"
-UPDATE_CONTAINER=1 CONTAINER_START='' stage_container >/dev/null
+CONTAINER_START='' stage_container >/dev/null
 grep -Fxq 'install-package' "$calls"
 if grep -Fq 'system start' "$calls"; then
-  fail_test 'container update restarted an on-demand system without opt-in'
+  fail_test 'Container upgrade restarted an on-demand system without opt-in'
 fi
 
 # Postflight distinguishes installed readiness from the explicit residency
