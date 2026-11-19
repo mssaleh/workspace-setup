@@ -46,13 +46,16 @@ ditto() {
     cp -R "$1" "$2"
   fi
 }
-hdiutil() {
-  printf '%s\n' "$1" >> "$calls"
-  case "$1" in
-    attach)
+diskutil() {
+  case "$1 $2" in
+    'image attach')
+      [[ "$3 $4 $5" == '--readOnly --nobrowse --mountPoint' ]] || return 1
+      printf 'attach\n' >> "$calls"
       [[ "$fixture_failure" != attach ]] || return 1
       mkdir -p "$6/$fixture_app/Contents/MacOS" ;;
-    detach) [[ "$fixture_failure" != detach ]] ;;
+    eject\ *)
+      printf 'eject\n' >> "$calls"
+      [[ "$fixture_failure" != detach ]] ;;
   esac
 }
 spctl() { [[ "$fixture_failure" != signature ]]; }
@@ -79,7 +82,7 @@ install_macos_app visual-studio-code >/dev/null
 fixture_app=LibreOffice.app
 install_macos_app libreoffice >/dev/null
 grep -Fxq attach "$calls"
-grep -Fxq detach "$calls"
+grep -Fxq eject "$calls"
 rm -rf "$TEST_TMP/Applications/LibreOffice.app"
 for fixture_failure in download attach signature; do
   : > "$calls"
@@ -88,7 +91,7 @@ for fixture_failure in download attach signature; do
     exit 1
   fi
   [[ ! -e "$TEST_TMP/Applications/LibreOffice.app" ]]
-  [[ "$fixture_failure" != signature ]] || grep -Fxq detach "$calls"
+  [[ "$fixture_failure" != signature ]] || grep -Fxq eject "$calls"
 done
 fixture_failure=''
 fixture_app=Claude.app

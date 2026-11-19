@@ -62,7 +62,7 @@ make_executable() {
   chmod +x "$1"
 }
 
-for tool in uv uvx claude codex copilot agy zmx ruff yazi ya himalaya yq cosign apex; do
+for tool in uv uvx claude codex copilot agy zmx ruff yazi ya himalaya yq cosign apex git-credential-manager; do
   make_executable "$HOME/.local/bin/$tool"
 done
 printf '#!/bin/sh\nprintf "yq (https://github.com/mikefarah/yq/) version v4.0.0\\n"\n' > "$HOME/.local/bin/yq"

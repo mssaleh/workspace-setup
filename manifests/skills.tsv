@@ -17,7 +17,7 @@
 vercel-labs/agent-skills	*	whole
 vercel-labs/skills	*	whole
 vercel/next.js	*	whole
-shadcn/ui	*	whole
+shadcn-ui/ui	*	whole
 pydantic/skills	*	whole
 run-llama/llamaparse-agent-skills	*	whole
 CopilotKit/CopilotKit	*	whole

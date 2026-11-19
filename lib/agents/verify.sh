@@ -12,12 +12,11 @@ verify_dry_run_notice() {
 }
 
 verify_store() {
-  local row source name missing unwanted broken invalid outside local_names declared locked stray="" absent_sources=""
+  local row source name missing unwanted broken invalid outside declared locked stray="" absent_sources=""
   declared=$(skills_declared_names) || { problem "store: cannot read skill declarations"; return 1; }
   locked=$(lock_skill_names) || { problem "store: cannot read skill lock at $AGENTS_LOCK"; return 1; }
   missing=$(comm -23 <(printf '%s\n' "$declared") <(store_skill_names))
   unwanted=$(comm -13 <(printf '%s\n' "$declared") <(printf '%s\n' "$locked"))
-  local_names=$(comm -23 <(store_all_names) <(printf '%s\n' "$locked"))
   invalid=$(comm -12 <(store_invalid_names) <(printf '%s\n' "$declared"))
 
   while IFS= read -r row; do
@@ -41,10 +40,6 @@ verify_store() {
   fi
   problem_list "store: directories with no SKILL.md, which no agent loads" \
     "$(unplanned "$(unplanned "$invalid" 'skill:')" 'unskill:')"
-
-  # Outside what the manifest is authoritative over, and worth seeing once a run.
-  [[ -n "$local_names" ]] \
-    && info "not installed from a source, left alone: $(oneline "$local_names")"
 
   # Serves whatever that path holds under the declared name. Reported, not
   # replaced: pointing a skill at a working copy is a real thing to do.
@@ -75,13 +70,14 @@ verify_store() {
 # still has a SKILL.md, so a presence check passes while the agent loads the
 # wrong thing under that name.
 verify_mirrors() {
-  local agent dir name link count total absent noskill elsewhere dangling want unfixed
-  want=$(mirror_set)
+  local agent dir name link count total absent noskill elsewhere dangling want unfixed locked
+  locked=$(lock_skill_names) || { problem "skills: cannot read lock for mirror verification"; return 1; }
+  want=$(mirror_set "$locked")
   total=$(printf '%s\n' "$want" | grep -c .)
 
   for agent in $SKILL_MIRROR_AGENTS; do
     dir=$(agent_skills_dir "$agent") || { problem "no skills directory known for $agent"; continue; }
-    [[ -d "$(dirname "$dir")" ]] || { info "$agent not installed here, skipping"; continue; }
+    skill_mirror_needed "$agent" "$dir" || { info "$agent not installed here, skipping"; continue; }
     if [[ ! -d "$dir" ]]; then
       planned "mirror-dir:$agent" || problem "$agent: no skills directory at $dir"
       continue
@@ -116,6 +112,7 @@ verify_mirrors() {
     # Only links the mirror pass does not own; the rest are in `absent` already.
     while IFS= read -r link; do
       [[ -n "$link" && ! -e "$link" ]] || continue
+      skill_mirror_owned "$link" || continue
       name=$(basename "$link")
       grep -qxF "$name" <<< "$want" && continue
       dangling="$dangling$name

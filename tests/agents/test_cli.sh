@@ -35,10 +35,15 @@ printf 'claude-code\twidgets\tacme/widgets\twidget\n' > "$MANIFEST_DIR/plugins.t
 
 # A new native home has parent directories but no skill mirrors yet.
 rm -rf "$CLAUDE_HOME/skills" "$CODEX_HOME/skills" "$COPILOT_HOME/skills"
-out=$("$REPO_DIR/setup.sh" agents --dry-run 2>&1); status=$?
-assert_eq "a clean-home dry run covers missing mirror directories" "$status" "0"
+mkdir -p "$HOME/.local/bin"
+for agent in claude codex opencode copilot; do
+  mv "$root/bin/$agent" "$HOME/.local/bin/$agent"
+done
+out=$(PATH="$root/bin:/usr/bin:/bin:/usr/sbin:/sbin" "$REPO_DIR/setup.sh" agents --dry-run 2>&1); status=$?
+assert_eq "a clean-home dry run finds user-local CLIs before login" "$status" "0"
 assert_absent "planned mirror directories are not verification failures" "$out" "no skills directory at"
 assert_missing "a clean-home dry run creates no mirror directory" "$CLAUDE_HOME/skills"
+export PATH="$HOME/.local/bin:$PATH"
 
 # --- --only runs one pass and leaves the others alone ---
 out=$("$REPO_DIR/setup.sh" agents --only skills 2>&1)

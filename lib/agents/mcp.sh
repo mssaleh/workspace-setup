@@ -193,9 +193,11 @@ mcp_converge() {
       mcp_install "$agent" "$name" "$transport" "$use" "$encoded" \
         || problem "mcp: native command failed for '$name' in $agent"
     done < <(printf '%s\n' "$fix" | tr ',' '\n')
-    agent_mcp_invalidate
-    agent_mcp_table > /dev/null \
-      || { problem "mcp: cannot read configuration after native writes"; return 1; }
+    if [[ -z "${DRY_RUN:-}" ]]; then
+      agent_mcp_invalidate
+      agent_mcp_table > /dev/null \
+        || { problem "mcp: cannot read configuration after native writes"; return 1; }
+    fi
   done < <(manifest_rows "$MANIFEST_DIR/mcp.tsv")
 }
 
@@ -228,17 +230,31 @@ mcp_report_project_scope() {
   return 0
 }
 
-# "<name>\t<target>\t<row it duplicates>" — a second name for an endpoint a row
-# already installs.
+# A second name is eligible only when its declared counterpart is usable in
+# this agent and both entries have the same target and stdio command.
 mcp_duplicates() {
-  local agent="$1" name got target dup
+  local agent="$1" name got kind target dup declared canonical
   while IFS= read -r name; do
     [[ -n "$name" ]] || continue
     got=$(agent_mcp_target "$agent" "$name")
+    kind=${got%%$'\t'*}
+    [[ "${got##*$'\t'}" == true ]] || continue
     target=${got#*$'\t'}; target=${target%$'\t'*}
-    dup=$(manifest_rows "$MANIFEST_DIR/mcp.tsv" \
-          | awk -F'\t' -v t="$target" '$3 == t { print $1; exit }')
-    [[ -n "$dup" ]] && printf '%s\t%s\t%s\n' "$name" "$target" "$dup"
+    while IFS=$'\t' read -r dup declared; do
+      canonical=$(agent_mcp_target "$agent" "$dup")
+      [[ "$canonical" == "$got" ]] || continue
+      if [[ "$kind" == stdio ]]; then
+        mcp_stdio_matches "$declared" "$target" || continue
+        [[ "$(agent_mcp_command "$agent" "$name")" == "$(agent_mcp_command "$agent" "$dup")" ]] || continue
+      else
+        [[ "$declared" == "$target" ]] || continue
+      fi
+      printf '%s\t%s\t%s\n' "$name" "$target" "$dup"
+      break
+    done < <(manifest_rows "$MANIFEST_DIR/mcp.tsv" | awk -F'\t' -v agent="$agent" -v kind="$kind" '
+      index("," $4 ",", "," agent ",") && (($2 == "stdio") == (kind == "stdio")) {
+        print $1 "\t" $3
+      }')
   done < <(comm -13 <(manifest_mcp_names) <(agent_mcp_names "$agent"))
   return 0
 }
@@ -246,7 +262,7 @@ mcp_duplicates() {
 # Opt-in: remove an undeclared name for a declared endpoint.
 mcp_prune_duplicates() {
   [[ -n "${PRUNE_DUPLICATE_MCP:-}" ]] || return 0
-  local agent name target dup
+  local agent name target dup wrote=""
   for agent in claude-code codex opencode github-copilot; do
     while IFS=$'\t' read -r name target dup; do
       [[ -n "$name" ]] || continue
@@ -260,22 +276,28 @@ mcp_prune_duplicates() {
         codex) run codex mcp remove "$name" ;;
         github-copilot) run copilot mcp remove "$name" ;;
       esac || problem "mcp: native removal failed for '$name' in $agent"
-      agent_mcp_invalidate
+      [[ -n "${DRY_RUN:-}" ]] || wrote=1
     done < <(mcp_duplicates "$agent")
   done
+  if [[ -n "$wrote" ]]; then
+    agent_mcp_invalidate
+    agent_mcp_table > /dev/null \
+      || { problem "mcp: cannot read configuration after native removals"; return 1; }
+  fi
 }
 
 # Undeclared servers can belong to users or desktop integrations.
 mcp_report_undeclared() {
-  local agent name extra dups removal
+  local agent name extra dups duplicates removal
   for agent in claude-code codex opencode github-copilot; do
     removal="--prune-duplicate-mcp removes it"
     [[ "$agent" != opencode ]] || removal="OpenCode has no native MCP remove command"
-    dups=$(mcp_duplicates "$agent" | cut -f1)
+    duplicates=$(mcp_duplicates "$agent")
+    dups=$(cut -f1 <<< "$duplicates")
     while IFS=$'\t' read -r name target dup; do
       [[ -n "$name" ]] || continue
       warn "$agent: '$name' is a second name for $target, declared as '$dup'; $removal"
-    done < <(mcp_duplicates "$agent")
+    done <<< "$duplicates"
 
     extra=$(comm -13 <(manifest_mcp_names) <(agent_mcp_names "$agent"))
     while IFS= read -r name; do

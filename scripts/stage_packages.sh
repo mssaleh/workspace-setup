@@ -264,14 +264,14 @@ register_third_party_apt_repos() {
 
   # Downloading and verifying a key needs these; ask for them once rather than
   # ahead of every archive below.
-  sudo "${APT_ENV[@]}" "$PKGMGR" install -y \
-    curl gnupg ca-certificates apt-transport-https || return 1
+  apt_report_removals install '' curl gnupg ca-certificates || return 1
+  apt_install_packages curl gnupg ca-certificates || return 1
 
   # --- git — ppa:git-core/ppa, the PPA git-scm.com names for Ubuntu. ---
   if [[ "$DISTRO" == ubuntu ]] \
      && ! find /etc/apt/sources.list.d -name 'git-core-ubuntu-ppa*' 2>/dev/null | grep -q .; then
     info "adding the Git maintainers' PPA (ppa:git-core/ppa)…"
-    sudo "${APT_ENV[@]}" "$PKGMGR" install -y software-properties-common || return 1
+    apt_install_candidate software-properties-common || return 1
     if sudo "${APT_ENV[@]}" add-apt-repository -y --no-update ppa:git-core/ppa >/dev/null 2>&1; then
       changed=1
     else
@@ -284,7 +284,7 @@ register_third_party_apt_repos() {
      && ! libreoffice_installed \
      && ! find /etc/apt/sources.list.d -name 'libreoffice-ubuntu-ppa*' 2>/dev/null | grep -q .; then
     info "adding the LibreOffice PPA (ppa:libreoffice/ppa)…"
-    sudo "${APT_ENV[@]}" "$PKGMGR" install -y software-properties-common || return 1
+    apt_install_candidate software-properties-common || return 1
     if sudo "${APT_ENV[@]}" add-apt-repository -y --no-update ppa:libreoffice/ppa >/dev/null 2>&1; then
       changed=1
     else
@@ -371,7 +371,7 @@ register_third_party_apt_repos() {
 
   # --- Claude Desktop — Anthropic's archive (downloads.claude.ai). ---
   if [[ -z "${SKIP_CLAUDE_DESKTOP:-}" ]] \
-     && { apt_gui_app_wanted claude-desktop '' || apt_repo_is_configured "$CLAUDE_DESKTOP_APT_URI"; }; then
+     && [[ "$arch" == amd64 || "$arch" == arm64 ]]; then
     if apt_trust_repo_key 'Claude Desktop' "$CLAUDE_DESKTOP_KEY_URL" \
         "$CLAUDE_DESKTOP_KEYRING" "$CLAUDE_DESKTOP_KEY_FINGERPRINT"; then
       source_changed=$(apt_write_repo_sources /etc/apt/sources.list.d/claude-desktop.sources \
@@ -460,7 +460,8 @@ register_third_party_apt_repos() {
      && [[ -n "$(apt-cache policy kitware-archive-keyring 2>/dev/null \
           | awk '/Candidate:/ && $2 != "(none)" {print $2}')" ]]; then
     sudo rm -f "$KITWARE_KEYRING"
-    if ! sudo "${APT_ENV[@]}" "$PKGMGR" install -y kitware-archive-keyring; then
+    if ! apt_report_removals install '' kitware-archive-keyring \
+        || ! apt_install_packages kitware-archive-keyring; then
       warn "kitware-archive-keyring did not install — restoring the pinned key"
       apt_trust_repo_key CMake "$KITWARE_KEY_URL" \
         "$KITWARE_KEYRING" "$KITWARE_KEY_FINGERPRINT" \
@@ -585,9 +586,9 @@ codex_app_verify_repository() {
 # keyring and the source list in place.
 install_codex_app() {
   local arch="$1" tmp deb rc=0
-  if apt_repo_is_configured "$CODEX_APP_REPO_URI"; then
-    info "installing the Codex app from OpenAI's apt repository…"
-    apt_install_candidate "$CODEX_APP_PACKAGE" 'Codex app' && codex_app_verify_repository
+  if apt_package_installed "$CODEX_APP_PACKAGE" || apt_repo_is_configured "$CODEX_APP_REPO_URI"; then
+    codex_app_verify_repository \
+      && apt_install_candidate "$CODEX_APP_PACKAGE" 'Codex app' "$CODEX_APP_REPO_URI"
     return
   fi
 
@@ -601,7 +602,7 @@ install_codex_app() {
     rm -rf "$tmp"
     return 1
   fi
-  if apt_install_packages "$deb"; then
+  if apt_report_removals install '' "$deb" && apt_install_packages "$deb"; then
     sudo "${APT_ENV[@]}" "$PKGMGR" update || rc=1
     codex_app_verify_repository || rc=1
   else
@@ -668,7 +669,7 @@ stage_packages() {
       info "generating en_US.UTF-8 locale (needed by the dotfiles LANG guard)…"
       # Install the `locales` package first (absent on minimal images).
       if ! apt_package_installed locales; then
-        sudo "${APT_ENV[@]}" "$PKGMGR" install -y locales
+        apt_install_candidate locales || return 1
       fi
       # Uncomment the en_US.UTF-8 line in /etc/locale.gen if present + commented.
       if [[ -f /etc/locale.gen ]]; then
@@ -722,20 +723,10 @@ stage_packages() {
     # GNOME Shell extensions are only manageable where the shell itself is
     # installed; on a host without it the app opens to nothing.
     if [[ -z "${SKIP_GNOME_EXTENSIONS:-}" ]] && pkg_installed gnome-shell; then
-      local gnome_pkg gnome_missing=()
+      local gnome_pkg
       for gnome_pkg in "${PACKAGES_APT_GNOME[@]}"; do
-        if apt_preserve_application "$gnome_pkg"; then
-          continue
-        fi
-        pkg_installed "$gnome_pkg" || gnome_missing+=("$gnome_pkg")
+        apt_install_candidate "$gnome_pkg" || return 1
       done
-      if ((${#gnome_missing[@]})); then
-        info "installing GNOME desktop tools: ${gnome_missing[*]}"
-        apt_install_packages "${gnome_missing[@]}" \
-          || warn "could not install ${gnome_missing[*]}"
-      else
-        ok "GNOME desktop tools already installed"
-      fi
     elif [[ -z "${SKIP_GNOME_EXTENSIONS:-}" ]]; then
       ok "GNOME Shell is not installed; skipped ${PACKAGES_APT_GNOME[*]}"
     fi
@@ -785,19 +776,18 @@ stage_packages() {
       info "skipping LibreOffice (SKIP_LIBREOFFICE=1)"
     elif apt_preserve_application libreoffice; then
       :
-    elif libreoffice_installed; then
-      ok "LibreOffice is already installed"
+    elif ! apt_package_installed libreoffice && libreoffice_versioned_bundle_installed; then
+      ok "LibreOffice is already installed from its versioned DEB bundle"
     else
-      apt_install_candidate libreoffice LibreOffice || true
+      apt_install_candidate libreoffice LibreOffice || return 1
     fi
 
     if [[ -n "${SKIP_CLAUDE_DESKTOP:-}" ]]; then
       info "skipping Claude Desktop (SKIP_CLAUDE_DESKTOP=1)"
-    elif apt_package_installed claude-desktop; then
-      ok "Claude Desktop official apt package already installed"
     elif apt_repo_is_configured "$CLAUDE_DESKTOP_APT_URI"; then
-      apt_install_candidate claude-desktop 'Claude Desktop' \
-        || warn "  see https://code.claude.com/docs/en/desktop-linux"
+      apt_install_candidate claude-desktop 'Claude Desktop' "$CLAUDE_DESKTOP_APT_URI" || return 1
+    elif apt_package_installed claude-desktop; then
+      warn "Claude Desktop is installed; its apt repository is unavailable for updates"
     fi
 
     # 6. The Codex app. This one cannot be pre-registered: OpenAI publish no
@@ -806,13 +796,10 @@ stage_packages() {
     #    repository is absent; afterwards it is an ordinary apt package.
     if [[ -n "${SKIP_CODEX_APP:-}" ]]; then
       info "skipping the Codex app (SKIP_CODEX_APP=1)"
-    elif apt_package_installed "$CODEX_APP_PACKAGE"; then
-      ok "Codex app official apt package already installed"
-      codex_app_verify_repository
     else
       local codex_arch; codex_arch=$(dpkg --print-architecture 2>/dev/null || true)
       case "$codex_arch" in
-        amd64|arm64) install_codex_app "$codex_arch" ;;
+        amd64|arm64) install_codex_app "$codex_arch" || return 1 ;;
         *) warn "Codex app: no packages published for architecture '${codex_arch:-unknown}' — skipping" ;;
       esac
     fi

@@ -51,6 +51,15 @@ postflight_kitty_display_backend() {
   esac
 }
 
+postflight_kitty_desktop_entry() {
+  [[ -f "$1" && -r "$1" ]] || return 1
+  KITTY_EXEC="$2" awk '
+    /^\[/ { main = ($0 == "[Desktop Entry]") }
+    main && /^Exec=/ { executable = substr($0, 6) }
+    END { exit(executable != ENVIRON["KITTY_EXEC"]) }
+  ' "$1"
+}
+
 # True when apt offers no nodejs outside NodeSource. `apt-cache policy` prints
 # one priority line per candidate version; anything not from deb.nodesource.com
 # has to be below zero for the NodeSource build to be the only option apt will
@@ -318,9 +327,16 @@ postflight_configs() {
       (.permissions.deny | index("Bash(brew install *)")) != null and
       (.permissions.deny | index("Bash(apt-get install *)")) != null
     ' "$claude_home/settings.json" >/dev/null 2>&1 \
-      && jq -e '
-        .permission.bash["brew install *"] == "deny" and
-        .permission.bash["apt-get install *"] == "deny"
+      && jq -e --slurpfile baseline "$(repo_dir)/dotfiles/config/opencode/opencode.jsonc" '
+        if has("permissions") then
+          ($baseline[0].permission.bash | to_entries |
+            map({action: "shell", resource: .key, effect: .value})) as $required |
+          ((.permissions | type) == "array") and
+          (.permissions[-($required | length):] | map({action, resource, effect})) == $required
+        else
+          .permission.bash["brew install *"] == "deny" and
+          .permission.bash["apt-get install *"] == "deny"
+        end
       ' <<< "$opencode_json" >/dev/null 2>&1 \
       && grep -Fq 'pattern = ["brew", "install"]' "$codex_home/rules/default.rules" \
       && grep -Fq 'pattern = ["apt-get", "install"]' "$codex_home/rules/default.rules"; then
@@ -893,7 +909,7 @@ postflight_upstream_tools() {
   fi
   if [[ "$OS_KIND" == linux ]]; then
     local linux_upstream_missing=() artifact name probe entry unrunnable=""
-    local upstream_names=(zmx ruff yazi ya himalaya yq cosign apex)
+    local upstream_names=(zmx ruff yazi ya himalaya yq cosign apex git-credential-manager)
     for entry in "${APT_UPSTREAM_FALLBACKS[@]}"; do
       [[ -e "$HOME/.local/bin/${entry#*:}" ]] && upstream_names+=("${entry#*:}")
     done
@@ -908,7 +924,7 @@ postflight_upstream_tools() {
       probe=--version
       [[ "$name" == cosign ]] && probe=version
       [[ "$name" == zmx ]] && probe=version
-      "$artifact" "$probe" >/dev/null 2>&1 || unrunnable="$unrunnable $artifact"
+      "$artifact" "$probe" </dev/null >/dev/null 2>&1 || unrunnable="$unrunnable $artifact"
     done
     if ((${#linux_upstream_missing[@]})); then
       postflight_fail "missing Linux upstream toolbox artifacts: ${linux_upstream_missing[*]}"
@@ -1061,12 +1077,13 @@ postflight_upstream_tools() {
       # desktop entry exists *and* points at the real binary — a stock `Exec=kitty`
       # copied straight from the app tree launches nothing from GNOME, which looks
       # identical to no integration at all from the user's side.
-      local kitty_entry="$HOME/.local/share/applications/kitty.desktop"
-      if [[ -f "$kitty_entry" ]] \
-          && grep -q "^Exec=$HOME/.local/kitty.app/bin/kitty" "$kitty_entry"; then
-        postflight_pass "kitty desktop entry is installed with absolute paths"
+      local kitty_entry="$HOME/.local/share/applications/kitty.desktop" kitty_command
+      kitty_command=$(kitty_desktop_command "$kitty_bin")
+      if postflight_kitty_desktop_entry "$kitty_entry" "$kitty_command" \
+          && postflight_kitty_desktop_entry "${kitty_entry%/*}/kitty-open.desktop" "$kitty_command +open %U"; then
+        postflight_pass "kitty desktop launchers point at the installed binary"
       else
-        postflight_fail "kitty desktop entry is missing or does not point at the installed binary"
+        postflight_fail "kitty desktop launchers are missing or do not point at the installed binary"
       fi
       # GNOME can only match a window back to its launcher, offer right-click
       # actions, and render a crisp dock icon when the entry and icon theme say

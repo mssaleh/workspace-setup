@@ -29,7 +29,8 @@ bash setup.sh agents --update
 
 The default run completes host verification before synchronizing agents. An
 agent failure makes the complete run fail. Agent-only runs require the CLIs and
-Node.js to be installed already. `--dry-run`, `--update`, and pruning flags apply
+Node.js to be installed already. They can find the provisioned tools before a
+new login shell loads their paths. `--dry-run`, `--update`, and pruning flags apply
 to the `agents` command; host reruns refresh the declared software inventory.
 
 ```bash
@@ -67,9 +68,9 @@ packages without their recommendations; each control still overrides it.
 | **containers** | macOS only: installs or updates Apple's signed Container package while stopped, ensures Rosetta, and writes only the stable build/registry defaults. The Container system remains stopped for on-demand laptop use unless `CONTAINER_START=1`; it is never stopped automatically. `container-compose` is supplied separately by Homebrew. |
 | **ssh** | Generates an ed25519 keypair if none exists, locks down `~/.ssh` permissions (700 dir, 600 files), and wires up the host-local SSH agent (macOS: Keychain; Linux: systemd user unit) without replacing an agent-forwarding socket supplied by `sshd`. Does **not** push to GitHub — run `gh auth login` manually. |
 | **remote readiness** | macOS only, read-only: reports effective Remote Login state and ACL, authorized-key count/mode, FileVault, firewall/stealth mode, and remote-relevant power settings; it calls out Full Disk Access as a separate manual TCC decision. It changes none of them. |
-| **applications + terminals** | A macOS workstation gets missing VS Code, Maccy, LibreOffice, and Kitty applications from vendor downloads. Existing bundles are preserved; their updates belong to the applications. VS Code's bundled `code` and `code-tunnel` receive user-local links when free. ChatGPT and Claude Desktop are explicit opt-ins. The Nerd Font uses a Homebrew cask. Kitty is not selected as the default terminal. Linux retains its existing combined font/Kitty stage. |
+| **applications + terminals** | A macOS workstation gets missing VS Code, Maccy, LibreOffice, and Kitty applications from vendor downloads. Existing bundles are preserved for app-managed updates. VS Code's bundled `code` and `code-tunnel` receive user-local links when free. ChatGPT and Claude Desktop are explicit opt-ins. The Nerd Font uses a Homebrew cask. Linux workstation runs keep the Nerd Font and the user-local Kitty bundle current with their upstream stable releases. Terminal selection stays with the user. |
 | **terminal profile** | macOS imports the scalar-only "Workspace" profile (a name Terminal.app does not ship; macOS 27 bundles its own "Clear Dark") only with `CONFIGURE_APPLE_TERMINAL=1` in a local interactive session, and selects it only with the additional `SET_APPLE_TERMINAL_DEFAULT=1`. Linux converges only previously untouched Ptyxis behavior keys. User choices are preserved. |
-| **updates** | Normal reruns update declared CLI providers, including the Homebrew toolbox and vendor taps, within the selected runtime lines. Desktop bundles are preserved, Container updates wait until it is stopped, and Homebrew cleanup is not run. Linux `UPDATE_SYSTEM=1` retains the separate full system update path. |
+| **updates** | Normal reruns update declared CLI providers within the selected runtime lines and refresh the managed Linux desktop packages from their configured apt repositories. On macOS, desktop bundles use vendor updates, Apple Container updates while stopped, and Homebrew cleanup stays manual. Linux `UPDATE_SYSTEM=1` runs the separate full system update path. |
 | **postflight** | Retains the existing Linux checks. macOS additionally verifies Node 26 and Python 3.14 in actual Bash/Zsh login shells, generated completion registration/security, Kitty's platform layer, Terminal's effective domain when requested, launchd/forwarded SSH-agent state, and Container's requested running/stopped state. |
 | **agents** | After host verification, installs missing declared skill collections, reconciles user-scope MCP servers using native agent commands, installs Claude plugins, and verifies the resulting configuration. A converged agent run makes no configuration changes; source refresh and pruning are explicit options. |
 
@@ -113,7 +114,7 @@ native coding agents, and Apple Container. Homebrew remains the fallback for
 the baseline toolbox and runtimes. Azure CLI uses Microsoft's documented
 Homebrew route as a community fallback. Node stays on 26.x and Python on 3.14.x.
 
-Desktop applications are installed from vendor downloads only when missing.
+On macOS, desktop applications are installed from vendor downloads only when missing.
 Setup neither adopts existing bundles into Homebrew nor replaces them to update
 them; use each application's updater or vendor update method. Application
 settings and credentials remain at their native paths. Conflicting executable
@@ -764,8 +765,10 @@ and assistant-ui.
 The skills CLI owns the shared payloads and lock. An ordinary run installs
 missing sources or payloads; `--update` refreshes declared collections and
 discovers newly added upstream skills. It does not refresh unrelated sources.
-`--prune-skills` removes only fetched skills outside declared selections and
-source paths. Skills without lock entries and unrelated files are preserved.
+`--prune-skills` removes fetched skills outside declared selections and source
+paths from the shared store and cleans up its mirror links. The skills CLI
+updates the lock. Mirroring and pruning leave manually copied skills outside
+that lock alone, including existing links that resolve to those skills.
 
 | Agent | Skills | MCP configuration |
 |---|---|---|
@@ -774,11 +777,12 @@ source paths. Skills without lock entries and unrelated files are preserved.
 | OpenCode | shared skills and native skill directories | `$XDG_CONFIG_HOME/opencode/opencode.json` or `.jsonc` |
 | GitHub Copilot CLI | `~/.agents/skills`; a `$COPILOT_HOME/skills` mirror only for a custom `COPILOT_HOME` | `$COPILOT_HOME/mcp-config.json` |
 
-Claude needs a mirror; Codex also reads the shared store and retains its legacy
-mirror; OpenCode reads the shared store directly. Copilot reads it directly at
+Claude uses a mirror. Codex reads the shared store and also uses its legacy
+mirror. Setup creates these mirrors on the first sync when their CLIs are
+installed. OpenCode reads the shared store directly. Copilot reads it directly at
 its default home (`copilot skill --help`: "Personal ~/.copilot/skills/ or
 ~/.agents/skills/") and gets a mirror only with a custom `COPILOT_HOME`; an
-existing `~/.copilot/skills` is left alone. Every mirror is checked with
+existing `~/.copilot/skills` is left alone. Each managed mirror is checked with
 `-ef` against its own payload. A whole agent skills directory may link to the
 shared store.
 
@@ -802,8 +806,9 @@ already write global configuration. Failed native writes return nonzero, and
 a later run can repair an incomplete replacement. Codex starts an interactive
 OAuth login inside `codex mcp add` when it discovers OAuth support, so remote
 Codex adds run with discovery unreachable; sign in to a server that needs it
-with `codex mcp login <name>`. A declared Claude plugin that the user disabled
-is reported and left disabled.
+with `codex mcp login <name>`. The [Temporal documentation server](https://docs.temporal.io/with-ai)
+requires a one-time OAuth sign-in before it can answer queries. A declared Claude
+plugin that the user disabled is reported and left disabled.
 
 Inspection uses native Codex JSON output, Claude plugin and marketplace JSON
 listings, Copilot's effective enabled state, and OpenCode's effective config.
@@ -823,12 +828,12 @@ disabled choices are reported and preserved.
 
 | Option after `agents` | Effect |
 |---|---|
-| `--dry-run` | Report proposed changes and what the plan would leave unresolved; leave configuration unchanged, including the agents' own state that reading it could create |
+| `--dry-run` | Report proposed changes and unresolved differences without changing agent configuration or skill payloads |
 | `--only skills\|mcp\|plugins\|verify` | Run one pass and verify its result; `verify` applies no configuration changes |
 | `--update` | Refresh declared skill collections, marketplaces, and plugins |
 | `--prune-skills` | Remove fetched skills outside the manifest's selections and whole sources |
 | `--prune-plugin-cache` | Delete cache directories with no registered marketplace or installed plugin reference |
-| `--prune-duplicate-mcp` | Remove exact-name duplicates for declared endpoints using native removal |
+| `--prune-duplicate-mcp` | Use native removal for aliases with an enabled matching declaration in the same agent |
 
 OpenCode has no native MCP removal command. Duplicate pruning reports that
 entry as unresolved and exits nonzero; its configuration needs separate editing.
@@ -861,13 +866,13 @@ service availability or authentication.
 
 ## Coding-agent guardrails
 
-The script installs or narrowly merges denylists for all three coding agents so they **cannot** install/remove/upgrade user-level packages via `brew` (macOS) or `apt`/`apt-get`/`snap` (Linux):
+The script installs or narrowly merges permission rules for direct package-manager commands.
 
 | Agent | Config file | Blocked commands |
 |---|---|---|
 | Claude Code | `~/.claude/settings.json` → `permissions.deny` | `brew install/uninstall/upgrade/tap/services/… *`, `apt install/remove/upgrade/… *`, `snap install/remove/refresh *` |
 | Codex | `~/.codex/rules/default.rules` → `prefix_rule()` | same (Starlark rules, `decision="forbidden"`) |
-| opencode | `~/.config/opencode/opencode.jsonc` → `permission.bash` | same (`"brew install *": "deny"`, etc.) |
+| OpenCode | `~/.config/opencode/opencode.jsonc` | Direct package-manager commands use deny rules in legacy `permission.bash` or the ordered V2 `permissions` array. [OpenCode permissions](https://opencode.ai/docs/permissions/) |
 
 Read-only commands (`brew list`, `apt show`, `snap list`, etc.) are not blocked.
 These are prefix rules that stop accidental package changes, not a boundary:
@@ -904,7 +909,8 @@ The script detects the OS and adapts:
 | Apple Terminal defaults | untouched unless locally authorized with `CONFIGURE_APPLE_TERMINAL=1`; selecting "Workspace" needs the additional `SET_APPLE_TERMINAL_DEFAULT=1` | skipped |
 | SSH agent | macOS Keychain (launchd-managed `com.openssh.ssh-agent`, `--apple-use-keychain`) | socket-activated systemd user unit, forwarding-aware local socket fallback, linger + `AddKeysToAgent yes`; passphrase typed once per boot |
 | SSH key passphrase | passphrase-less (Keychain + FileVault protect the on-disk key) | passphrase-protected by default (override with `SSH_KEY_PASSPHRASE=none` for disposable VMs) |
-| Nerd Font | brew cask (`JetBrainsMono Nerd Font`) | GitHub release → `~/.local/share/fonts` (`JetBrainsMono Nerd Font Mono` variant — single-width icons for TUI alignment) |
+| Nerd Font | brew cask (`JetBrainsMono Nerd Font`) | Current [Nerd Fonts release](https://github.com/ryanoasis/nerd-fonts/releases/latest) → `~/.local/share/fonts` (`JetBrainsMono Nerd Font Mono` variant with single-width icons for TUI alignment) |
+| Kitty | [Vendor installer](https://sw.kovidgoyal.net/kitty/binary/) when absent | Same installer to `~/.local/kitty.app`, with stable release checks on reruns and user-local desktop integration |
 | Maccy clipboard manager | [Vendor release](https://github.com/p0deje/Maccy/releases/latest) when absent; existing app preserved | skipped (Linux has its own clipboard managers) |
 | LibreOffice | Vendor stable DMG when absent; existing app preserved | Preserves an installed official versioned DEB bundle, Snap, or Flatpak. Otherwise uses `ppa:libreoffice/ppa`; skip with `SKIP_LIBREOFFICE=1` |
 | Claude Desktop | Vendor download when absent, with `INSTALL_CLAUDE_DESKTOP=1` | Official Anthropic apt repo; skip with `SKIP_CLAUDE_DESKTOP=1` |
@@ -918,6 +924,7 @@ The script detects the OS and adapts:
 | Azure CLI (`az`) | Microsoft's documented [Homebrew cask](https://learn.microsoft.com/cli/azure/install-azure-cli-macos), `azure-cli`, as a community fallback; an installed formula is replaced after fetching the cask | Microsoft's apt archive when it publishes the host's suite. An existing uv copy is removed only after the apt command works; otherwise uv remains the fallback |
 | Cloudflare CLI (`cf`, `cloudflare`) | npm package [`cf`](https://developers.cloudflare.com/cf/get-started/) in `~/.npm/packages`; updated on reruns | same; uses the project's Node 26 runtime |
 | GoDaddy CLI (`gddy`) | [Official installer](https://developer.godaddy.com/en/docs/api-users/cli/set-up), with checksum verification and execution checked before placement in `~/.local/bin` | same; compares installed and published releases on each run |
+| Git credential helper | Git's Keychain helper | Verified [Git Credential Manager](https://github.com/git-ecosystem/git-credential-manager/releases/latest) archives on x86-64 and arm64, with user-local launchers |
 | OpenAI API CLI (`openai`) | Official [Homebrew cask `openai/tools/openai`](https://developers.openai.com/api/docs/libraries/openai-cli) | Official release to `~/.local/bin`, verified against its published digest |
 | Claude Code (`claude`) | [Native installer](https://code.claude.com/docs/en/setup) with the `stable` channel; `claude install stable` on reruns | same |
 | Codex CLI (`codex`) | [OpenAI's installer](https://learn.chatgpt.com/docs/codex/cli) selects `latest`, with state under `CODEX_HOME` and shell setup isolated from user profiles | same |
@@ -980,8 +987,11 @@ to the vendor's build the first time rather than being installed from the
 distribution and replaced afterwards. One index refresh covers them all.
 Ordinary Linux reruns pass the declared apt inventory to `apt install` again:
 apt upgrades stale packages and retains packages already at their candidates.
-The removal simulation runs before the transaction. Packages outside this
-inventory follow the existing opt-in `UPDATE_SYSTEM=1` path.
+Workstation runs also check the configured apt candidates for LibreOffice,
+Claude Desktop, the Codex app, GNOME Extension Manager, and the GNOME Software
+Flatpak plugin when enabled. Package removal simulation runs before those
+transactions. Packages outside the inventory follow the opt-in
+`UPDATE_SYSTEM=1` path.
 kubectl resolves the official
 [`stable.txt` endpoint](https://kubernetes.io/docs/tasks/tools/install-kubectl-linux/)
 on each setup run and selects that release's apt minor repository. Managed
@@ -1005,6 +1015,13 @@ mean it is left alone and reported.
 Rust uses `rustup update stable` on reruns, preserving other toolchains and
 the selected default. Only the uv and npm tools declared in the manifest are
 refreshed during normal provisioning; additional installed tools are preserved.
+
+Linux workstation runs check Kitty's published stable version and use the
+[official installer](https://sw.kovidgoyal.net/kitty/binary/) for fresh installs
+and upgrades. Setup verifies the staged `kitty` and `kitten` versions before
+replacing the bundle used by subsequent launches. JetBrainsMono Nerd Font Mono
+checks the release version embedded in the installed font and refreshes the
+Mono variants from the verified Nerd Fonts archive.
 
 Coding-agent installations use the native update paths listed above.
 Claude follows its `stable` channel; Codex, Copilot, OpenCode V2, and Antigravity
@@ -1115,7 +1132,7 @@ bash tests/run.sh
 bash tests/run.sh --only host
 bash tests/run.sh --only agents
 
-# On macOS 27, this runs agent tests under Apple's Bash 3.2 and Homebrew Bash:
+# On macOS 27, this runs the suite under Homebrew Bash and Apple's Bash 3.2:
 bash tests/run.sh --only agents
 
 # Real agent CLIs, temporary homes, and shipped manifests:

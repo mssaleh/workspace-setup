@@ -35,17 +35,29 @@ for state in 'deinstall ok config-files' 'install ok unpacked' 'install ok half-
 done
 set_status 'deinstall ok config-files'
 apt-cache() { printf '  Candidate: 1.0\n'; }
+apt_report_removals() { printf '%s\n' "$*" > "$db/simulation"; }
 apt_install_packages() { printf '%s\n' "$*" > "$db/transaction"; }
 apt_install_candidate fixture
 [[ "$(cat "$db/transaction")" == fixture ]]
+
+set_status 'install ok installed'
+archive=https://vendor.example.invalid/packages
+apt-cache() {
+  case "$1" in
+    policy) printf '  Candidate: 2.0\n' ;;
+    madison) printf 'fixture | 2.0 | %s stable/main amd64 Packages\n' "$archive" ;;
+  esac
+}
+: > "$db/transaction"
+: > "$db/simulation"
+apt_install_candidate fixture Fixture "$archive"
+[[ "$(cat "$db/transaction")" == fixture=2.0 && "$(cat "$db/simulation")" == 'install  fixture=2.0' ]]
 
 mkdir -p "$db/bin" "$db/info"
 printf '#!/bin/sh\nexit 0\n' > "$db/bin/fixture"
 chmod +x "$db/bin/fixture"
 printf '%s\n' "$db/bin/fixture" > "$db/info/fixture.list"
 export PATH="$db/bin:$PATH"
-set_status 'install ok installed'
-archive=https://vendor.example.invalid/packages
 apt-cache() { printf 'fixture | 1.0 | %s stable/main amd64 Packages\n' "$archive"; }
 [[ "$(vendor_command_state fixture fixture "$archive")" == managed ]]
 [[ "$(vendor_command_state fixture fixture "$archive/")" == managed ]]

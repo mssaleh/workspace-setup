@@ -157,7 +157,7 @@ install_macos_app() {
   else
     mount="$tmp/mount"
     mkdir -p "$mount"
-    if hdiutil attach -quiet -nobrowse -readonly -mountpoint "$mount" "$tmp/download.dmg" </dev/null; then
+    if diskutil image attach --readOnly --nobrowse --mountPoint "$mount" "$tmp/download.dmg" </dev/null; then
       mounted=1
     else
       status=1
@@ -177,7 +177,7 @@ install_macos_app() {
       fi
     fi
   fi
-  if ((mounted)) && ! hdiutil detach -quiet "$mount"; then
+  if ((mounted)) && ! diskutil eject "$mount" </dev/null; then
     warn "could not detach $name disk image at $mount"
     # Keep the mountpoint for manual recovery rather than deleting through it.
     return 1

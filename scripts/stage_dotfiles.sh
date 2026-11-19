@@ -246,6 +246,7 @@ merge_opencode_settings() {
   jq empty "$src" >/dev/null 2>&1 || return 1
   tmp=$(mktemp "${TMPDIR:-/tmp}/opencode-settings.XXXXXX") || return 1
   if ! jq -e '
+      (has("permissions") | not) and
       (.permission // {} | type) == "object" and
       (.permission.bash // {} | type) == "object"
     ' "$dst" >/dev/null 2>&1; then

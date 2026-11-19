@@ -35,6 +35,7 @@ store_add() {
 }
 store_add handmade                  # written here: no lock entry
 store_add sketches "" bare          # written here, and not a skill yet
+ln -s "$AGENTS_STORE/handmade" "$CODEX_HOME/skills/handmade"
 store_add leftover      lock        # fetched once, no longer declared
 store_add halfwritten   lock bare   # fetched, truncated, no longer declared
 printf 'orphan-one\norphan-two\n' >> "$SANDBOX/state/lock"   # payloads long gone
@@ -64,18 +65,17 @@ assert_absent   "a local binary of the declared package is not rewritten" \
 assert_contains "and what it actually runs is named" "$out" \
   "'devtools' runs /usr/local/bin/devtools-mcp in claude-code"
 
-# Nothing the lock never fetched is touched. No manifest row mentions these.
-assert_absent   "a skill written here is not pruned"  "$out" "removing undeclared skill handmade"
-assert_absent   "a directory written here is not pruned" "$out" "removing undeclared skill sketches"
-assert_contains "a skill written here is mirrored"    "$out" "linking handmade"
-assert_contains "what was written here is named once" "$out" \
-  "not installed from a source, left alone: handmade sketches"
+# Unlocked payloads and their existing links stay outside the plan.
+assert_absent "the plan leaves a manually copied skill alone" "$out" "handmade"
+assert_absent "the plan leaves a manually created directory alone" "$out" "sketches"
 
 assert_eq "no link is created and removed at once" \
   "$(grep -cE '^~ (claude-code|codex): removing (dangling|stale) link (alpha|beta|gamma|handmade)$' <<< "$out")" "0"
 
-assert_contains "a duplicate endpoint is named" "$out" \
-  "'docs-alias' is a second name for https://docs.example/mcp"
+assert_contains "the dry run plans the declared endpoint" "$out" \
+  "installing docs into claude-code,codex"
+assert_contains "the only configured name for the endpoint is preserved" "$out" \
+  "'docs-alias' configured but not declared (left alone)"
 
 # Verification reports only what the plan leaves behind — here, nothing.
 assert_absent   "verification does not repeat the plan"        "$out" "declared skills missing"
@@ -92,8 +92,9 @@ assert_eq "the store is the manifest plus what was written here" \
   "$(store_skill_names | tr '\n' ' ')" "alpha beta gamma handmade "
 assert_eq "and the directory written here is still there" \
   "$([[ -d "$AGENTS_STORE/sketches" ]] && echo yes)" "yes"
-assert_link "the skill written here is linked into claude-code" "$CLAUDE_HOME/skills/handmade"
-assert_link "the skill written here is linked into codex"       "$CODEX_HOME/skills/handmade"
+assert_missing "the local skill gets no new Claude mirror" "$CLAUDE_HOME/skills/handmade"
+assert_eq "the existing local Codex link still resolves" \
+  "$([[ "$CODEX_HOME/skills/handmade" -ef "$AGENTS_STORE/handmade" ]] && printf yes)" yes
 assert_missing "the truncated payload is gone" "$AGENTS_STORE/halfwritten"
 assert_missing "the stale link is gone"        "$CLAUDE_HOME/skills/gone"
 agent_mcp_invalidate

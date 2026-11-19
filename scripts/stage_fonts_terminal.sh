@@ -6,7 +6,7 @@
 
 ensure_cli_symlink() {
   local target="$1" link="$2"
-  mkdir -p "$(dirname "$link")"
+  mkdir -p "$(dirname "$link")" || return 1
   if [[ -L "$link" && -e "$link" && "$link" -ef "$target" ]]; then
     return 0
   fi
@@ -18,7 +18,7 @@ ensure_cli_symlink() {
     warn "preserving user-owned link $link → $(readlink "$link"); expected $target"
     return 0
   fi
-  ln -s "$target" "$link"
+  ln -s "$target" "$link" || return 1
   info "linked $link → $target"
 }
 
@@ -35,6 +35,51 @@ clear_setup_terminal_preference() {
   fi
 }
 
+install_linux_kitty() (
+  local app="$1" parent="${1%/*}" published installed state tmp
+  mkdir -p "$parent" || return 1
+  exec 9< "$parent"
+  flock -x 9 || return 1
+  if [[ -L "$app" ]]; then
+    warn "preserving Kitty's externally managed bundle link: $app"
+    [[ -x "$app/bin/kitty" && -x "$app/bin/kitten" ]]
+    return
+  fi
+  if [[ -e "$app" && ! -d "$app" ]]; then
+    warn "preserving an existing path that blocks Kitty: $app"
+    return 1
+  fi
+
+  published=$(curl -fsSL "$KITTY_LATEST_VERSION_URL" </dev/null) || published=''
+  if [[ ! "$published" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    warn "Kitty's current stable release could not be confirmed"
+    [[ -x "$app/bin/kitty" && -x "$app/bin/kitten" ]]
+    return
+  fi
+  if [[ -x "$app/bin/kitty" && -x "$app/bin/kitten" ]]; then
+    installed=$(upstream_installed_version "$app/bin/kitty" --version) || installed=''
+    state=$(upstream_artifact_state kitty "$installed" "$published")
+    upstream_report_state kitty "$state" "$installed" "$published"
+    [[ "$state" == stale ]] || return 0
+  else
+    info "installing Kitty $published with its upstream binary installer…"
+  fi
+
+  # Stage on the destination filesystem so a failed download or extraction
+  # leaves the working bundle in place.
+  tmp=$(mktemp -d "$parent/.kitty-install.XXXXXX") || return 1
+  trap 'rm -rf -- "$tmp"' EXIT
+  if ! curl -fsSL "$KITTY_INSTALL_URL" -o "$tmp/installer.sh" \
+      || ! sh "$tmp/installer.sh" launch=n "dest=$tmp" "installer=version-$published" </dev/null \
+      || [[ "$(upstream_installed_version "$tmp/kitty.app/bin/kitty" --version)" != "$published" \
+         || "$(upstream_installed_version "$tmp/kitty.app/bin/kitten" --version)" != "$published" ]]; then
+    warn "Kitty installer did not produce a working $published bundle"
+    return 1
+  fi
+  upstream_place_linux_bundle "$tmp/kitty.app" "$app" || return 1
+  ok "Kitty $published installed at $app"
+)
+
 install_kitty_upstream() {
   local kitty_bin kitten_bin
   if [[ "$OS_KIND" == macos ]]; then
@@ -45,21 +90,44 @@ install_kitty_upstream() {
     kitten_bin="$HOME/.local/kitty.app/bin/kitten"
   fi
 
-  if [[ ! -x "$kitty_bin" || ! -x "$kitten_bin" ]]; then
+  if [[ "$OS_KIND" == linux ]]; then
+    install_linux_kitty "$HOME/.local/kitty.app" || return 1
+  elif [[ ! -x "$kitty_bin" || ! -x "$kitten_bin" ]]; then
     info "installing kitty with its upstream binary installer…"
-    curl -fsSL https://sw.kovidgoyal.net/kitty/installer.sh | sh /dev/stdin launch=n
+    curl -fsSL "$KITTY_INSTALL_URL" </dev/null | sh /dev/stdin launch=n || return 1
   else
     ok "kitty application already installed"
   fi
 
   [[ -x "$kitty_bin" && -x "$kitten_bin" ]] || \
     fail "kitty installer completed without the expected application binaries"
-  ensure_cli_symlink "$kitty_bin" "$HOME/.local/bin/kitty"
-  ensure_cli_symlink "$kitten_bin" "$HOME/.local/bin/kitten"
+  ensure_cli_symlink "$kitty_bin" "$HOME/.local/bin/kitty" || return 1
+  ensure_cli_symlink "$kitten_bin" "$HOME/.local/bin/kitten" || return 1
 
   if [[ "$OS_KIND" == linux ]]; then
     install_kitty_desktop_integration
   fi
+}
+
+desktop_entry_value() {
+  local value="$1"
+  value=${value//\\/\\\\}
+  value=${value//$'\n'/\\n}
+  value=${value//$'\r'/\\r}
+  value=${value//$'\t'/\\t}
+  printf '%s' "$value"
+}
+
+kitty_desktop_command() {
+  local executable="$1"
+  # Exec quoting precedes the desktop string escaping.
+  # https://specifications.freedesktop.org/desktop-entry/latest/exec-variables.html
+  executable=${executable//\\/\\\\}
+  executable=${executable//\"/\\\"}
+  executable=${executable//\$/\\\$}
+  executable=${executable//\`/\\\`}
+  # GIO resolves the executable before expanding field codes such as %%.
+  printf '/usr/bin/env -- %s' "$(desktop_entry_value "\"${executable//%/%%}\"")"
 }
 
 # The upstream binary installer unpacks a self-contained ~/.local/kitty.app and
@@ -74,7 +142,11 @@ install_kitty_desktop_integration() {
   local app="$HOME/.local/kitty.app"
   local apps_dir="$HOME/.local/share/applications"
   local icon="$app/share/icons/hicolor/256x256/apps/kitty.png"
-  local entry src
+  local entry src bin="$app/bin/kitty" exec_path try_exec desktop_icon
+
+  exec_path=$(kitty_desktop_command "$bin")
+  try_exec=$(desktop_entry_value "$bin")
+  desktop_icon=$(desktop_entry_value "$icon")
 
   mkdir -p "$apps_dir"
   for entry in kitty.desktop kitty-open.desktop; do
@@ -94,10 +166,12 @@ install_kitty_desktop_integration() {
       # environment that already has ~/.local/bin on its PATH — GNOME's session
       # PATH usually does not include it, so the launcher silently fails to
       # start.
-      sed -e "s|^Icon=kitty$|Icon=$icon|" \
-          -e "s|^TryExec=kitty$|TryExec=$app/bin/kitty|" \
-          -e "s|^Exec=kitty|Exec=$app/bin/kitty|" \
-          "$src"
+      KITTY_EXEC="$exec_path" KITTY_TRY_EXEC="$try_exec" KITTY_ICON="$desktop_icon" awk '
+        /^Icon=kitty$/ { print "Icon=" ENVIRON["KITTY_ICON"]; next }
+        /^TryExec=kitty$/ { print "TryExec=" ENVIRON["KITTY_TRY_EXEC"]; next }
+        /^Exec=kitty( |$)/ { print "Exec=" ENVIRON["KITTY_EXEC"] substr($0, 11); next }
+        { print }
+      ' "$src"
 
       # The shipped entry describes a terminal but not an *application* as
       # GNOME models one: without StartupWMClass a window cannot be matched
@@ -113,8 +187,8 @@ Actions=new-window;
 
 [Desktop Action new-window]
 Name=New Window
-Exec=$app/bin/kitty
-Icon=$icon
+Exec=$exec_path
+Icon=$desktop_icon
 ENTRY
       fi
     } > "$apps_dir/$entry"
@@ -147,56 +221,46 @@ ENTRY
   ok "kitty desktop integration installed"
 }
 
+install_linux_nerd_font() (
+  local font_dir="$HOME/.local/share/fonts" label='JetBrainsMono Nerd Font Mono'
+  local regular=JetBrainsMonoNerdFontMono-Regular.ttf tag published installed state tmp font
+  mkdir -p "$font_dir" || return 1
+  exec 9< "$font_dir"
+  flock -x 9 || return 1
+  tag=$(upstream_latest_tag "$NERD_FONTS_REPO") || tag=''
+  published=${tag#v}
+  if [[ ! "$published" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    warn "$label: could not confirm the current release"
+    [[ -f "$font_dir/$regular" ]]
+    return
+  fi
+  if [[ -f "$font_dir/$regular" ]]; then
+    # Nerd Fonts v3.5.1's font-patcher writes its version into the SFNT name.
+    installed=$(strings -a "$font_dir/$regular" | awk '
+      !version && match($0, /Nerd Fonts [0-9]+\.[0-9]+\.[0-9]+/) {
+        version = substr($0, RSTART + 11, RLENGTH - 11)
+      } END { print version }') || installed=''
+    state=$(upstream_artifact_state "$label" "$installed" "$published")
+    upstream_report_state "$label" "$state" "$installed" "$published"
+    [[ "$state" == stale ]] || return 0
+  fi
+  tmp=$(mktemp -d "$font_dir/.nerd-font.XXXXXX") || return 1
+  trap 'rm -rf -- "$tmp"' EXIT
+  upstream_fetch_verified_asset "$NERD_FONTS_REPO" "$tag" "$NERD_FONT_ASSET" "$tmp/$NERD_FONT_ASSET" \
+    && tar -xJf "$tmp/$NERD_FONT_ASSET" -C "$tmp" \
+    && [[ -f "$tmp/$regular" ]] || return 1
+
+  # Install Regular last so an interrupted refresh is retried on the next run.
+  for font in "$tmp"/JetBrainsMonoNerdFontMono-*.ttf; do
+    [[ "${font##*/}" != "$regular" ]] || continue
+    mv -f -- "$font" "$font_dir/" || return 1
+  done
+  mv -f -- "$tmp/$regular" "$font_dir/" && fc-cache -f "$font_dir" || return 1
+  ok "$label $published installed at $font_dir"
+)
+
 stage_fonts_terminal() {
   [[ "$OS_KIND" == linux ]] || return 0
-
-  # JetBrainsMono Nerd Font — kitty.conf sets `font_family JetBrainsMono
-  # Nerd Font`; without this the powerline tab bar, yazi icons, and lazygit
-  # UI all break. Install from the official ryanoasis/nerd-fonts GitHub
-  # release into ~/.local/share/fonts (the XDG_DATA_HOME fonts dir; the
-  # older ~/.fonts is deprecated). fontconfig picks it up automatically.
-  # We use the flat `releases/latest/download/JetBrainsMono.tar.xz` URL
-  # (no API call needed — GitHub 302-redirects to the current release's
-  # asset, whose filename is stable across versions). The .tar.xz is
-  # much smaller than the .zip. We install ONLY the *NerdFontMono-* files
-  # (NFM variant — single-width icons, keeps yazi/lazygit grid alignment).
-  local font_dir="$HOME/.local/share/fonts"
-  if ls "$font_dir"/JetBrainsMonoNerdFontMono-*.ttf >/dev/null 2>&1; then
-    ok "JetBrainsMono Nerd Font Mono already installed"
-  else
-    info "installing JetBrainsMono Nerd Font Mono (GitHub release)…"
-    mkdir -p "$font_dir"
-    local tmp; tmp=$(mktemp -d)
-    if curl -fsSL "https://github.com/ryanoasis/nerd-fonts/releases/latest/download/JetBrainsMono.tar.xz" \
-      -o "$tmp/JetBrainsMono.tar.xz" 2>/dev/null; then
-      # Extract the whole archive (contains Ligatures/NoLigatures trees
-      # with NF/NFM/NFP variants). We then copy only the NFM files to keep
-      # the install lean (~16 TTFs vs ~96).
-      if tar -xJf "$tmp/JetBrainsMono.tar.xz" -C "$tmp" 2>/dev/null; then
-        # The archive extracts into the cwd with no top-level dir; find
-        # the NFM files wherever they landed.
-        local count=0
-        while IFS= read -r -d '' f; do
-          cp "$f" "$font_dir/"
-          count=$((count+1))
-        done < <(find "$tmp" -type f -name 'JetBrainsMonoNerdFontMono-*.ttf' -print0)
-        if (( count > 0 )); then
-          # Refresh fontconfig cache so kitty/xterm/anything picks them up.
-          if command -v fc-cache >/dev/null 2>&1; then
-            fc-cache -f >/dev/null 2>&1 || true
-          fi
-          ok "JetBrainsMono Nerd Font Mono installed ($count files → $font_dir)"
-        else
-          warn "Nerd Font: no *NerdFontMono-*.ttf files found in archive (kitty tab bar / icons will not render)"
-        fi
-      else
-        warn "Nerd Font: tar extraction failed (tar may not support xz — install xz-utils)"
-      fi
-    else
-      warn "Nerd Font: download failed (kitty tab bar / icons will not render)"
-    fi
-    rm -rf "$tmp"
-  fi
-
+  install_linux_nerd_font || return 1
   install_kitty_upstream
 }

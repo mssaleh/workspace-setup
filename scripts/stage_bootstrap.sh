@@ -24,14 +24,15 @@ stage_bootstrap() {
   if [[ -z "${APT_ENV+x}" ]]; then
     APT_ENV=(env "DEBIAN_FRONTEND=noninteractive" "NEEDRESTART_MODE=a" "APT_LISTCHANGES_FRONTEND=none")
   fi
-  if ! command -v curl >/dev/null 2>&1; then
-    info "installing curl…"
+  local tool missing=()
+  for tool in curl git; do
+    command -v "$tool" >/dev/null 2>&1 || missing+=("$tool")
+  done
+  if ((${#missing[@]})); then
+    info "installing ${missing[*]}…"
     sudo "${APT_ENV[@]}" "$PKGMGR" update || warn "apt update failed; trying the cached package index"
-    sudo "${APT_ENV[@]}" "$PKGMGR" install -y curl
-  fi
-  if ! command -v git >/dev/null 2>&1; then
-    info "installing git…"
-    sudo "${APT_ENV[@]}" "$PKGMGR" install -y git
+    apt_report_removals install '' "${missing[@]}" || return 1
+    apt_install_packages "${missing[@]}" || return 1
   fi
   ok "curl + git available"
   bootstrap_report_memory

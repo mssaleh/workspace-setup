@@ -216,6 +216,16 @@ agent_mcp_invalidate
 assert_absent   "the duplicate is gone"          "$(agent_mcp_names claude-code)" "docs-alias"
 assert_contains "the row it duplicated survives" "$(agent_mcp_names claude-code)" "docs"
 
+# A same-endpoint entry in an agent outside the declaration is independent.
+sandbox_set_mcp github-copilot standalone-docs remote https://docs.example/mcp
+agent_mcp_invalidate
+PRUNE_DUPLICATE_MCP=1 mcp_prune_duplicates >/dev/null 2>&1
+agent_mcp_invalidate
+assert_contains "pruning preserves an endpoint used outside the declaration" \
+  "$(agent_mcp_names github-copilot)" standalone-docs
+sandbox_del_mcp github-copilot standalone-docs
+agent_mcp_invalidate
+
 # Native removal uses an exact name.
 sandbox_set_mcp claude-code doc remote https://docs.example/mcp
 agent_mcp_invalidate

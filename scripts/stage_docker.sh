@@ -108,7 +108,8 @@ stage_docker() {
   # apt_trust_repo_key verifies the fingerprint before trusting the download
   # and leaves an already-correct keyring alone, so this is a no-op on a host
   # that is only here because one Docker package went missing.
-  sudo "${APT_ENV[@]}" "$PKGMGR" install -y ca-certificates curl gnupg || return 1
+  apt_report_removals install '' ca-certificates curl gnupg || return 1
+  apt_install_packages ca-certificates curl gnupg || return 1
   if ! apt_trust_repo_key Docker "${DOCKER_APT_URI_BASE}/${docker_repo_os}/gpg" \
       "$DOCKER_KEYRING" "$DOCKER_KEY_FINGERPRINT"; then
     warn "could not establish Docker's signing key — skipping Docker Engine"
@@ -159,8 +160,9 @@ stage_docker() {
     warn "apt update failed after adding Docker repo — skipping install (check /etc/apt/sources.list.d/docker.sources)"
     return 1
   fi
-  if ! sudo "${APT_ENV[@]}" "$PKGMGR" install -y \
-      docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin; then
+  local docker_packages=(docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin)
+  if ! apt_report_removals install '' "${docker_packages[@]}" \
+      || ! apt_install_packages "${docker_packages[@]}"; then
     warn "Docker Engine install failed — see https://docs.docker.com/engine/install/$docker_repo_os/"
     return 1
   fi

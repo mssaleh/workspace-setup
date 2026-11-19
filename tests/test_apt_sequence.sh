@@ -62,13 +62,11 @@ first_install=$(grep -nE 'apt_install_packages|apt_install_candidate|install_nod
 # install are the ones it needs to do that: the tool that adds a PPA, the key
 # handling utilities, and the keyring package Kitware ship their rotation in.
 while read -r line; do
-  # Everything between `install -y` and the first redirection, operator or line
-  # continuation is the package list; the rest is shell punctuation.
-  names=$(sed -n 's/.*install -y //p' <<< "$line" | sed -e 's/[|>;&].*//' -e 's/\\$//')
+  names=$(sed -nE 's/.*apt_install_(packages|candidate) //p' <<< "$line" | sed -e 's/[|>;&].*//')
   [[ -n "$names" ]] || continue
   for candidate in $names; do
     case "$candidate" in
-      software-properties-common|curl|gnupg|ca-certificates|apt-transport-https|kitware-archive-keyring) ;;
+      software-properties-common|curl|gnupg|ca-certificates|kitware-archive-keyring) ;;
       *) fail "registration installs the toolbox package '$candidate'; installs belong in the install phase" ;;
     esac
   done
@@ -214,7 +212,7 @@ raw_installs=$(printf '%s\n' "$branch" \
     esac
   }
 
-  LO_APT_STATUS='install ok installed'
+  LO_APT_STATUS=installed
   libreoffice_installed || fail 'an installed distribution LibreOffice was missed'
 
   LO_APT_STATUS=

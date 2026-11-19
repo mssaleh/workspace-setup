@@ -159,12 +159,12 @@ apt_repo_is_configured() {
     /etc/apt/sources.list.d/*.sources 2>/dev/null
 }
 
-# apt_install_candidate <package> [label] — install the package, or upgrade it
+# apt_install_candidate <package> [label] [archive] — install or upgrade
 # when the archive now offers a version other than the installed one. Comparing
 # against the candidate is what moves a host off a distribution build after a
 # vendor repository is added, while keeping a converged host a no-op.
 apt_install_candidate() {
-  local pkg="$1" label="${2:-$1}" installed candidate
+  local pkg="$1" label="${2:-$1}" archive="${3:-}" target="$1" installed candidate
   apt_preserve_application "$pkg" && return 0
   installed=''
   if apt_package_installed "$pkg"; then
@@ -180,8 +180,16 @@ apt_install_candidate() {
     ok "$label already at the newest available version ($installed)"
     return 0
   fi
+  if [[ -n "$archive" ]]; then
+    if ! apt_version_from_archive "$pkg" "$candidate" "$archive"; then
+      warn "$label: candidate $candidate is unavailable from $archive"
+      return 1
+    fi
+    target="$pkg=$candidate"
+  fi
   info "installing $label $candidate…"
-  apt_install_packages "$pkg" \
+  apt_report_removals install '' "$target" || return 1
+  apt_install_packages "$target" \
     || { warn "$label install failed (skipped)"; return 1; }
 }
 
@@ -221,16 +229,16 @@ apt_preserve_application() {
 # Official LibreOffice DEB bundles use a versioned package name rather than
 # Ubuntu's unversioned package name; Snap and Flatpak can also provide it.
 libreoffice_installed() {
-  apt_application_equivalent libreoffice >/dev/null && return 0
-  if dpkg-query -W -f='${Status}' libreoffice 2>/dev/null \
-      | grep -Fxq 'install ok installed'; then
-    return 0
-  fi
+  apt_application_equivalent libreoffice >/dev/null \
+    || apt_package_installed libreoffice \
+    || libreoffice_versioned_bundle_installed
+}
 
+libreoffice_versioned_bundle_installed() {
   local package status
   while IFS=$'\t' read -r package status; do
     [[ "$package" =~ ^libreoffice[0-9]+\.[0-9]+$ ]] || continue
-    [[ "$status" == 'install ok installed' ]] || continue
+    [[ "$status" == 'install ok installed' || "$status" == 'hold ok installed' ]] || continue
     return 0
   done < <(dpkg-query -W -f='${binary:Package}\t${Status}\n' 'libreoffice[0-9]*' 2>/dev/null)
   return 1

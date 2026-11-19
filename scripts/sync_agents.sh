@@ -75,6 +75,17 @@ while (($#)); do
   shift
 done
 detect_os
+# A shell that has not loaded the installed profile can still use its tools.
+tool_paths=("$HOME/.local/bin")
+[[ "$OS_KIND" != macos ]] || tool_paths+=("$(default_brew_prefix)/bin")
+for tool_path in "${tool_paths[@]}"; do
+  [[ -d "$tool_path" ]] || continue
+  case ":${PATH:-}:" in
+    *":$tool_path:"*) ;;
+    *) PATH="${PATH:+$PATH:}$tool_path" ;;
+  esac
+done
+export PATH
 export DRY_RUN=${DRY_RUN:-}
 export PRUNE_PLUGIN_CACHE=${PRUNE_PLUGIN_CACHE:-}
 export PRUNE_DUPLICATE_MCP=${PRUNE_DUPLICATE_MCP:-}
@@ -105,8 +116,8 @@ pass_skills() {
 pass_mcp() {
   agent_mcp_table > /dev/null \
     || { problem "mcp: cannot read effective agent configuration"; return 1; }
-  mcp_prune_duplicates
-  mcp_converge
+  mcp_converge || return
+  mcp_prune_duplicates || return
   mcp_report_variants
   mcp_report_project_scope
   mcp_report_disabled_here

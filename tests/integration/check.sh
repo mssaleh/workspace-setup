@@ -150,8 +150,10 @@ native_readback() {
   for dir in "$HOME/.agents/skills/"*/; do
     [[ -f "$dir/SKILL.md" ]] || die "Incomplete skill: $dir"
     skill=${dir%/}; skill=${skill##*/}
-    [[ "$CLAUDE_CONFIG_DIR/skills/$skill" -ef "$dir" ]]
-    [[ "$CODEX_HOME/skills/$skill" -ef "$dir" ]]
+    if [[ "$skill" != integration-local ]]; then
+      [[ "$CLAUDE_CONFIG_DIR/skills/$skill" -ef "$dir" ]]
+      [[ "$CODEX_HOME/skills/$skill" -ef "$dir" ]]
+    fi
     skills+=("$skill")
   done
   # At its default home Copilot reads the shared store itself, without a mirror.
@@ -192,7 +194,7 @@ seed_user_additions() {
 
 assert_user_additions() {
   [[ -f "$HOME/.agents/skills/integration-local/SKILL.md" ]]
-  [[ -f "$CLAUDE_CONFIG_DIR/skills/integration-local/SKILL.md" ]]
+  [[ ! -e "$CLAUDE_CONFIG_DIR/skills/integration-local" && ! -L "$CLAUDE_CONFIG_DIR/skills/integration-local" ]]
   grep -qF '"extra@integration-fixture"' "$CLAUDE_CONFIG_DIR/plugins/installed_plugins.json"
   grep -qF '"integration-user"' "$CLAUDE_CONFIG_DIR/.claude.json"
   codex mcp get integration-user --json

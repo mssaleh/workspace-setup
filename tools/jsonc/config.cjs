@@ -18,12 +18,27 @@ if (action === 'read') {
     }));
   };
   if (!Object.hasOwn(config, '$schema')) set(['$schema'], baseline.$schema);
-  const permission = config.permission;
-  if (typeof permission === 'string') set(['permission'], { '*': permission });
-  const bash = permission && typeof permission === 'object' ? permission.bash : undefined;
-  if (typeof bash === 'string') set(['permission', 'bash'], { '*': bash });
-  for (const [command, policy] of Object.entries(baseline.permission.bash)) {
-    if (!bash || bash[command] !== policy) set(['permission', 'bash', command], policy);
+  const packageRules = Object.entries(baseline.permission.bash);
+  if (Object.hasOwn(config, 'permissions')) {
+    if (!Array.isArray(config.permissions)) throw new Error('OpenCode permissions must be an array');
+    const required = packageRules.map(([resource, effect]) => ({ action: 'shell', resource, effect }));
+    const tail = config.permissions.slice(-required.length);
+    // OpenCode V2 uses the last matching rule. Keep other rules in their original order.
+    const matches = tail.length === required.length && required.every((rule, index) => {
+      const entry = tail[index];
+      return entry?.action === rule.action && entry.resource === rule.resource && entry.effect === rule.effect;
+    });
+    if (!matches) {
+      for (const rule of required) set(['permissions', -1], rule);
+    }
+  } else {
+    const permission = config.permission;
+    if (typeof permission === 'string') set(['permission'], { '*': permission });
+    const bash = permission && typeof permission === 'object' ? permission.bash : undefined;
+    if (typeof bash === 'string') set(['permission', 'bash'], { '*': bash });
+    for (const [command, policy] of packageRules) {
+      if (!bash || bash[command] !== policy) set(['permission', 'bash', command], policy);
+    }
   }
   process.stdout.write(text);
 } else {

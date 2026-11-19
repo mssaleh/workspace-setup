@@ -155,6 +155,17 @@ assert_eq "updating a collection discovers new skills" "$([[ -f "$AGENTS_STORE/t
 assert_eq "a source subfolder matches its lock path" "$(lock_source_skill_names acme/solo/deep)" gamma
 assert_eq "a different subfolder does not match" "$(lock_source_skill_names acme/solo/other)" ""
 
+export SKILLS_STUB_PROVIDES="$SKILLS_STUB_PROVIDES
+shadcn/ui=shadcn"
+skills_cli add shadcn/ui --skill '*' -a "$SKILL_STORE_AGENT" -g -y >/dev/null 2>&1
+printf 'shadcn-ui/ui\t*\twhole\n' >> "$MANIFEST_DIR/skills.tsv"
+assert_eq "a renamed repository resolves its existing lock" "$(lock_source_skill_names shadcn-ui/ui)" shadcn
+assert_absent "a renamed repository keeps its installed skills" "$(skills_install 2>&1)" 'shadcn-ui/ui: fetching'
+
+CLAUDE_HOME="$SANDBOX/first-run/claude" CODEX_HOME="$SANDBOX/first-run/codex" skills_mirror >/dev/null 2>&1
+assert_link "Claude gets skills before its first launch" "$SANDBOX/first-run/claude/skills/shadcn"
+assert_link "Codex gets skills before its first launch" "$SANDBOX/first-run/codex/skills/shadcn"
+
 # skills 1.7.4 keys its lock by the frontmatter name and installs into a
 # sanitized directory; the two are the same skill.
 mkdir -p "$AGENTS_STORE/mixedcase"
@@ -171,7 +182,7 @@ assert_link "the mirror links the installed directory" "$CLAUDE_HOME/skills/mixe
 # Planned removal uses the lock name, while the mirror uses the directory.
 DRY_RUN=1
 plan 'unskill:MixedCase'
-assert_absent "a planned removal excludes the sanitized mirror" "$(mirror_set)" mixedcase
+assert_absent "a planned removal excludes the sanitized mirror" "$(mirror_set "$(lock_skill_names)")" mixedcase
 DRY_RUN=''
 
 test_summary

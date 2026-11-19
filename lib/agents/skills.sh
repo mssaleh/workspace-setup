@@ -170,16 +170,23 @@ lock_skill_names() {
 # skills 1.7.4 writes lock entries with JSON.stringify(lock, null, 2).
 # Read source and skillPath as well as the name to retain whole collections.
 lock_source_skill_names() {
+  local alias=''
+  # https://github.com/shadcn/ui redirects to https://github.com/shadcn-ui/ui.
+  case "$1" in
+    shadcn-ui/ui) alias=shadcn/ui ;;
+    shadcn/ui) alias=shadcn-ui/ui ;;
+  esac
   [[ -e "$AGENTS_LOCK" || -L "$AGENTS_LOCK" ]] || return 0
   [[ -f "$AGENTS_LOCK" && -r "$AGENTS_LOCK" ]] || return 1
-  awk -v spec="$1" '
+  awk -v spec="$1" -v alias="$alias" '
     function field(s) { sub(/^[^:]*: "/, "", s); sub(/",?$/, "", s); return s }
     /^    "[^"]+": \{$/ { name = $0; sub(/^    "/, "", name); sub(/": \{$/, "", name); source = ""; path = "" }
     /^      "source":/ { source = field($0) }
     /^      "skillPath":/ { path = field($0) }
     /^    }/ {
       s = tolower(source); want = tolower(spec)
-      if (s != "" && (want == s || (index(want, s "/") == 1 && index(path, substr(spec, length(source) + 2) "/") == 1))) print name
+      if (s != "" && (want == s || alias == s ||
+          (index(want, s "/") == 1 && index(path, substr(spec, length(source) + 2) "/") == 1))) print name
     }
   ' "$AGENTS_LOCK" | sort -u
 }
@@ -199,11 +206,25 @@ skills_declared_names() {
 
 store_all_names() { cat <(store_skill_names) <(store_invalid_names) | sort -u; }
 
-# `skills remove` enumerates the lock too, so it clears an entry whose payload
-# is already gone.
-skills_forget() {
-  skills_cli remove -g -s "$1" -y || problem "could not remove $1"
-}
+# skills 1.9 removes same-named copies across agent homes by default.
+# Give its universal target only the shared store and the native lock.
+skills_remove_from_store() (
+  if [[ -n "${DRY_RUN:-}" ]]; then
+    skills_cli remove -g -a universal "$@" -y
+    return
+  fi
+  local scratch npm_userconfig="${NPM_CONFIG_USERCONFIG:-${npm_config_userconfig:-$HOME/.npmrc}}"
+  scratch=$(mktemp -d "${TMPDIR:-/tmp}/skills-remove.XXXXXX") || return 1
+  trap 'rm -rf -- "$scratch"' EXIT
+  mkdir "$scratch/.agents" \
+    && ln -s "$AGENTS_STORE" "$scratch/.agents/skills" \
+    && ln -s "$AGENTS_LOCK" "$scratch/.agents/.skill-lock.json" || return 1
+  unset CLAUDE_CONFIG_DIR CLAUDE_HOME CODEX_HOME COPILOT_HOME OPENCODE_CONFIG_DIR
+  cd / || return 1
+  HOME="$scratch" XDG_STATE_HOME='' XDG_CONFIG_HOME="$scratch/config" \
+    XDG_DATA_HOME="$scratch/data" npm_config_userconfig="$npm_userconfig" \
+    skills_cli remove -g -a universal "$@" -y
+)
 
 # Plain runs fetch missing payloads; --update re-fetches declared sources.
 skills_install() {
@@ -247,14 +268,14 @@ skills_install() {
   return 0
 }
 
-# What the store holds, plus what install said it would fetch — under --dry-run
-# nothing has been fetched yet, and `planned` is always false on a real run.
+# Fetched skills in the store plus declared skills in the dry-run plan.
 mirror_set() {
-  local name dir out
+  local locked="$1" name dir out
   out=$(
     while IFS= read -r dir; do
       [[ -n "$dir" ]] || continue
       name=$(skill_frontmatter_name "$AGENTS_STORE/$dir/SKILL.md")
+      grep -qxF "${name:-$dir}" <<< "$locked" || continue
       planned "unskill:${name:-$dir}" || printf '%s\n' "$dir"
     done < <(store_skill_dirs)
   )
@@ -263,7 +284,7 @@ mirror_set() {
     planned "skill:$name" && out="$out
 $name"
   done < <(skills_declared_names)
-  printf '%s\n' "$out" | grep -v '^[[:space:]]*$' | sort -u
+  printf '%s\n' "$out" | sed '/^[[:space:]]*$/d' | sort -u
 }
 
 # The lock minus the manifest: a payload no row wants, and an entry whose
@@ -271,27 +292,53 @@ $name"
 skills_prune() {
   [[ -n "${PRUNE_SKILLS:-}" ]] || return 0
   local extra name declared locked
+  local flags=()
   declared=$(skills_declared_names) || { problem "skills: cannot read declarations for pruning"; return 1; }
   locked=$(lock_skill_names) || { problem "skills: cannot read lock for pruning"; return 1; }
   extra=$(comm -13 <(printf '%s\n' "$declared") <(printf '%s\n' "$locked"))
   [[ -n "$extra" ]] || { ok "no undeclared skills"; return 0; }
   while IFS= read -r name; do
     [[ -n "$name" ]] || continue
+    case "$name" in
+      '*'|-*) problem "skills: cannot safely select lock entry '$name' for removal"; continue ;;
+    esac
     delta "removing undeclared skill $name"
     plan "unskill:$name"
-    skills_forget "$name"
+    flags+=(-s "$name")
   done <<< "$extra"
+  if ((${#flags[@]})); then
+    skills_remove_from_store "${flags[@]}" || problem "could not remove undeclared skills"
+  fi
+}
+
+skill_mirror_needed() {
+  local binary
+  [[ -d "${2%/*}" ]] && return 0
+  case "$1" in
+    claude-code) binary=claude ;;
+    codex) binary=codex ;;
+    github-copilot) binary=copilot ;;
+    *) return 1 ;;
+  esac
+  command -v "$binary" >/dev/null 2>&1
+}
+
+skill_mirror_owned() {
+  local target
+  target=$(readlink "$1") || return 1
+  [[ "$target" == /* ]] || target="${1%/*}/$target"
+  skills_same_path "$target" "$AGENTS_STORE/${1##*/}"
 }
 
 # A real directory under a mirrored name is a stale full copy shadowing the
-# store, so it is replaced. The sweep below skips exactly what this loop owns,
-# so nothing is linked and unlinked in the same run.
+# store. The sweep skips links owned by the mirror loop.
 skills_mirror() {
-  local agent dir target name link mirrored
-  mirrored=$(mirror_set)
+  local agent dir target name link mirrored locked skill
+  locked=$(lock_skill_names) || { problem "skills: cannot read lock for mirroring"; return 1; }
+  mirrored=$(mirror_set "$locked")
   for agent in $SKILL_MIRROR_AGENTS; do
     dir=$(agent_skills_dir "$agent") || { warn "no skills directory known for $agent"; continue; }
-    [[ -d "$(dirname "$dir")" ]] || { info "$agent not installed here, skipping"; continue; }
+    skill_mirror_needed "$agent" "$dir" || { info "$agent not installed here, skipping"; continue; }
     if [[ ! -d "$dir" ]]; then
       delta "creating $dir"; plan "mirror-dir:$agent"
       run mkdir -p "$dir" || { problem "$agent: cannot create $dir"; continue; }
@@ -323,12 +370,14 @@ skills_mirror() {
       [[ -n "$link" ]] || continue
       name=$(basename "$link")
       grep -qxF "$name" <<< "$mirrored" && continue   # owned by the loop above
+      skill_mirror_owned "$link" || continue
       if [[ ! -e "$link" ]]; then
         delta "$agent: removing dangling link $name"
-      elif [[ "$link" -ef "$AGENTS_STORE/$name" ]]; then
-        delta "$agent: removing stale link $name"
       else
-        continue
+        skill=""
+        if [[ -f "$link/SKILL.md" ]]; then skill=$(skill_frontmatter_name "$link/SKILL.md"); fi
+        grep -qxF "${skill:-$name}" <<< "$locked" || continue
+        delta "$agent: removing stale link $name"
       fi
       plan "unmirror:$agent:$name"
       run rm -f "$link" || problem "$agent: cannot remove $link"

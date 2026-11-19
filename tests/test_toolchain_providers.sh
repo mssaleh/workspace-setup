@@ -69,6 +69,7 @@ chmod +x "$HOME/.local/bin/uv"
 # published uv release is supplied directly.
 upstream_artifact_needed() { return 1; }
 install_cloud_clis() { return 0; }
+install_linux_git_credential_manager() { return 0; }
 install_coding_agents() { return 0; }
 apt_repo_is_configured() { return 1; }
 STUB_UV_RELEASE=0.1.0

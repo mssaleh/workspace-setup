@@ -28,9 +28,20 @@ COPILOT_HOME=$(agent_home github-copilot)
 OPENCODE_CONFIG=${OPENCODE_CONFIG:-$(opencode_config_path)}
 
 MCP_TABLE_CACHE=""
+MCP_TABLE_LOADED=""
+
+# OpenCode 2.3 initializes logs and state even for --help and config.get.
+# Leave HOME and XDG_CONFIG_HOME in place so it reads the real configuration.
+opencode_read() (
+  local scratch
+  scratch=$(mktemp -d "${TMPDIR:-/tmp}/opencode-read.XXXXXX") || return 1
+  trap 'rm -rf -- "$scratch"' EXIT
+  XDG_DATA_HOME="$scratch/data" XDG_STATE_HOME="$scratch/state" XDG_CACHE_HOME="$scratch/cache" \
+    opencode "$@" < /dev/null
+)
 
 opencode_has_global_scope() {
-  opencode mcp add --help < /dev/null | grep -q -- '--global'
+  opencode_read mcp add --help | grep -F -- '--global' >/dev/null
 }
 
 copilot_available() {
@@ -148,17 +159,17 @@ codex_mcp_table() {
 # object replaces an earlier one: https://opencode.ai/v2/docs/mcp-servers
 opencode_mcp_table() {
   if opencode_has_global_scope; then
-    (cd / && opencode api --standalone config.get < /dev/null) \
+    (cd / && opencode_read api --standalone config.get) \
       | json_mcp_block - info.mcp.servers full \
       | awk -F'\t' '{ row[$1] = $0 } END { for (name in row) print row[name] }' | sort
   else
-    (cd / && opencode --pure debug config < /dev/null) | json_mcp_block - mcp full
+    (cd / && opencode_read --pure debug config) | json_mcp_block - mcp full
   fi
 }
 
 # Cached: the passes ask about the same servers repeatedly.
 agent_mcp_table() {
-  if [[ -z "$MCP_TABLE_CACHE" ]]; then
+  if [[ -z "$MCP_TABLE_LOADED" ]]; then
     MCP_TABLE_CACHE=$(
       json_mcp_block "$CLAUDE_CONFIG" mcpServers full | sed $'s/^/claude-code\t/' || exit
       codex_mcp_table | sed $'s/^/codex\t/' || exit
@@ -170,11 +181,12 @@ agent_mcp_table() {
     )
     local status=$?
     if ((status != 0)); then MCP_TABLE_CACHE=""; return "$status"; fi
+    MCP_TABLE_LOADED=1
   fi
   printf '%s\n' "$MCP_TABLE_CACHE"
 }
 
-agent_mcp_invalidate() { MCP_TABLE_CACHE=""; }
+agent_mcp_invalidate() { MCP_TABLE_LOADED=""; }
 
 agent_mcp_names() {
   agent_mcp_table | awk -F'\t' -v a="$1" '$1 == a && $2 != "" { print $2 }' | sort -u

@@ -107,49 +107,42 @@ stage_toolchains() {
 
   install_cloud_clis || return 1
 
-  # --- Git Credential Manager — GitHub release tarball ---
-  # Linux only; a Mac gets its keychain helper from git itself. The archive is a
-  # self-contained .NET application: the executable needs its two .so files
-  # beside it, so it is unpacked into its own directory and exposed by symlink,
-  # which is what the publisher's own .deb does under /usr/local/share/gcm-core.
-  if [[ "$OS_KIND" == linux ]] && [[ "$(uname -m)" == x86_64 ]]; then
-    local gcm_dir="$HOME/.local/share/gcm-core"
-    local gcm_bin="$gcm_dir/git-credential-manager"
-    local gcm_link="$HOME/.local/bin/git-credential-manager"
-    if upstream_artifact_needed git-credential-manager "$gcm_bin" "$gcm_bin" --version; then
-      local gcm_tag gcm_ver gcm_tmp
-      gcm_tag=$(upstream_latest_tag git-ecosystem/git-credential-manager 2>/dev/null || true)
-      gcm_ver=${gcm_tag#v}
-      if [[ -z "$gcm_tag" ]]; then
-        warn "could not determine the published git-credential-manager version"
-      else
-        gcm_tmp=$(mktemp -d)
-        if upstream_fetch_verified_asset git-ecosystem/git-credential-manager "$gcm_tag" \
-             "gcm-linux-x64-${gcm_ver}.tar.gz" "$gcm_tmp/gcm.tar.gz" \
-           && mkdir -p "$gcm_dir" \
-           && tar -xzf "$gcm_tmp/gcm.tar.gz" -C "$gcm_dir"; then
-          chmod 0755 "$gcm_bin"
-          ok "git-credential-manager installed → $gcm_dir ($gcm_ver)"
-        else
-          warn "git-credential-manager ${gcm_ver} download or extraction failed"
-        fi
-        rm -rf "$gcm_tmp"
-      fi
-    fi
-    if [[ -x "$gcm_bin" ]]; then
-      if [[ -L "$gcm_link" && "$gcm_link" -ef "$gcm_bin" ]]; then
-        :
-      elif [[ -e "$gcm_link" && ! -L "$gcm_link" ]]; then
-        warn "preserving user-owned $gcm_link; cannot expose the upstream artifact"
-      else
-        ln -sfn "$gcm_bin" "$gcm_link"
-        info "linked $gcm_link → $gcm_bin"
-      fi
-    fi
-  fi
-
+  [[ "$OS_KIND" != linux ]] || install_linux_git_credential_manager || return 1
   install_coding_agents || return 1
 }
+
+install_linux_git_credential_manager() (
+  local label=git-credential-manager parent="$HOME/.local/share" arch repo tag version actual tmp
+  local bundle="$parent/gcm-core"
+  local bin="$bundle/$label"
+  case "$(uname -m)" in
+    x86_64|amd64) arch=x64 ;;
+    aarch64|arm64) arch=arm64 ;;
+    *) return 0 ;;
+  esac
+  mkdir -p "$parent" || return 1
+  exec 9< "$parent"
+  flock -x 9 || return 1
+  if [[ ! -L "$bundle" ]] && upstream_artifact_needed "$label" "$bin" "$bin" --version; then
+    repo=$(upstream_project_repo "$label") || return 1
+    tag=$(upstream_latest_tag "$repo") || return 1
+    version=${tag#v}
+    tmp=$(mktemp -d "$parent/.gcm-install.XXXXXX") || return 1
+    trap 'rm -rf -- "$tmp"' EXIT
+    mkdir "$tmp/bundle" || return 1
+    if ! upstream_fetch_verified_asset "$repo" "$tag" "gcm-linux-$arch-$version.tar.gz" "$tmp/gcm.tar.gz" \
+        || ! tar -xzf "$tmp/gcm.tar.gz" -C "$tmp/bundle" \
+        || ! actual=$("$tmp/bundle/$label" --version </dev/null) \
+        || [[ "${actual%%+*}" != "$version" ]] \
+        || ! upstream_place_linux_bundle "$tmp/bundle" "$bundle"; then
+      warn "$label $version installation failed"
+      return 1
+    fi
+    ok "$label $version installed at $bundle"
+  fi
+  [[ -x "$bin" ]] || { warn "$label executable is missing at $bin"; return 1; }
+  ensure_cli_symlink "$bin" "$HOME/.local/bin/$label"
+)
 
 install_coding_agents() {
   local tool tmp status codex_home opencode_bin opencode_link version

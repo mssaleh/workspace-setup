@@ -93,7 +93,7 @@ upstream_fetch_verified_asset() {
 # necessarily on the first line: yazi prints "Yazi" above "Version: 26.9.1".
 upstream_installed_version() {
   local output
-  output=$("$@" 2>/dev/null) || return 1
+  output=$("$@" </dev/null 2>/dev/null) || return 1
   grep -oE '[0-9]+\.[0-9]+\.[0-9]+' <<< "$output" | head -n1
 }
 
@@ -263,5 +263,15 @@ upstream_place_artifact() {
     install_executable_replacing "$src" "$dst" "$label"
   else
     install_executable_if_path_free "$src" "$dst" "$label"
+  fi
+}
+
+# Replace a staged Linux bundle on the same filesystem in one rename.
+upstream_place_linux_bundle() {
+  local src="$1" dst="$2"
+  if [[ -d "$dst" && ! -L "$dst" ]]; then
+    mv -T --no-copy --exchange "$src" "$dst"
+  else
+    mv -T --no-copy --update=none-fail "$src" "$dst"
   fi
 }

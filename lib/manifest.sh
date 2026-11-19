@@ -105,6 +105,9 @@ PACKAGES_APT=(
   build-essential less openssh-client patch bzip2 fuse3
   # AWS CLI formats its help pages with groff.
   groff
+  # Git Credential Manager's self-contained .NET 10 build requires Ubuntu's ICU.
+  # https://learn.microsoft.com/dotnet/core/install/linux-ubuntu-install#dependencies
+  libicu78
   flatpak
   # Remote shells inherit TERM=xterm-kitty even when this host has no GUI.
   # This package is only terminal capability metadata; it does not install
@@ -195,6 +198,11 @@ WORKSTATION_GROUPS=(dialout kvm render video audio)
 # same TLS session, so it proves the download arrived intact, not who built it.
 YQ_RELEASE_BASE=https://github.com/mikefarah/yq/releases/latest/download
 COSIGN_RELEASE_BASE=https://github.com/sigstore/cosign/releases/latest/download
+
+KITTY_INSTALL_URL=https://sw.kovidgoyal.net/kitty/installer.sh
+KITTY_LATEST_VERSION_URL=https://sw.kovidgoyal.net/kitty/current-version.txt
+NERD_FONTS_REPO=ryanoasis/nerd-fonts
+NERD_FONT_ASSET=JetBrainsMono.tar.xz
 
 # Where an installed Kitty keeps the terminfo source this setup compiles when
 # the host database has no xterm-kitty entry. The per-user tree is probed first

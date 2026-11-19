@@ -157,6 +157,26 @@ jq -e '.theme == "custom" and (.permissions.allow | index("Read(*)")) and (.perm
   "$claude_dst" >/dev/null
 [[ "$CONFIG_LAST_ACTION" == merged ]]
 
+# Native OpenCode rules take precedence over legacy permissions.
+opencode_src="$TEST_ROOT/dotfiles/config/opencode/opencode.jsonc"
+opencode_dst="$TEST_TMP/native-opencode.jsonc"
+cat > "$opencode_dst" <<'JSONC'
+{
+  // Keep the user's policy.
+  "permissions": [{"action":"shell","resource":"*","effect":"ask"}],
+  "instructions": ["notes.md"]
+}
+JSONC
+merge_opencode_settings "$opencode_src" "$opencode_dst" 0644
+grep -Fq '// Keep the user' "$opencode_dst"
+config_json_read "$opencode_dst" | jq -e '
+  .instructions == ["notes.md"] and
+  .permissions[0] == {action:"shell",resource:"*",effect:"ask"} and
+  ([.permissions[] | select(.action == "shell" and .resource == "apt-get install *")] | last.effect) == "deny"'
+cp "$opencode_dst" "$TEST_TMP/native-opencode-settled"
+merge_opencode_settings "$opencode_src" "$opencode_dst" 0644
+cmp -s "$opencode_dst" "$TEST_TMP/native-opencode-settled"
+
 # Container migration adds the registry while retaining user-tuned resources.
 container_src="$TEST_TMP/container-desired.toml"
 container_dst="$TEST_TMP/container.toml"

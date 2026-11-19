@@ -17,19 +17,13 @@ stage_flatpak() {
   # same SKIP_ convention as LibreOffice and Claude Desktop applies.
   local desktop_pkg desktop_added=0
   for desktop_pkg in "${PACKAGES_APT_FLATPAK_DESKTOP[@]}"; do
-    if apt_gui_app_wanted "$desktop_pkg" "${SKIP_FLATPAK_DESKTOP:-}"; then
-      if apt-cache show "$desktop_pkg" >/dev/null 2>&1; then
-        info "installing $desktop_pkg…"
-        if sudo "${APT_ENV[@]}" "$PKGMGR" install -y "$desktop_pkg"; then
-          desktop_added=1
-        else
-          warn "could not install $desktop_pkg"
-        fi
-      else
-        warn "apt: $desktop_pkg is not in this repository"
-      fi
+    if [[ -n "${SKIP_FLATPAK_DESKTOP:-}" ]]; then
+      ok "$desktop_pkg skipped"
     elif pkg_installed "$desktop_pkg"; then
-      ok "$desktop_pkg already installed"
+      apt_install_candidate "$desktop_pkg" || return 1
+    elif apt_gui_app_wanted "$desktop_pkg" ''; then
+      apt_install_candidate "$desktop_pkg" || return 1
+      desktop_added=1
     else
       ok "$desktop_pkg skipped"
     fi
