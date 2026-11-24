@@ -167,11 +167,45 @@ profile_path_probe() {
     sh "$1" >/dev/null 2>&1
 }
 
+profile_cli_paths_converge() {
+  local dst="$1" mode candidate conflicts
+  local startup='. "$1" >/dev/null'
+  [[ -d "$HOME/.local/share/workspace-setup/bin" ]] || return 0
+  if conflicts=$(shell_cli_provider_conflicts /bin/sh "$startup" "$dst") && [[ -z "$conflicts" ]]; then
+    return 0
+  fi
+
+  mode=$(config_file_mode "$dst") || return 1
+  candidate=$(mktemp "${TMPDIR:-/tmp}/workspace-setup-profile.XXXXXX") || return 1
+  if cat "$dst" > "$candidate" && cat >> "$candidate" <<'PROFILE'
+
+# Select the workspace CLI providers after profile PATH changes.
+_profile_workspace_path="$HOME/.config/shell/env.d/99-workspace-setup-path.sh"
+if [ -f "$_profile_workspace_path" ] && [ ! -L "$_profile_workspace_path" ] && [ -r "$_profile_workspace_path" ]; then
+  . "$_profile_workspace_path"
+fi
+unset _profile_workspace_path
+PROFILE
+  then
+    if conflicts=$(shell_cli_provider_conflicts /bin/sh "$startup" "$candidate") && [[ -z "$conflicts" ]] \
+        && config_atomic_replace "$candidate" "$dst" "$mode"; then
+      rm -f "$candidate"
+      CONFIG_MERGE_ACTION=merged
+      info "reapplied the workspace CLI paths after profile PATH changes in: $dst"
+      return 0
+    fi
+  fi
+  rm -f "$candidate"
+  CONFIG_MERGE_REASON="$dst overrides the selected workspace CLI providers"
+  return 1
+}
+
 profile_path_semantically_compliant() {
   local src="$1" dst="$2" mode="$3"
   profile_path_probe "$dst" || return 1
   shell_env_loader_converge "$dst" "$src" "$mode" \
     profile_path_probe /bin/sh -c || return 1
+  profile_cli_paths_converge "$dst" || return 1
   CONFIG_MERGE_ACTION=${CONFIG_MERGE_ACTION:-kept}
   return 0
 }
@@ -747,6 +781,7 @@ stage_dotfiles() {
   opencode_config=$(opencode_config_path opencode.jsonc)
 
   remove_legacy_tmux_config
+  stage_shell_env "$repo"
 
   install_repo_config "$repo" dotfiles/bashrc "$HOME/.bashrc" 0644 bash_path_semantically_compliant
   install_repo_config "$repo" dotfiles/bash_profile "$HOME/.bash_profile" 0644 bash_path_semantically_compliant
@@ -777,7 +812,6 @@ stage_dotfiles() {
 
   stage_git_config "$repo"
   stage_npm_config
-  stage_shell_env "$repo"
 
   install_repo_config "$repo" dotfiles/config/kitty/kitty.conf \
     "$HOME/.config/kitty/kitty.conf"

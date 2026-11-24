@@ -244,6 +244,10 @@ libreoffice_versioned_bundle_installed() {
   return 1
 }
 
+apt_removal_names() {
+  awk '/^(Remv|Purg) / { print $2 }' | sort -u
+}
+
 # Simulation uses the real verb: install and remove have different cascades.
 apt_simulated_removals() {
   local verb="$1" simulation
@@ -255,7 +259,7 @@ apt_simulated_removals() {
     warn "could not simulate $PKGMGR $verb $*"
     return 1
   }
-  printf '%s\n' "$simulation" | awk '/^(Remv|Purg) / { print $2 }' | sort -u
+  apt_removal_names <<< "$simulation"
 }
 
 # apt_report_removals <verb> <note> <package...>; an empty note adds no detail.

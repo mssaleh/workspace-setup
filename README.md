@@ -705,7 +705,9 @@ token loaded from an interactive branch is missing precisely where automation
 runs.
 
 Setup maintains `99-workspace-setup-path.sh` to load the selected command
-providers. The other snippets belong to you. Setup sets both ordinary
+providers. If an edited `~/.profile` shadows those providers after loading
+the snippets, setup verifies and appends a call to its PATH snippet. The
+profile's existing lines and the other snippets belong to you. Setup sets both ordinary
 directories to `0700` and makes files with group or other permissions private. Symlinks and other filesystem objects are never followed or
 replaced; they are preserved as configuration conflicts and keep postflight
 red until you remove them or replace them with ordinary files.

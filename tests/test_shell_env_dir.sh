@@ -36,6 +36,8 @@ repo_dir() { printf '%s\n' "$REPO_DIR"; }
 # shellcheck disable=SC1091
 . "$TEST_ROOT/lib/config.sh"
 # shellcheck disable=SC1091
+. "$TEST_ROOT/lib/os.sh"
+# shellcheck disable=SC1091
 . "$TEST_ROOT/scripts/stage_dotfiles.sh"
 if [[ "$OS_KIND" == macos ]]; then
   # shellcheck disable=SC1091
@@ -408,5 +410,39 @@ done
 POSTFLIGHT_PASSES=0 POSTFLIGHT_FAILURES=0
 postflight_shell_env >/dev/null 2>&1
 [[ "$POSTFLIGHT_FAILURES" == 0 ]] || fail_test "restoring the parent modes did not clear the failure"
+
+(
+  fixture_home="$HOME"
+  HOME="$TEST_TMP/provider-path-home"
+  managed_bin="$HOME/.local/share/workspace-setup/bin"
+  mkdir -p "$managed_bin" "$HOME/.local/bin" "$HOME/.cargo/bin"
+  cp "$fixture_home/.local/bin/uv" "$HOME/.local/bin/uv"
+  cp "$fixture_home/.cargo/bin/rustup" "$HOME/.cargo/bin/rustup"
+  cp "$fixture_home/.cargo/env" "$HOME/.cargo/env"
+  printf '#!/bin/sh\nprintf "local tool\\n"\n' > "$HOME/.local/bin/workspace-tool"
+  printf '#!/bin/sh\nprintf "selected tool\\n"\n' > "$managed_bin/workspace-tool"
+  chmod +x "$HOME/.local/bin/workspace-tool" "$managed_bin/workspace-tool"
+  cp "$TEST_ROOT/dotfiles/profile" "$HOME/.profile"
+  cat >> "$HOME/.profile" <<'PROFILE'
+
+export PATH="$HOME/.local/bin:$PATH"
+export WORKSPACE_PROFILE_CUSTOM=kept
+PROFILE
+  chmod 0600 "$HOME/.profile"
+  cp "$HOME/.profile" "$TEST_TMP/profile-before"
+  original_lines=$(wc -l < "$TEST_TMP/profile-before")
+
+  stage_dotfiles > "$TEST_TMP/provider-path.log" 2>&1
+  head -n "$original_lines" "$HOME/.profile" | cmp -s "$TEST_TMP/profile-before" -
+  [[ "$(config_file_mode "$HOME/.profile")" == 600 ]]
+  env -i HOME="$HOME" PATH=/usr/bin:/bin:/usr/sbin:/sbin /bin/sh -ec '
+    . "$HOME/.profile"
+    [ "$WORKSPACE_PROFILE_CUSTOM" = kept ]
+    [ "$(workspace-tool)" = "selected tool" ]
+  '
+  merged_profile=$(sha256_of "$HOME/.profile")
+  stage_dotfiles > "$TEST_TMP/provider-path-rerun.log" 2>&1
+  [[ "$(sha256_of "$HOME/.profile")" == "$merged_profile" ]]
+)
 
 printf 'host-local environment tests: ok\n'

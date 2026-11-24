@@ -108,6 +108,21 @@ cli_command_path() {
   cli_provider_target "$resolved"
 }
 
+shell_cli_provider_conflicts() {
+  local shell_bin="$1" startup="$2"
+  shift 2
+  env -i HOME="$HOME" USER="${USER:-$(id -un)}" PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+    "$shell_bin" -c "$startup"' && {
+      for link in "$HOME/.local/share/workspace-setup/bin/"*; do
+        [ -f "$link" ] && [ -x "$link" ] || continue
+        name=${link##*/}
+        actual=$(command -v "$name" 2>/dev/null || true)
+        case "$actual" in /*|"") ;; *) continue ;; esac
+        [ "$actual" -ef "$link" ] || printf "%s " "$name"
+      done
+    }' "$shell_bin" "$@"
+}
+
 refresh_brew_environment() {
   local found
   found=$(find_brew 2>/dev/null || true)

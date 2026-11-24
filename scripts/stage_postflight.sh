@@ -208,7 +208,7 @@ postflight_legacy_tmux() {
       return
     fi
     local removals
-    if ! removals=$(apt_simulated_removals remove tmux); then
+    if ! removals=$("$PKGMGR" -s remove tmux | apt_removal_names); then
       postflight_fail "could not inspect the retained tmux package's dependencies"
     elif [[ -n "$removals" && "$removals" != tmux ]]; then
       postflight_pass "tmux is retained to preserve its reverse dependencies"
@@ -584,14 +584,6 @@ postflight_shell_paths() {
 postflight_command_providers() {
   local directory="$HOME/.local/share/workspace-setup/bin" shell startup output
   [[ -d "$directory" ]] || return 0
-  local probe='
-    for link in "$HOME/.local/share/workspace-setup/bin/"*; do
-      [ -f "$link" ] && [ -x "$link" ] || continue
-      name=${link##*/}
-      actual=$(command -v "$name" 2>/dev/null || true)
-      case "$actual" in /*|"") ;; *) continue ;; esac
-      [ "$actual" -ef "$link" ] || printf "%s " "$name"
-    done'
   for shell in bash sh zsh; do
     case "$shell" in
       bash) startup='. "$HOME/.bashrc" >/dev/null' ;;
@@ -600,8 +592,7 @@ postflight_command_providers() {
         [[ "$OS_KIND" == macos ]] || continue
         startup='setopt nonomatch; source "$HOME/.zshenv" >/dev/null; source "$HOME/.zprofile" >/dev/null' ;;
     esac
-    if output=$(env -i HOME="$HOME" USER="${USER:-$(id -un)}" PATH=/usr/bin:/bin:/usr/sbin:/sbin \
-        "/bin/$shell" -c "$startup && { $probe; }") && [[ -z "$output" ]]; then
+    if output=$(shell_cli_provider_conflicts "/bin/$shell" "$startup") && [[ -z "$output" ]]; then
       postflight_pass "$shell resolves the selected command providers"
     else
       postflight_fail "$shell could not resolve the selected providers: ${output:-startup failed}"
