@@ -62,13 +62,13 @@ packages without their recommendations; each control still overrides it.
 | **bootstrap** | On macOS, verifies that the selected Xcode Command Line Tools actually provide `xcrun clang` before touching Homebrew, then discovers Homebrew at its real prefix or installs it. It never launches the asynchronous CLT installer dialog. On Linux, ensures curl + git. |
 | **packages** | Installs the cross-platform CLI toolbox: `eza`, `fd`, `bat`, `ripgrep` (`rg`), `fzf`, `zoxide`, `yazi`, `bun`, `rtk`, `git`, `git-delta` (`delta`), `lazygit`, `gh`, `zmx`, `rsync`, `rclone`, `nmap`, `jq`, `yq`, `pandoc`, `7zz` (`7z`), `cmake`, `ninja`, `node`, `uv`, `ruff`, `helm`, `kubectl`, `cosign`, `ffmpeg`, `poppler` (`poppler-utils`), `nano`, `himalaya`, `ncdu`, `shellcheck`, `pre-commit`, … It installs `xterm-kitty` terminfo as a non-GUI SSH capability on every host. Where a Linux release's apt has no `git-delta`, `eza` or `lazygit`, their upstream releases install into `~/.local/bin`. On Linux it registers **every** vendor archive before installing anything (see below), then installs the toolbox, the **Claude Desktop** app (skip with `SKIP_CLAUDE_DESKTOP=1`) and the **Codex app** (skip with `SKIP_CODEX_APP=1`). |
 | **docker** | Linux only: installs the official **Docker Engine** + **Docker Compose v2** from download.docker.com. Docker's documented pre-clean of the distribution's `docker.io`, `containerd` and `runc` names every package apt would take with them before it runs, since those runtimes carry reverse dependencies of their own. A complete, responsive official installation is a no-op on rerun. |
-| **toolchains** | Updates Rust stable through native rustup while preserving the selected default and other toolchains. Astral's installer owns uv. Coding and cloud CLIs use vendor-maintained Brew taps or practical vendor installers; Linux cloud CLIs also use official apt repositories. Cloudflare CLI and Linux Bun use npm. `markitdown[all]` and macOS Ruff use uv tools. |
+| **toolchains** | Updates Rust stable through native rustup while preserving the selected default and other toolchains. Astral's installer owns uv. Coding and cloud CLIs use vendor-maintained Brew taps or practical vendor installers; Linux cloud CLIs also use official apt repositories. npm tracks the registry's stable release alongside Cloudflare CLI and Linux Bun. `markitdown[all]` and macOS Ruff use uv tools. |
 | **configuration** | Converges ordinary files under `$HOME`; repairs old links into temporary checkouts, atomically upgrades exact known historical versions, semantically merges supported JSON/TOML/Git/ssh formats and repairs a shell startup file that has lost the host-local environment loader, preserves ambiguous user-owned content, installs the coding-agent skills into each agent home, and provisions the host-local environment directory `~/.config/shell/env.d/` that the supported shells source. |
 | **completions** | macOS only: runs `brew completions link` when Homebrew reports that external-command completions are not linked, then generates and syntax-checks Bash/Zsh completions from the installed Codex, rustup/cargo, opencode, Container, and Container Compose binaries. Existing files without this setup's ownership marker are preserved. Linux retains its existing himalaya loader only. |
 | **containers** | macOS only: installs or updates Apple's signed Container package while stopped, ensures Rosetta, and writes only the stable build/registry defaults. The Container system remains stopped for on-demand laptop use unless `CONTAINER_START=1`; it is never stopped automatically. `container-compose` is supplied separately by Homebrew. |
 | **ssh** | Generates an ed25519 keypair if none exists, locks down `~/.ssh` permissions (700 dir, 600 files), and wires up the host-local SSH agent (macOS: Keychain; Linux: systemd user unit) without replacing an agent-forwarding socket supplied by `sshd`. Does **not** push to GitHub — run `gh auth login` manually. |
 | **remote readiness** | macOS only, read-only: reports effective Remote Login state and ACL, authorized-key count/mode, FileVault, firewall/stealth mode, and remote-relevant power settings; it calls out Full Disk Access as a separate manual TCC decision. It changes none of them. |
-| **applications + terminals** | A macOS workstation gets missing VS Code, Maccy, LibreOffice, and Kitty applications from vendor downloads. Existing bundles are preserved for app-managed updates. VS Code's bundled `code` and `code-tunnel` receive user-local links when free. ChatGPT and Claude Desktop are explicit opt-ins. The Nerd Font uses a Homebrew cask. Linux workstation runs keep the Nerd Font and the user-local Kitty bundle current with their upstream stable releases. Terminal selection stays with the user. |
+| **applications + terminals** | A macOS workstation gets missing VS Code, Maccy, and LibreOffice applications from vendor downloads and preserves existing bundles for app-managed updates. Setup updates Kitty through its installed provider on both platforms. VS Code's bundled `code` and `code-tunnel` receive user-local links when free. ChatGPT and Claude Desktop are explicit opt-ins. The macOS Nerd Font uses a Homebrew cask. Linux workstation runs keep the Nerd Font current with its upstream stable release. Terminal selection stays with the user. |
 | **terminal profile** | macOS imports the scalar-only "Workspace" profile (a name Terminal.app does not ship; macOS 27 bundles its own "Clear Dark") only with `CONFIGURE_APPLE_TERMINAL=1` in a local interactive session, and selects it only with the additional `SET_APPLE_TERMINAL_DEFAULT=1`. Linux converges only previously untouched Ptyxis behavior keys. User choices are preserved. |
 | **updates** | Normal reruns update declared CLI providers within the selected runtime lines and refresh the managed Linux desktop packages from their configured apt repositories. On macOS, desktop bundles use vendor updates, Apple Container updates while stopped, and Homebrew cleanup stays manual. Linux `UPDATE_SYSTEM=1` runs the separate full system update path. |
 | **postflight** | Retains the existing Linux checks. macOS additionally verifies Node 26 and Python 3.14 in actual Bash/Zsh login shells, generated completion registration/security, Kitty's platform layer, Terminal's effective domain when requested, launchd/forwarded SSH-agent state, and Container's requested running/stopped state. |
@@ -112,11 +112,11 @@ documented cask for Azure CLI. The manifest uses standalone installers for
 Rustup, uv, AWS, Google Cloud, the native coding agents, and Apple Container.
 Node stays on 26.x and Python on 3.14.x.
 
-On macOS, desktop applications are installed from vendor downloads only when missing.
-Setup neither adopts existing bundles into Homebrew nor replaces them to update
-them; use each application's updater or vendor update method. Application
-settings and credentials remain at their native paths. Setup verifies the
-selected CLI providers before retiring independently installed alternatives.
+On macOS, Kitty is updated through its installed provider. Other desktop
+applications are installed from vendor downloads when missing and continue to
+use their own updaters. Application settings and credentials remain at their
+native paths. Setup verifies the selected CLI providers before retiring
+independently installed alternatives.
 System-wide vendor installers can require local
 administrator authentication.
 
@@ -139,7 +139,7 @@ platform package is unavailable.
 | uv, AWS CLI, GoDaddy, Claude Code, Codex, Copilot, Antigravity, and Kitty | each project's upstream installer |
 | macOS Google Cloud, Apple Container, and desktop applications | vendor SDK, signed package, or application download |
 | macOS Ruff and cross-platform MarkItDown | uv tools |
-| Cloudflare CLI and Ubuntu Bun | npm packages |
+| npm, Cloudflare CLI, and Ubuntu Bun | npm registry packages |
 | Ubuntu Yazi and RTK | apt installs Yazi from its stable repository and RTK from its published Debian package |
 | Linux OpenCode and API CLIs | each project's upstream installer or release |
 | Configuration | ordinary files at their native paths |
@@ -920,7 +920,7 @@ The script detects the OS and adapts:
 | SSH agent | macOS Keychain (launchd-managed `com.openssh.ssh-agent`, `--apple-use-keychain`) | socket-activated systemd user unit, forwarding-aware local socket fallback, linger + `AddKeysToAgent yes`; passphrase typed once per boot |
 | SSH key passphrase | passphrase-less (Keychain + FileVault protect the on-disk key) | passphrase-protected by default (override with `SSH_KEY_PASSPHRASE=none` for disposable VMs) |
 | Nerd Font | brew cask (`JetBrainsMono Nerd Font`) | Current [Nerd Fonts release](https://github.com/ryanoasis/nerd-fonts/releases/latest) → `~/.local/share/fonts` (`JetBrainsMono Nerd Font Mono` variant with single-width icons for TUI alignment) |
-| Kitty | [Vendor installer](https://sw.kovidgoyal.net/kitty/binary/) when absent | Same installer to `~/.local/kitty.app`, with stable release checks on reruns and user-local desktop integration |
+| Kitty | [Vendor installer](https://sw.kovidgoyal.net/kitty/binary/) with stable release checks on reruns, or Homebrew for an existing cask | Vendor installer to `~/.local/kitty.app`, with stable release checks on reruns and user-local desktop integration |
 | Maccy clipboard manager | [Vendor release](https://github.com/p0deje/Maccy/releases/latest) when absent; existing app preserved | skipped (Linux has its own clipboard managers) |
 | LibreOffice | Vendor stable DMG when absent; existing app preserved | Preserves an installed official versioned DEB bundle, Snap, or Flatpak. Otherwise uses `ppa:libreoffice/ppa`; skip with `SKIP_LIBREOFFICE=1` |
 | Claude Desktop | Vendor download when absent, with `INSTALL_CLAUDE_DESKTOP=1` | Official Anthropic apt repo; skip with `SKIP_CLAUDE_DESKTOP=1` |
@@ -954,8 +954,9 @@ The script detects the OS and adapts:
 | Rustup | [Rust's installer](https://doc.rust-lang.org/stable/book/ch01-01-installation.html); stable toolchain updates preserve the selected compiler | same |
 | VS Code CLI | Vendor app download when absent; bundled `code` and `code-tunnel` receive user-local links when free | Official `code` apt package, or a preserved existing Snap/Flatpak equivalent |
 | Clipboard CLI | `xsel` is absent from `PACKAGES_BREW`; native GUI/terminal clipboard paths are used | `xsel` is declared in `PACKAGES_APT` for supported X11 sessions |
+| npm and npx | Latest stable [npm registry package](https://docs.npmjs.com/try-the-latest-stable-version-of-npm/) in `~/.npm/packages`. Setup selects its launchers for the declared Node runtime. | same |
 | npm global prefix | `~/.npm/packages` via `~/.npmrc` (`prefix` + `cache`) — set on both platforms so `npm i -g` never needs sudo | same |
-| Kitty | [Vendor installer](https://sw.kovidgoyal.net/kitty/binary/) → `/Applications/kitty.app`; preserves existing app | upstream app installer → `~/.local/kitty.app`, plus desktop integration the installer omits: absolute-path `.desktop` entries, `StartupWMClass`, a "New Window" action, and the scalable icon in the hicolor theme; terminal preference remains owned by the desktop or user |
+| Kitty | Current vendor bundle at `/Applications/kitty.app`, with Homebrew upgrades for an existing cask | upstream app installer → `~/.local/kitty.app`, plus desktop integration the installer omits: absolute-path `.desktop` entries, `StartupWMClass`, a "New Window" action, and the scalable icon in the hicolor theme; terminal preference remains owned by the desktop or user |
 | `xterm-kitty` terminfo | default database or Kitty's official definition compiled into `~/.terminfo` | `kitty-terminfo` apt package, with the same per-user fallback when unavailable; independent of Kitty, X11, Wayland, and `SKIP_FONT` |
 | Kitty config | `kitty.conf` + `platform-macos.conf` → `platform.conf`: Cmd-based keymap, `font_size 14`, powerline tabs, `macos_*` options | `kitty.conf` + `platform-linux.conf` → `platform.conf`: Ctrl+Shift keymap, `font_size 11` (matches GNOME's `monospace-font-name`), flat tabs. Cmd is **not** usable — kitty aliases it to Super, which GNOME Shell grabs first, so the bindings load silently and never fire |
 | Kitty window decorations | native macOS title bar | `linux_display_server auto` follows the active desktop session, using native Wayland on Wayland and X11 on X11; Wayland title bars use system colors, and `Ctrl+Shift+P` is left to terminal applications. |
@@ -1043,13 +1044,15 @@ release on reruns and installs updates through apt. Yazi updates through its
 signed apt repository with the other Ubuntu packages.
 
 Rust uses `rustup update stable` on reruns, preserving other toolchains and
-the selected default. Only the uv and npm tools declared in the manifest are
-refreshed during normal provisioning; additional installed tools are preserved.
+the selected default. Setup uses `uv tool install --upgrade` with the declared
+requirements, including MarkItDown's extras. It uses npm's registry `latest`
+tag for npm itself and native npm updates for declared global packages.
 
-Linux workstation runs check Kitty's published stable version and use the
-[official installer](https://sw.kovidgoyal.net/kitty/binary/) for fresh installs
-and upgrades. Setup verifies the staged `kitty` and `kitten` versions before
-replacing the bundle used by subsequent launches. JetBrainsMono Nerd Font Mono
+Workstation runs update Kitty through its installed provider. For a vendor
+bundle, setup reads the publisher's stable version and verifies the staged
+`kitty` and `kitten` before replacing the bundle used by subsequent launches.
+On macOS, it verifies the vendor bundle signature and updates an existing
+Homebrew cask through Homebrew metadata. Linux JetBrainsMono Nerd Font Mono
 checks the release version embedded in the installed font and refreshes the
 Mono variants from the verified Nerd Fonts archive.
 
@@ -1067,8 +1070,8 @@ Transactions disable automatic cleanup and unrelated installed-dependent
 checks. Homebrew still resolves required dependencies and metadata migrations.
 [Apple's signed Container installer](https://github.com/apple/container) requires
 stopped services, so setup defers its update while Container is running. It
-never starts a service without `CONTAINER_START=1`. Existing desktop bundles
-are preserved and excluded from Homebrew transactions.
+never starts a service without `CONTAINER_START=1`. Existing vendor desktop
+bundles stay outside Homebrew transactions.
 
 The temporary JSONC helper uses `npm update` to resolve the current stable
 parser within its open dependency range; the repository lock file is the

@@ -57,6 +57,7 @@ curl() {
   case "$2" in
     "$AWS_CLI_INSTALL_URL") installer=aws ;;
     "$GODADDY_INSTALL_URL") installer=gddy ;;
+    "$NPM_REGISTRY_URL/-/package/npm/dist-tags") printf '{"latest":"12.2.3"}\n'; return ;;
     *) return 22 ;;
   esac
   [[ "$fixture_download_failure" != "$installer" ]] || return 22
@@ -74,7 +75,7 @@ install_upstream_archive_tool() {
 }
 fixture_npm_update_failure=0
 npm() {
-  local tool script_arg=''
+  local tool script_arg='' npm_prefix="$HOME/.npm/packages" command_name
   case "$1" in
     ls)
       tool=$7
@@ -83,6 +84,16 @@ npm() {
       ;;
     install)
       tool=${!#}
+      if [[ "$tool" == npm@12.2.3 ]]; then
+        [[ "$*" == "install --global --prefix $npm_prefix --registry=$NPM_REGISTRY_URL --engine-strict --ignore-scripts npm@12.2.3" ]]
+        printf 'npm\n' >> "$CLI_TEST_LOG"
+        mkdir -p "$npm_prefix/bin"
+        for command_name in npm npx; do
+          printf '#!/bin/sh\nprintf "12.2.3\\n"\n' > "$npm_prefix/bin/$command_name"
+          chmod +x "$npm_prefix/bin/$command_name"
+        done
+        return
+      fi
       tool=${tool%@latest}
       [[ "$tool" != bun ]] || script_arg=' --allow-scripts=bun'
       [[ "$*" == "install --global --prefix $HOME/.npm/packages$script_arg $tool@latest" ]]
@@ -108,7 +119,9 @@ install_cloud_clis >/dev/null
 grep -Fxq 'openai openai_{version}_linux_amd64.tar.gz openai' "$scratch/archives"
 grep -Fxq 'ant ant_{version}_linux_amd64.tar.gz ant' "$scratch/archives"
 [[ "$HOME/.local/bin/aws" -ef "$HOME/.local/share/aws-cli/v2/current/bin/aws" ]]
-[[ "$(cat "$CLI_TEST_LOG")" == $'gddy\naws\ncf\nbun' ]]
+[[ "$(cat "$CLI_TEST_LOG")" == $'gddy\naws\nnpm\ncf\nbun' ]]
+[[ "$("$HOME/.npm/packages/bin/npm" --version)" == 12.2.3 ]]
+[[ "$("$HOME/.npm/packages/bin/npx" --version)" == 12.2.3 ]]
 
 # Existing declared npm tools advance through npm's native updater.
 : > "$CLI_TEST_LOG"

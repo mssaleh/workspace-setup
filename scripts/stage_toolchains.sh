@@ -56,7 +56,7 @@ stage_toolchains() {
     uv_state=$(upstream_artifact_state uv "$uv_installed" "$uv_published")
     upstream_report_state uv "$uv_state" "$uv_installed" "$uv_published"
     if [[ "$uv_state" == stale ]]; then
-      if "$HOME/.local/bin/uv" self update >/dev/null 2>&1; then
+      if UV_NO_MODIFY_PATH=1 "$HOME/.local/bin/uv" self update </dev/null; then
         ok "uv $(upstream_installed_version "$HOME/.local/bin/uv" --version) → ~/.local/bin/uv"
       else
         warn "uv self update failed; still on $uv_installed"
@@ -124,7 +124,7 @@ install_linux_git_credential_manager() (
         || ! tar -xzf "$tmp/gcm.tar.gz" -C "$tmp/bundle" \
         || ! actual=$("$tmp/bundle/$label" --version </dev/null) \
         || [[ "${actual%%+*}" != "$version" ]] \
-        || ! upstream_place_linux_bundle "$tmp/bundle" "$bundle"; then
+        || ! upstream_place_bundle "$tmp/bundle" "$bundle"; then
       warn "$label $version installation failed"
       return 1
     fi
@@ -327,11 +327,48 @@ install_cloud_clis() {
   install_managed_npm_tools
 }
 
+install_managed_npm() {
+  local prefix="$1" installed npx_version state published
+  installed=$(upstream_installed_version "$prefix/bin/npm" --version) || installed=''
+  npx_version=$(upstream_installed_version "$prefix/bin/npx" --version) || npx_version=''
+  published=$(curl -fsSL "$NPM_REGISTRY_URL/-/package/npm/dist-tags" </dev/null | jq -er '.latest | strings') || published=''
+  if [[ ! "$published" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    warn "could not confirm npm's stable release"
+    [[ -n "$installed" && "$installed" == "$npx_version" ]] || return 1
+    MANAGED_NPM_VERSION="$installed"
+    return 0
+  fi
+  state=$(upstream_artifact_state npm "$installed" "$published")
+  if [[ "$state" == newer && "$installed" != "$npx_version" ]]; then
+    warn "npm $installed is newer than the stable release but its npx does not match"
+    return 1
+  fi
+  if [[ "$installed" == "$npx_version" && ( "$state" == current || "$state" == newer ) ]]; then
+    upstream_report_state npm "$state" "$installed" "$published"
+  else
+    info "installing npm $published in ${prefix}…"
+    npm install --global --prefix "$prefix" --registry="$NPM_REGISTRY_URL" \
+      --engine-strict --ignore-scripts "npm@$published" </dev/null || return 1
+    installed=$(upstream_installed_version "$prefix/bin/npm" --version) || return 1
+    npx_version=$(upstream_installed_version "$prefix/bin/npx" --version) || return 1
+    if [[ "$installed" != "$published" || "$npx_version" != "$published" ]]; then
+      warn "npm installation did not provide npm and npx $published"
+      return 1
+    fi
+  fi
+  MANAGED_NPM_VERSION="$installed"
+}
+
 install_managed_npm_tools() {
   # An explicit user prefix works before stage_npm_config on a fresh host.
-  local tool script_args npm_tools=("${NPM_TOOLS_COMMON[@]}")
+  local prefix="$HOME/.npm/packages" PATH="$PATH" tool script_args npm_tools=("${NPM_TOOLS_COMMON[@]}")
   [[ "$OS_KIND" != linux ]] || npm_tools+=("${NPM_TOOLS_LINUX[@]}")
   for tool in "${npm_tools[@]}"; do
+    if [[ "$tool" == npm ]]; then
+      install_managed_npm "$prefix" || return 1
+      setup_path_prepend "$prefix/bin"
+      continue
+    fi
     script_args=()
     # Bun uses postinstall to expose its platform binary. npm 12 blocks that hook by default.
     [[ "$tool" != bun ]] || script_args=(--allow-scripts=bun)

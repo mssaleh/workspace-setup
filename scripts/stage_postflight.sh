@@ -1295,6 +1295,19 @@ postflight_toolbox_commands() {
   fi
 }
 
+postflight_npm_cli() {
+  [[ -n "${MANAGED_NPM_VERSION:-}" ]] || return 0
+  local tool resolved prefix="$HOME/.npm/packages/bin"
+  for tool in npm npx; do
+    resolved=$(cli_command_path "$tool")
+    if [[ ! "$resolved" -ef "$prefix/$tool" || "$(upstream_installed_version "$tool" --version)" != "$MANAGED_NPM_VERSION" ]]; then
+      postflight_fail "$tool does not resolve to the registry-installed npm $MANAGED_NPM_VERSION"
+      return 0
+    fi
+  done
+  postflight_pass "npm and npx resolve to the registry-installed $MANAGED_NPM_VERSION"
+}
+
 stage_postflight() {
   POSTFLIGHT_PASSES=0
   POSTFLIGHT_FAILURES=0
@@ -1313,6 +1326,7 @@ stage_postflight() {
   postflight_completions
   postflight_upstream_tools
   postflight_toolbox_commands
+  postflight_npm_cli
   postflight_cloud_clis
   postflight_headless_credentials
   postflight_containers

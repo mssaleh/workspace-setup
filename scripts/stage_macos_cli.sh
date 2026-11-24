@@ -6,7 +6,7 @@ stage_macos_cli() {
   [[ "${OS_KIND:-}" == macos ]] || return 0
 
   local node_bin="$BREW_PREFIX/opt/node@${NODE_MAJOR}/bin"
-  local command_name
+  local command_name target
 
   for command_name in "${BREW_CLI_COMMANDS[@]}"; do
     [[ -x "$BREW_PREFIX/bin/$command_name" ]] || {
@@ -22,6 +22,10 @@ stage_macos_cli() {
   fi
 
   for command_name in node npm npx corepack; do
+    target="$node_bin/$command_name"
+    if [[ ( "$command_name" == npm || "$command_name" == npx ) && -x "$HOME/.npm/packages/bin/$command_name" ]]; then
+      target="$HOME/.npm/packages/bin/$command_name"
+    fi
     if [[ -L "$HOME/.local/bin/$command_name" \
           && "$(readlink "$HOME/.local/bin/$command_name")" == "$BREW_PREFIX/opt/node@24/bin/$command_name" ]]; then
       if [[ -x "$node_bin/$command_name" ]]; then
@@ -30,8 +34,12 @@ stage_macos_cli() {
         rm -f "$HOME/.local/bin/$command_name" || return 1
       fi
     fi
-    [[ -x "$node_bin/$command_name" ]] || continue
-    ensure_cli_symlink "$node_bin/$command_name" "$HOME/.local/bin/$command_name"
+    [[ -x "$target" ]] || continue
+    if [[ "$target" != "$node_bin/$command_name" && -L "$HOME/.local/bin/$command_name" \
+        && "$(readlink "$HOME/.local/bin/$command_name")" == "$node_bin/$command_name" ]]; then
+      ln -sfn "$target" "$HOME/.local/bin/$command_name" || return 1
+    fi
+    ensure_cli_symlink "$target" "$HOME/.local/bin/$command_name"
   done
 
   ensure_cli_symlink "$BREW_PREFIX/opt/python@$PYTHON_MINOR/bin/python$PYTHON_MINOR" "$HOME/.local/bin/python$PYTHON_MINOR"

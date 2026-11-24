@@ -35,8 +35,18 @@ ensure_local_command_alias() {
 
 preferred_cli_paths() {
   local name path pkg keg entry npm_packages=("${NPM_TOOLS_COMMON[@]}")
+  [[ "$OS_KIND" != linux ]] || npm_packages+=("${NPM_TOOLS_LINUX[@]}")
+  # A registry-installed npm and npx take precedence over Node's bundled copies.
+  for pkg in "${npm_packages[@]}"; do
+    path="$HOME/.npm/packages/lib/node_modules/$pkg/package.json"
+    [[ -f "$path" ]] || continue
+    jq -r --arg package "${pkg##*/}" \
+      '.bin | if type == "object" then keys[] elif type == "string" then $package else empty end' "$path" |
+      while IFS= read -r name; do
+        printf '%s\t%s/.npm/packages/bin/%s\n' "$name" "$HOME" "$name"
+      done || return 1
+  done
   if [[ "$OS_KIND" == linux ]]; then
-    npm_packages+=("${NPM_TOOLS_LINUX[@]}")
     # Ubuntu uses these names for the same upstream commands.
     for entry in "${APT_COMMAND_ALIASES[@]}"; do
       printf '%s\t/usr/bin/%s\n' "${entry%%:*}" "${entry#*:}"
@@ -90,15 +100,6 @@ preferred_cli_paths() {
     printf 'container\t/usr/local/bin/container\n'
   fi
 
-  for pkg in "${npm_packages[@]}"; do
-    path="$HOME/.npm/packages/lib/node_modules/$pkg/package.json"
-    [[ -f "$path" ]] || continue
-    jq -r --arg package "${pkg##*/}" \
-      '.bin | if type == "object" then keys[] elif type == "string" then $package else empty end' "$path" |
-      while IFS= read -r name; do
-        printf '%s\t%s/.npm/packages/bin/%s\n' "$name" "$HOME" "$name"
-      done || return 1
-  done
   local local_commands=("${LOCAL_CLI_COMMON[@]}")
   if [[ "$OS_KIND" == linux ]]; then
     local_commands+=("${LOCAL_CLI_LINUX[@]}")
@@ -253,6 +254,12 @@ stage_reconcile_cli_providers() {
         continue
       fi
       [[ -f "$candidate" && -x "$candidate" ]] || continue
+      if [[ ( "$name" == npm || "$name" == npx ) && "${OS_KIND:-}" == macos && "$parent" == "$HOME/.local/bin" \
+          && "$chosen" == "$HOME/.npm/packages/bin/$name" && -L "$candidate" \
+          && "$(readlink "$candidate")" == "$BREW_PREFIX/opt/node@$NODE_MAJOR/bin/$name" ]]; then
+        ln -sfn "$chosen" "$candidate" || status=1
+        continue
+      fi
       # The OS, application bundles and project environments can ship their own tools.
       case "$parent" in
         /bin|/sbin|/usr/bin|/usr/sbin|*/.app/*|*/node_modules/.bin|*/.venv/bin) continue ;;

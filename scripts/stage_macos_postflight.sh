@@ -425,6 +425,7 @@ stage_macos_postflight() {
   postflight_macos_completions
   postflight_macos_upstream_tools
   postflight_toolbox_commands
+  postflight_npm_cli
   postflight_cloud_clis
   postflight_macos_kitty_platform_layer
   postflight_headless_credentials

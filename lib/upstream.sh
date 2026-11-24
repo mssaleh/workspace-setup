@@ -266,12 +266,13 @@ upstream_place_artifact() {
   fi
 }
 
-# Replace a staged Linux bundle on the same filesystem in one rename.
-upstream_place_linux_bundle() {
-  local src="$1" dst="$2"
+# Replace a staged bundle on the same filesystem with GNU mv.
+upstream_place_bundle() {
+  local src="$1" dst="$2" move=mv
+  [[ "${OS_KIND:-}" != macos ]] || move="$BREW_PREFIX/bin/gmv"
   if [[ -d "$dst" && ! -L "$dst" ]]; then
-    mv -T --no-copy --exchange "$src" "$dst"
+    "$move" -T --no-copy --exchange "$src" "$dst"
   else
-    mv -T --no-copy --update=none-fail "$src" "$dst"
+    "$move" -T --no-copy --update=none-fail "$src" "$dst"
   fi
 }

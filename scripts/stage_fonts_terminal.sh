@@ -35,32 +35,44 @@ clear_setup_terminal_preference() {
   fi
 }
 
-install_linux_kitty() (
-  local app="$1" parent="${1%/*}" published installed state tmp
+install_kitty_bundle() (
+  local app="$1" bin_dir="$2" parent="${1%/*}" published installed kitten_version state tmp
   mkdir -p "$parent" || return 1
-  exec 9< "$parent"
-  flock -x 9 || return 1
+  if [[ "$OS_KIND" == linux ]]; then
+    exec 9< "$parent"
+    flock -x 9 || return 1
+  fi
   if [[ -L "$app" ]]; then
     warn "preserving Kitty's externally managed bundle link: $app"
-    [[ -x "$app/bin/kitty" && -x "$app/bin/kitten" ]]
+    [[ -x "$app/$bin_dir/kitty" && -x "$app/$bin_dir/kitten" ]]
     return
   fi
   if [[ -e "$app" && ! -d "$app" ]]; then
     warn "preserving an existing path that blocks Kitty: $app"
     return 1
   fi
+  if [[ -d "$app" && "$OS_KIND" == macos ]] && ! /usr/bin/codesign --verify -R "$KITTY_MACOS_REQUIREMENT" "$app"; then
+    warn "preserving a Kitty bundle that does not match the publisher's signature: $app"
+    return 1
+  fi
 
   published=$(curl -fsSL "$KITTY_LATEST_VERSION_URL" </dev/null) || published=''
   if [[ ! "$published" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     warn "Kitty's current stable release could not be confirmed"
-    [[ -x "$app/bin/kitty" && -x "$app/bin/kitten" ]]
+    [[ -x "$app/$bin_dir/kitty" && -x "$app/$bin_dir/kitten" ]]
     return
   fi
-  if [[ -x "$app/bin/kitty" && -x "$app/bin/kitten" ]]; then
-    installed=$(upstream_installed_version "$app/bin/kitty" --version) || installed=''
+  if [[ -x "$app/$bin_dir/kitty" && -x "$app/$bin_dir/kitten" ]]; then
+    installed=$(upstream_installed_version "$app/$bin_dir/kitty" --version) || installed=''
+    kitten_version=$(upstream_installed_version "$app/$bin_dir/kitten" --version) || kitten_version=''
     state=$(upstream_artifact_state kitty "$installed" "$published")
-    upstream_report_state kitty "$state" "$installed" "$published"
-    [[ "$state" == stale ]] || return 0
+    if [[ "$installed" == "$kitten_version" ]]; then
+      upstream_report_state kitty "$state" "$installed" "$published"
+      [[ "$state" == stale ]] || return 0
+    elif [[ "$state" == newer ]]; then
+      warn "Kitty $installed is newer than the stable release but its kitten does not match"
+      return 1
+    fi
   else
     info "installing Kitty $published with its upstream binary installer…"
   fi
@@ -69,40 +81,39 @@ install_linux_kitty() (
   # leaves the working bundle in place.
   tmp=$(mktemp -d "$parent/.kitty-install.XXXXXX") || return 1
   trap 'rm -rf -- "$tmp"' EXIT
-  if ! curl -fsSL "$KITTY_INSTALL_URL" -o "$tmp/installer.sh" \
-      || ! sh "$tmp/installer.sh" launch=n "dest=$tmp" "installer=version-$published" </dev/null \
-      || [[ "$(upstream_installed_version "$tmp/kitty.app/bin/kitty" --version)" != "$published" \
-         || "$(upstream_installed_version "$tmp/kitty.app/bin/kitten" --version)" != "$published" ]]; then
+  curl -fsSL "$KITTY_INSTALL_URL" -o "$tmp/installer.sh" || return 1
+  sh "$tmp/installer.sh" launch=n "dest=$tmp" "installer=version-$published" </dev/null || return 1
+  if [[ "$OS_KIND" == macos ]]; then
+    /usr/bin/codesign --verify --deep --strict "$tmp/kitty.app" || return 1
+    /usr/bin/codesign --verify -R "$KITTY_MACOS_REQUIREMENT" "$tmp/kitty.app" || return 1
+  fi
+  if [[ "$(upstream_installed_version "$tmp/kitty.app/$bin_dir/kitty" --version)" != "$published" \
+      || "$(upstream_installed_version "$tmp/kitty.app/$bin_dir/kitten" --version)" != "$published" ]]; then
     warn "Kitty installer did not produce a working $published bundle"
     return 1
   fi
-  upstream_place_linux_bundle "$tmp/kitty.app" "$app" || return 1
+  upstream_place_bundle "$tmp/kitty.app" "$app" || return 1
   ok "Kitty $published installed at $app"
 )
 
 install_kitty_upstream() {
-  local kitty_bin kitten_bin
+  local app bin_dir
   if [[ "$OS_KIND" == macos ]]; then
-    kitty_bin=/Applications/kitty.app/Contents/MacOS/kitty
-    kitten_bin=/Applications/kitty.app/Contents/MacOS/kitten
+    app=/Applications/kitty.app
+    bin_dir=Contents/MacOS
   else
-    kitty_bin="$HOME/.local/kitty.app/bin/kitty"
-    kitten_bin="$HOME/.local/kitty.app/bin/kitten"
+    app="$HOME/.local/kitty.app"
+    bin_dir=bin
   fi
-
-  if [[ "$OS_KIND" == linux ]]; then
-    install_linux_kitty "$HOME/.local/kitty.app" || return 1
-  elif [[ ! -x "$kitty_bin" || ! -x "$kitten_bin" ]]; then
-    info "installing kitty with its upstream binary installer…"
-    curl -fsSL "$KITTY_INSTALL_URL" </dev/null | sh /dev/stdin launch=n || return 1
+  if [[ "$OS_KIND" == macos ]] && "$BREW_BIN" list --cask kitty >/dev/null 2>&1; then
+    brew_managed upgrade --cask --greedy-auto-updates kitty || return 1
   else
-    ok "kitty application already installed"
+    install_kitty_bundle "$app" "$bin_dir" || return 1
   fi
-
-  [[ -x "$kitty_bin" && -x "$kitten_bin" ]] || \
-    fail "kitty installer completed without the expected application binaries"
-  ensure_cli_symlink "$kitty_bin" "$HOME/.local/bin/kitty" || return 1
-  ensure_cli_symlink "$kitten_bin" "$HOME/.local/bin/kitten" || return 1
+  "${app}/$bin_dir/kitty" --version </dev/null || return 1
+  "${app}/$bin_dir/kitten" --version </dev/null || return 1
+  ensure_cli_symlink "$app/$bin_dir/kitty" "$HOME/.local/bin/kitty" || return 1
+  ensure_cli_symlink "$app/$bin_dir/kitten" "$HOME/.local/bin/kitten" || return 1
 
   if [[ "$OS_KIND" == linux ]]; then
     install_kitty_desktop_integration

@@ -168,8 +168,9 @@ UV_TOOLS_MACOS=(ruff)
 # macOS uses the Homebrew cask.
 UV_TOOLS_LINUX=(azure-cli)
 
-NPM_TOOLS_COMMON=(cf)
+NPM_TOOLS_COMMON=(npm cf)
 NPM_TOOLS_LINUX=(bun)
+NPM_REGISTRY_URL=https://registry.npmjs.org
 AWS_CLI_INSTALL_URL=https://awscli.amazonaws.com/v2/install.sh
 CLAUDE_INSTALL_URL=https://claude.ai/install.sh
 CODEX_INSTALL_URL=https://chatgpt.com/codex/install.sh
@@ -214,6 +215,7 @@ COSIGN_RELEASE_BASE=https://github.com/sigstore/cosign/releases/latest/download
 
 KITTY_INSTALL_URL=https://sw.kovidgoyal.net/kitty/installer.sh
 KITTY_LATEST_VERSION_URL=https://sw.kovidgoyal.net/kitty/current-version.txt
+KITTY_MACOS_REQUIREMENT='=anchor apple generic and identifier "net.kovidgoyal.kitty" and certificate leaf[subject.OU] = "NTY7FVCEKP"'
 NERD_FONTS_REPO=ryanoasis/nerd-fonts
 NERD_FONT_ASSET=JetBrainsMono.tar.xz
 
