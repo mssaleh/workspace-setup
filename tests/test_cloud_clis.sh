@@ -2,6 +2,7 @@
 set -euo pipefail
 repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 . "$repo/lib/log.sh"
+. "$repo/lib/os.sh"
 . "$repo/lib/manifest.sh"
 . "$repo/lib/upstream.sh"
 . "$repo/scripts/stage_toolchains.sh"
@@ -73,23 +74,30 @@ install_upstream_archive_tool() {
 }
 fixture_npm_update_failure=0
 npm() {
+  local tool script_arg=''
   case "$1" in
     ls)
-      [[ -x "$HOME/.npm/packages/bin/cf" ]] || return 1
-      printf '{"dependencies":{"cf":{"version":"1.0.0"}}}\n'
+      tool=$7
+      [[ -x "$HOME/.npm/packages/bin/$tool" ]] || return 1
+      printf '{"dependencies":{"%s":{"version":"1.0.0"}}}\n' "$tool"
       ;;
     install)
-      [[ "$*" == "install --global --prefix $HOME/.npm/packages cf@latest" ]]
-      printf 'cf\n' >> "$CLI_TEST_LOG"
+      tool=${!#}
+      tool=${tool%@latest}
+      [[ "$tool" != bun ]] || script_arg=' --allow-scripts=bun'
+      [[ "$*" == "install --global --prefix $HOME/.npm/packages$script_arg $tool@latest" ]]
+      printf '%s\n' "$tool" >> "$CLI_TEST_LOG"
       mkdir -p "$HOME/.npm/packages/bin"
-      printf '#!/bin/sh\nprintf "cf 1.0.0\\n"\n' > "$HOME/.npm/packages/bin/cf"
-      chmod +x "$HOME/.npm/packages/bin/cf"
+      printf '#!/bin/sh\nprintf "%s 1.0.0\\n"\n' "$tool" > "$HOME/.npm/packages/bin/$tool"
+      chmod +x "$HOME/.npm/packages/bin/$tool"
       ;;
     update)
-      [[ "$*" == "update --global --prefix $HOME/.npm/packages --tag=latest cf" ]]
+      tool=${!#}
+      [[ "$tool" != bun ]] || script_arg=' --allow-scripts=bun'
+      [[ "$*" == "update --global --prefix $HOME/.npm/packages --tag=latest$script_arg $tool" ]]
       ((fixture_npm_update_failure == 0)) || return 1
-      printf 'cf-update\n' >> "$CLI_TEST_LOG"
-      printf '#!/bin/sh\nprintf "cf 2.0.0\\n"\n' > "$HOME/.npm/packages/bin/cf"
+      printf '%s-update\n' "$tool" >> "$CLI_TEST_LOG"
+      printf '#!/bin/sh\nprintf "%s 2.0.0\\n"\n' "$tool" > "$HOME/.npm/packages/bin/$tool"
       ;;
     *) return 1 ;;
   esac
@@ -100,12 +108,12 @@ install_cloud_clis >/dev/null
 grep -Fxq 'openai openai_{version}_linux_amd64.tar.gz openai' "$scratch/archives"
 grep -Fxq 'ant ant_{version}_linux_amd64.tar.gz ant' "$scratch/archives"
 [[ "$HOME/.local/bin/aws" -ef "$HOME/.local/share/aws-cli/v2/current/bin/aws" ]]
-[[ "$(cat "$CLI_TEST_LOG")" == $'gddy\naws\ncf' ]]
+[[ "$(cat "$CLI_TEST_LOG")" == $'gddy\naws\ncf\nbun' ]]
 
 # Existing declared npm tools advance through npm's native updater.
 : > "$CLI_TEST_LOG"
 install_cloud_clis >/dev/null
-[[ "$(cat "$CLI_TEST_LOG")" == $'aws\ncf-update' ]]
+[[ "$(cat "$CLI_TEST_LOG")" == $'aws\ncf-update\nbun-update' ]]
 [[ "$("$HOME/.npm/packages/bin/cf" --version)" == 'cf 2.0.0' ]]
 fixture_npm_update_failure=1
 if install_cloud_clis >/dev/null 2>&1; then exit 1; fi
@@ -180,8 +188,10 @@ install_google_cloud_macos() {
 }
 rm "$HOME/.local/bin/aws" "$HOME/.local/bin/aws_completer"
 : > "$scratch/archives"
+: > "$CLI_TEST_LOG"
 install_cloud_clis >/dev/null
 [[ ! -s "$scratch/archives" ]]
+[[ "$(cat "$CLI_TEST_LOG")" == $'aws\ncf-update' ]]
 [[ "$HOME/.local/bin/aws" -ef "$HOME/.local/share/aws-cli/aws" ]]
 [[ "$HOME/.local/bin/gcloud" -ef "$HOME/.local/share/google-cloud-sdk/bin/gcloud" ]]
 POSTFLIGHT_FAILURES=0

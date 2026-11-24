@@ -25,6 +25,8 @@ mkdir -p "$HOME"
 # shellcheck disable=SC1091
 . "$TEST_ROOT/lib/manifest.sh"
 # shellcheck disable=SC1091
+. "$TEST_ROOT/scripts/stage_packages.sh"
+# shellcheck disable=SC1091
 . "$TEST_ROOT/scripts/stage_fonts_terminal.sh"
 # shellcheck disable=SC1091
 . "$TEST_ROOT/scripts/stage_terminal_profile.sh"
@@ -71,6 +73,11 @@ rm "$HOME/.local/bin/code"
 printf '# user code wrapper\n' > "$HOME/.local/bin/code"
 ensure_vscode_cli_links >/dev/null 2>&1
 [[ "$(cat "$HOME/.local/bin/code")" == '# user code wrapper' ]]
+printf '. %q\n' "$TEST_ROOT/dotfiles/config/shell/workspace-setup-path.sh" >> "$HOME/.bashrc"
+stage_command_providers
+POSTFLIGHT_PASSES=0 POSTFLIGHT_FAILURES=0
+postflight_macos_cli_paths >/dev/null
+[[ "$POSTFLIGHT_FAILURES" == 0 && "$POSTFLIGHT_PASSES" == 2 ]]
 
 # A VS Code build without the optional tunnel launcher is still a complete app
 # provider and must not make the graphical stage fail.

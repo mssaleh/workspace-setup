@@ -67,7 +67,7 @@ install_google_cloud_macos() {
   fi
   "$sdk/install.sh" --quiet --path-update=false --command-completion=false \
     --install-python=false </dev/null || return 1
-  for tool in gcloud bq gsutil git-credential-gcloud.sh docker-credential-gcloud; do
+  for tool in "${GOOGLE_CLOUD_MACOS_COMMANDS[@]}"; do
     [[ -x "$sdk/bin/$tool" ]] || { warn "Google Cloud SDK command is missing: $sdk/bin/$tool"; return 1; }
     ensure_cli_symlink "$sdk/bin/$tool" "$HOME/.local/bin/${tool%.sh}" || return 1
   done

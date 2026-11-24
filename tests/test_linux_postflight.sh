@@ -22,6 +22,7 @@ SKIP_FONT=1
 PATH="$HOME/.local/bin:$TEST_TMP/system:/usr/bin:/bin"
 export HOME OS_KIND SKIP_FONT PATH
 repo_dir() { printf '%s\n' "$TEST_ROOT"; }
+. "$TEST_ROOT/lib/os.sh"
 mkdir -p \
   "$HOME/.local/bin" "$HOME/.cargo/bin" "$HOME/.config/uv" \
   "$HOME/.opencode/bin" "$TEST_TMP/system"
@@ -136,6 +137,10 @@ dpkg-query() {
 }
 nodejs_extra_origin=''
 apt-cache() {
+  if [[ "$1" == show && "$2" == git-delta ]]; then
+    printf 'Package: git-delta\n'
+    return
+  fi
   if [[ "$1" == madison ]]; then
     case "$2" in
       kubectl) printf 'kubectl | 1.0 | %s Packages\n' "$KUBERNETES_APT_URI" ;;
@@ -157,11 +162,16 @@ apt-cache() {
     '        500 http://archive.ubuntu.com/ubuntu resolute/universe amd64 Packages'
 }
 
+# An apt-backed tool can leave an older standalone copy installed.
+printf '#!/bin/sh\ntouch "%s"\n' "$TEST_TMP/standalone-delta-ran" > "$HOME/.local/bin/delta"
+chmod +x "$HOME/.local/bin/delta"
 POSTFLIGHT_PASSES=0
 POSTFLIGHT_FAILURES=0
 postflight_upstream_tools
 [[ "$POSTFLIGHT_FAILURES" == 0 ]]
 [[ "$POSTFLIGHT_PASSES" == 18 ]]
+[[ ! -e "$TEST_TMP/standalone-delta-ran" ]]
+rm "$HOME/.local/bin/delta"
 
 for python_release in 3.15.0 3.14.11rc1; do
   printf '#!/bin/sh\nprintf "Python %s\\n"\n' "$python_release" > "$TEST_TMP/system/python3"

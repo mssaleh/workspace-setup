@@ -57,6 +57,7 @@ chmod +x "$HOME/.local/bin/uv"
 
 # shellcheck disable=SC1091
 . "$TEST_ROOT/lib/log.sh"
+. "$TEST_ROOT/lib/os.sh"
 # shellcheck disable=SC1091
 . "$TEST_ROOT/lib/manifest.sh"
 . "$TEST_ROOT/lib/agents/paths.sh"
@@ -120,6 +121,7 @@ mv "$BREW_PREFIX/bin/uv" "$HOME/.local/bin/uv"
 . "$TEST_ROOT/lib/upstream.sh"
 upstream_latest_version() { printf '2.2.1\n'; }
 . "$TEST_ROOT/scripts/stage_toolchains.sh"
+
 export CLI_TEST_HOME="$HOME" CLI_TEST_ROOT="$TEST_TMP"
 export CLI_TEST_FAIL_DOWNLOAD='' CLI_TEST_FAIL_UPDATE='' CLI_TEST_FAIL_VERSION=''
 mkdir -p "$TEST_TMP/current" "$TEST_TMP/versions"

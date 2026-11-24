@@ -40,11 +40,15 @@ Host providers belong in `lib/manifest.sh`; agent sources and targets belong in
 `manifests/`. Agent locations belong in `lib/agents/paths.sh`.
 Keep configuration ordinary and independent of the disposable payload.
 
-On macOS, "official Homebrew" means maintained by the software vendor, not
-merely listed in homebrew/core or homebrew/cask. Prefer vendor-maintained taps,
-then practical vendor installers. Homebrew remains the baseline CLI/runtime
-fallback where a practical first-party Mac installer is unavailable. Do not
-classify a community package as first-party because a vendor documents it.
+Prefer apt packages and Homebrew formulae or casks that package the intended
+upstream tool, including packages maintained by Ubuntu and Homebrew. Use the
+project's existing user-level package managers when a platform package is
+unavailable. Use standalone binaries or installers where needed and containers
+as a last resort.
+Select commands by their declared provider's installed executable. After
+postflight, retire conflicting standalone executables and positively identified
+alternate packages. Respect package ownership and bundled application tools.
+`PRESERVE_CLI_DUPLICATES=1` keeps alternate installations.
 Normal host runs update declared CLI providers within the selected runtime
 lines. Install missing desktop apps from vendor downloads, preserve existing
 apps, and leave their updates to the apps' own mechanisms.

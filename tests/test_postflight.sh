@@ -85,10 +85,13 @@ for command_name in uv uvx claude codex copilot agy ruff delta; do
   printf '%s\n' '#!/bin/sh' 'exit 0' > "$HOME/.local/bin/$command_name"
   chmod +x "$HOME/.local/bin/$command_name"
 done
-for command_name in gh kubectl gddy "${BREW_CLI_COMMANDS[@]}"; do
+for command_name in gh kubectl gddy bun bunx yazi ya "${BREW_CLI_COMMANDS[@]}"; do
   printf '%s\n' '#!/bin/sh' 'printf "cli 1.0.0\n"' > "$HOME/.local/bin/$command_name"
   chmod +x "$HOME/.local/bin/$command_name"
 done
+printf '%s\n' '#!/bin/sh' 'case "$1" in gain) printf "Usage: rtk gain [OPTIONS]\n" ;; *) printf "rtk 1.0.0\n" ;; esac' \
+  > "$HOME/.local/bin/rtk"
+chmod +x "$HOME/.local/bin/rtk"
 printf '%s\n' '#!/bin/sh' 'printf "aws-cli/2.0.0\n"' > "$HOME/.local/bin/aws"
 chmod +x "$HOME/.local/bin/aws"
 mkdir -p "$HOME/.npm/packages/bin"

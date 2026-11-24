@@ -8,4 +8,5 @@ if [[ -n "${BREW_PREFIX:-}" && -x "$BREW_PREFIX/bin/brew" ]]; then
 fi
 [[ -d "$HOME/.cargo/bin" ]] && path=("$HOME/.cargo/bin" $path)
 path=("$HOME/.local/bin" $path)
+[[ ! -d "$HOME/.local/share/workspace-setup/bin" ]] || path=("$HOME/.local/share/workspace-setup/bin" $path)
 export PATH BREW_PREFIX

@@ -70,6 +70,7 @@ mkdir "$db/shadow"
 cp "$db/bin/fixture" "$db/shadow/fixture"
 PATH="$db/shadow:$PATH"
 [[ "$(vendor_command_state fixture fixture "$archive")" == foreign ]]
+[[ "$(vendor_command_state fixture fixture "$archive" "$db/bin/fixture")" == managed ]]
 rm "$db/shadow/fixture" "$db/bin/fixture"
 [[ "$(vendor_command_state fixture fixture "$archive")" == wanted ]]
 

@@ -2,7 +2,7 @@
 
 Provision a terminal-first workspace and configure its coding agents on **Ubuntu 26.04 LTS** and **macOS 27**. These are the only supported operating systems. Setup rejects other releases before provisioning or synchronizing agents. One repository owns packages, toolchains, regular configuration files, SSH, terminals, containers, shared skills, MCP servers, and Claude Code plugins.
 
-The setup payload is disposable. `curl | bash` downloads it into a temporary directory, provisions and verifies the host, synchronizes agents, then deletes the payload. Installed files do not depend on the checkout. Providers retain their native state, including the skills CLI's lock file; setup retains no separate receipt or state directory.
+The setup payload is disposable. `curl | bash` downloads it into a temporary directory, provisions and verifies the host, synchronizes agents, then deletes the payload. Installed files do not depend on the checkout. Providers retain their native state, including the skills CLI's lock file. Setup selects executables from the installed packages and keeps no separate package inventory.
 
 ## Quick start
 
@@ -60,9 +60,9 @@ packages without their recommendations; each control still overrides it.
 |---|---|
 | **context** | On macOS, separately classifies the host as `workstation`/`headless` and the current run as `local`/`ssh`/`noninteractive`. Host role controls installation; session kind controls whether GUI activation is permitted. Neither the login shell nor the default terminal is changed. On Linux only the host role applies: `HOST_PROFILE=headless` drops the desktop stages, GUI applications and SSH key generation. |
 | **bootstrap** | On macOS, verifies that the selected Xcode Command Line Tools actually provide `xcrun clang` before touching Homebrew, then discovers Homebrew at its real prefix or installs it. It never launches the asynchronous CLT installer dialog. On Linux, ensures curl + git. |
-| **packages** | Installs the cross-platform CLI toolbox: `eza`, `fd`, `bat`, `ripgrep` (`rg`), `fzf`, `zoxide`, `yazi`, `git`, `git-delta` (`delta`), `lazygit`, `gh`, `zmx`, `rsync`, `rclone`, `nmap`, `jq`, `yq`, `pandoc`, `7zz` (`7z`), `cmake`, `ninja`, `node`, `uv`, `ruff`, `helm`, `kubectl`, `cosign`, `ffmpeg`, `poppler` (`poppler-utils`), `nano`, `himalaya`, `ncdu`, `shellcheck`, `pre-commit`, … It installs `xterm-kitty` terminfo as a non-GUI SSH capability on every host. Where a Linux release's apt has no `git-delta`, `eza` or `lazygit`, their upstream releases install into `~/.local/bin`. On Linux it registers **every** vendor archive before installing anything (see below), then installs the toolbox, the **Claude Desktop** app (skip with `SKIP_CLAUDE_DESKTOP=1`) and the **Codex app** (skip with `SKIP_CODEX_APP=1`). |
+| **packages** | Installs the cross-platform CLI toolbox: `eza`, `fd`, `bat`, `ripgrep` (`rg`), `fzf`, `zoxide`, `yazi`, `bun`, `rtk`, `git`, `git-delta` (`delta`), `lazygit`, `gh`, `zmx`, `rsync`, `rclone`, `nmap`, `jq`, `yq`, `pandoc`, `7zz` (`7z`), `cmake`, `ninja`, `node`, `uv`, `ruff`, `helm`, `kubectl`, `cosign`, `ffmpeg`, `poppler` (`poppler-utils`), `nano`, `himalaya`, `ncdu`, `shellcheck`, `pre-commit`, … It installs `xterm-kitty` terminfo as a non-GUI SSH capability on every host. Where a Linux release's apt has no `git-delta`, `eza` or `lazygit`, their upstream releases install into `~/.local/bin`. On Linux it registers **every** vendor archive before installing anything (see below), then installs the toolbox, the **Claude Desktop** app (skip with `SKIP_CLAUDE_DESKTOP=1`) and the **Codex app** (skip with `SKIP_CODEX_APP=1`). |
 | **docker** | Linux only: installs the official **Docker Engine** + **Docker Compose v2** from download.docker.com. Docker's documented pre-clean of the distribution's `docker.io`, `containerd` and `runc` names every package apt would take with them before it runs, since those runtimes carry reverse dependencies of their own. A complete, responsive official installation is a no-op on rerun. |
-| **toolchains** | Updates Rust stable through native rustup while preserving the selected default and other toolchains. Astral's installer owns uv. Coding and cloud CLIs use vendor-maintained Brew taps or practical vendor installers; Linux cloud CLIs also use official apt repositories. Cloudflare uses npm; `markitdown[all]` and macOS Ruff use uv tools. |
+| **toolchains** | Updates Rust stable through native rustup while preserving the selected default and other toolchains. Astral's installer owns uv. Coding and cloud CLIs use vendor-maintained Brew taps or practical vendor installers; Linux cloud CLIs also use official apt repositories. Cloudflare CLI and Linux Bun use npm. `markitdown[all]` and macOS Ruff use uv tools. |
 | **configuration** | Converges ordinary files under `$HOME`; repairs old links into temporary checkouts, atomically upgrades exact known historical versions, semantically merges supported JSON/TOML/Git/ssh formats and repairs a shell startup file that has lost the host-local environment loader, preserves ambiguous user-owned content, installs the coding-agent skills into each agent home, and provisions the host-local environment directory `~/.config/shell/env.d/` that the supported shells source. |
 | **completions** | macOS only: runs `brew completions link` when Homebrew reports that external-command completions are not linked, then generates and syntax-checks Bash/Zsh completions from the installed Codex, rustup/cargo, opencode, Container, and Container Compose binaries. Existing files without this setup's ownership marker are preserved. Linux retains its existing himalaya loader only. |
 | **containers** | macOS only: installs or updates Apple's signed Container package while stopped, ensures Rosetta, and writes only the stable build/registry defaults. The Container system remains stopped for on-demand laptop use unless `CONTAINER_START=1`; it is never stopped automatically. `container-compose` is supplied separately by Homebrew. |
@@ -106,21 +106,18 @@ step and verifies the reported state afterwards. Homebrew taps can execute code 
 The manifest uses fully qualified vendor packages and [package-scoped
 trust](https://docs.brew.sh/Tap-Trust).
 
-"Official Homebrew" means maintained by the software vendor. Catalog membership
-and a vendor recommending a community package do not establish that ownership.
-macOS uses vendor taps for OpenAI CLI, Anthropic CLI, OpenCode, Zmx, and Apex;
-practical first-party installers provide Rustup, uv, AWS, Google Cloud, the
-native coding agents, and Apple Container. Homebrew remains the fallback for
-the baseline toolbox and runtimes. Azure CLI uses Microsoft's documented
-Homebrew route as a community fallback. Node stays on 26.x and Python on 3.14.x.
+Homebrew supplies the baseline toolbox and runtimes. It uses vendor taps for
+Bun, RTK, OpenAI CLI, Anthropic CLI, OpenCode, Zmx, and Apex, and Microsoft's
+documented cask for Azure CLI. The manifest uses standalone installers for
+Rustup, uv, AWS, Google Cloud, the native coding agents, and Apple Container.
+Node stays on 26.x and Python on 3.14.x.
 
 On macOS, desktop applications are installed from vendor downloads only when missing.
 Setup neither adopts existing bundles into Homebrew nor replaces them to update
 them; use each application's updater or vendor update method. Application
-settings and credentials remain at their native paths. Conflicting executable
-providers are preserved and reported. Back up an unwanted launcher before
-migrating its provider; setup does not run native self-updaters through links
-to Homebrew-managed binaries. System-wide vendor installers can require local
+settings and credentials remain at their native paths. Setup verifies the
+selected CLI providers before retiring independently installed alternatives.
+System-wide vendor installers can require local
 administrator authentication.
 
 For manual Homebrew maintenance, inspect `brew doctor`, `brew outdated`,
@@ -129,17 +126,21 @@ packages before removing anything; setup does not perform blanket cleanup.
 
 ## Ownership and convergence model
 
-This is automation for a conventional hand-configured machine, not a settings manager:
+Setup uses apt and Homebrew packages that supply the intended upstream tool.
+It uses the existing user-level package managers or vendor installers when a
+platform package is unavailable.
 
 | Capability | Owner |
 |---|---|
-| macOS baseline CLI toolbox, runtimes, Container Compose, Azure CLI, and fonts | Homebrew fallback |
-| macOS OpenAI CLI, Anthropic CLI, OpenCode, Zmx, and Apex | vendor-maintained Homebrew taps |
+| macOS baseline CLI toolbox, runtimes, Container Compose, Azure CLI, and fonts | Homebrew |
+| macOS Bun, RTK, OpenAI CLI, Anthropic CLI, OpenCode, Zmx, and Apex | Vendor-maintained Homebrew taps |
 | Linux base toolbox | apt; official vendor repositories where the distribution build is too far behind to use; `ppa:libreoffice/ppa` when LibreOffice is absent and `ppa:git-core/ppa` on Ubuntu |
 | Rust manager and toolchains | upstream rustup |
 | uv, AWS CLI, GoDaddy, Claude Code, Codex, Copilot, Antigravity, and Kitty | each project's upstream installer |
 | macOS Google Cloud, Apple Container, and desktop applications | vendor SDK, signed package, or application download |
-| macOS Ruff; MarkItDown on both platforms | uv tools |
+| macOS Ruff and cross-platform MarkItDown | uv tools |
+| Cloudflare CLI and Ubuntu Bun | npm packages |
+| Ubuntu Yazi and RTK | apt installs Yazi from its stable repository and RTK from its published Debian package |
 | Linux OpenCode and API CLIs | each project's upstream installer or release |
 | Configuration | ordinary files at their native paths |
 | Shared skills and their lock file | `npx skills`, from `manifests/skills.tsv` |
@@ -263,7 +264,7 @@ curl -fsSL https://raw.githubusercontent.com/mssaleh/workspace-setup/main/setup.
 - **Does not install databases at user level.** No Postgres, MySQL, Redis, etc. via `brew services`. Dev databases belong in containers with mounted volumes. The script installs `container`/`container-compose` (macOS) or Docker Engine + Compose v2 (Linux), but does not configure database instances.
 - **Does not authenticate with GitHub.** Run `gh auth login` manually after.
 - **Does not install Docker on macOS.** macOS uses Apple's native `container` CLI (Virtualization.framework micro-VMs + Rosetta, no daemon). On Linux, the official Docker Engine is installed natively — it's the standard runtime there.
-- **Does not put a secret on the machine.** `~/.config/shell/env.d/` is created empty and its permissions are enforced; what goes into it is yours to write. Setup does not ship, converge, back up or replace snippet contents; postflight parses them without running them and never prints them.
+- **Does not put a secret on the machine.** Setup manages the PATH snippet in `~/.config/shell/env.d/` and enforces private permissions. Credential snippets belong to you. Postflight syntax-checks them without printing their contents.
 - **Does not push SSH keys anywhere.** The public key stays at `~/.ssh/id_ed25519.pub`; add it to GitHub manually or via `gh auth login`.
 - **Does not apply the optional files under `system/`.** Package managers and their installers necessarily write to their native locations (`/opt/homebrew`, `/Applications`, `/usr/local`, package receipts, and Linux package/systemd paths); those exact owners are listed above. The reviewed SSH/sysctl/Docker examples under `system/` remain manual because their host-wide policy cannot be inferred safely.
 - **Does not enable Remote Login, change its allow-list, grant Full Disk Access, change FileVault/firewall/power policy, change the login shell, or select Kitty as the default terminal.** The macOS remote stage reports effective state only.
@@ -703,13 +704,9 @@ non-symlink `*.sh` file in that directory. In `~/.bashrc` the loader sits
 token loaded from an interactive branch is missing precisely where automation
 runs.
 
-The directory is provisioned; snippet contents are not. Nothing under it is
-shipped, converged or replaced by a later run — a credential is host-local by
-definition, and a file this setup had written would turn into a permanent
-conflict the moment a token went into it. What setup.sh owns is the two ordinary
-directory paths, at `0700`, and the permissions of the ordinary files you put
-in `env.d`: a file carrying group or other bits is made private and the change
-is reported. Symlinks and other filesystem objects are never followed or
+Setup maintains `99-workspace-setup-path.sh` to load the selected command
+providers. The other snippets belong to you. Setup sets both ordinary
+directories to `0700` and makes files with group or other permissions private. Symlinks and other filesystem objects are never followed or
 replaced; they are preserved as configuration conflicts and keep postflight
 red until you remove them or replace them with ordinary files.
 
@@ -760,7 +757,8 @@ Skill sources use `owner/repo` or `owner/repo/path/to/skills`. `whole` mode with
 names from their `SKILL.md` frontmatter. Discover names with
 `npx skills add <source> -l`. The shipped collections cover Vercel, Next.js,
 shadcn, Pydantic, LlamaIndex, CopilotKit, Temporal, Qdrant, LiveKit, TypeSafe,
-and assistant-ui.
+assistant-ui, and [Cloudflare](https://github.com/cloudflare/skills).
+The Cloudflare collection includes the `cf-cli` skill.
 
 The skills CLI owns the shared payloads and lock. An ordinary run installs
 missing sources or payloads; `--update` refreshes declared collections and
@@ -921,8 +919,11 @@ The script detects the OS and adapts:
 | GitHub CLI | Homebrew `gh` | GitHub's own archive (`cli.github.com`), every key in the downloaded keyring checked against the declared fingerprints. The vendor archive supplies current stable releases |
 | AWS CLI v2 (`aws`) | [AWS's installer](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) with signature verification, user-local payload and launchers; checks updates on reruns | Same installer; restores missing launchers on reruns |
 | Google Cloud CLI (`gcloud`) | [Google's SDK archive](https://docs.cloud.google.com/sdk/docs/install-sdk#mac) under `~/.local/share/google-cloud-sdk`; `gcloud components update --quiet` on reruns | Google's official apt archive. An apt preference excludes Google's `kubectl` so the Kubernetes stable archive retains ownership |
-| Azure CLI (`az`) | Microsoft's documented [Homebrew cask](https://learn.microsoft.com/cli/azure/install-azure-cli-macos), `azure-cli`, as a community fallback; an installed formula is replaced after fetching the cask | Microsoft's apt archive when it publishes the host's suite. An existing uv copy is removed only after the apt command works; otherwise uv remains the fallback |
+| Azure CLI (`az`) | Microsoft's documented [Homebrew cask](https://learn.microsoft.com/cli/azure/install-azure-cli-macos), `azure-cli`; an installed formula is replaced after fetching the cask | Microsoft's apt archive when it publishes the host's suite, with uv as the fallback |
 | Cloudflare CLI (`cf`, `cloudflare`) | npm package [`cf`](https://developers.cloudflare.com/cf/get-started/) in `~/.npm/packages`; updated on reruns | same; uses the project's Node 26 runtime |
+| Bun (`bun`) | [Bun's Homebrew formula](https://bun.com/docs/installation) | Official npm package |
+| RTK (`rtk`) | [RTK's Homebrew formula](https://www.rtk-ai.app/docs/getting-started/installation/) | Verified publisher Debian package installed by apt |
+| Yazi (`yazi`, `ya`) | Homebrew | [Yazi's stable apt repository](https://yazi-rs.github.io/docs/installation/#debian-and-ubuntu) |
 | GoDaddy CLI (`gddy`) | [Official installer](https://developer.godaddy.com/en/docs/api-users/cli/set-up), with checksum verification and execution checked before placement in `~/.local/bin` | same; compares installed and published releases on each run |
 | Git credential helper | Git's Keychain helper | Verified [Git Credential Manager](https://github.com/git-ecosystem/git-credential-manager/releases/latest) archives on x86-64 and arm64, with user-local launchers |
 | OpenAI API CLI (`openai`) | Official [Homebrew cask `openai/tools/openai`](https://developers.openai.com/api/docs/libraries/openai-cli) | Official release to `~/.local/bin`, verified against its published digest |
@@ -933,8 +934,8 @@ The script detects the OS and adapts:
 | Anthropic API CLI (`ant`) | Official [Homebrew cask `anthropics/tap/ant`](https://platform.claude.com/docs/en/cli-sdks-libraries/cli/quickstart) | Official release to `~/.local/bin`, verified against its published digest |
 | Antigravity CLI (`agy`) | [Google's installer](https://antigravity.google/cli/install.sh) to `~/.local/bin`; temporary home preserves profiles and aliases; `agy update` checks current releases on reruns | same |
 | Apex Markdown (`apex`) | Homebrew `ttscoff/thelab/apex` | [Official release](https://github.com/ApexMarkdown/apex) to `~/.local/bin`, checksum verified, with installed and published versions compared on each run |
-| Tools not in default apt repo (helm, kubectl, himalaya, ruff, yazi) | Homebrew formulae; Ruff uses [Astral's documented uv tool installation](https://docs.astral.sh/ruff/installation/) | official apt repo (helm, kubectl) / official installer (himalaya) / GitHub release → `~/.local/bin` (ruff, yazi). Each run compares installed and published versions and upgrades stale artifacts |
-| `yq` and `cosign` | Homebrew `yq` (mikefarah) and `cosign` | upstream release → `~/.local/bin`, checksum verified against the publisher's own list. **Not** the distribution packages: Ubuntu's `yq` is kislyuk's jq wrapper — a different program with a different command language — and upstream `cosign` supplies the selected current release. A setup for parity between a Mac and a Linux box cannot give the same command name to two different programs. A distribution build left installed alongside is preserved; `~/.local/bin` wins on PATH and postflight names the ambiguity |
+| Tools not in default apt repo (helm, kubectl, himalaya, ruff) | Homebrew formulae; Ruff uses [Astral's documented uv tool installation](https://docs.astral.sh/ruff/installation/) | official apt repo (helm, kubectl) / official installer (himalaya) / GitHub release → `~/.local/bin` (ruff). Each run compares installed and published versions and upgrades stale artifacts |
+| `yq` and `cosign` | Homebrew `yq` (mikefarah) and `cosign` | Verified upstream releases in `~/.local/bin`. Ubuntu's `yq` is kislyuk's jq wrapper and upstream `cosign` supplies the selected current release. Setup selects the upstream executables and preserves any installed distribution copies |
 | Node.js | Homebrew `node@26`, exposed through user-local links. Setup migrates its Node 24 links and checks current patches on reruns. Postflight checks the resolved executable and declared major | NodeSource apt repo, major set by `NODE_MAJOR` in `lib/manifest.sh`; reruns install the current candidate. An apt preference excludes distribution runtime packages |
 | Python | Homebrew `python@3.14`; `python`, `python3`, and `python3.14` receive user-local links | Ubuntu `python3.14` and `python3.14-venv`; reruns install current distribution patches. uv can install other project interpreters on either platform |
 | uv | [Astral's standalone installer](https://docs.astral.sh/uv/getting-started/installation/) and receipt; `uv self update` on reruns | same |
@@ -976,11 +977,24 @@ PostgreSQL is supplied only as a container example: `postgres:18` with
 Reruns resolve current releases while preserving edited configuration and
 unrelated tools. Once the requested versions and settings are satisfied,
 their effective values remain unchanged; package-manager metadata can refresh.
+Setup puts selected command launchers in
+`~/.local/share/workspace-setup/bin`, which the shipped shells put first on PATH.
+Launchers follow the installed package or tool provider across updates.
+Script launchers invoke the provider's executable at its installed path.
+Postflight checks that a fresh shell resolves the selected providers.
+After postflight, setup removes competing standalone native executables in
+`~/.local/bin`, `~/bin`, and Bun's standalone bin directory. It also uses npm,
+uv, and Cargo to uninstall alternate tools when their installation metadata
+identifies the executable. Setup reports unrecognized launchers in the
+standalone directories. System and application-bundled executables stay with
+their owners. To retain alternate installations, run
+`PRESERVE_CLI_DUPLICATES=1 bash setup.sh host`.
 
-**Distribution packages** come from the vendor's own archive where the
-distribution's build is too far behind to use — `ppa:git-core/ppa`,
+**Ubuntu packages** come from vendor archives when the distribution lacks a
+suitable package. These archives include `ppa:git-core/ppa`,
 `cli.github.com`, `apt.kitware.com`, `pkgs.k8s.io`, `packages.buildkite.com`,
-`downloads.claude.ai`, `deb.nodesource.com`, `packages.cloud.google.com`,
+`downloads.claude.ai`, `deb.nodesource.com`, `yazi-rs.github.io/builds`,
+`packages.cloud.google.com`,
 `packages.microsoft.com/repos/azure-cli`, `ppa:libreoffice/ppa`. On Linux
 every archive is registered before any package is installed, so a name resolves
 to the vendor's build the first time rather than being installed from the
@@ -999,7 +1013,7 @@ installations advance across minor releases; unrecognized providers are
 preserved. Failed release discovery retains the existing sources and reports
 that the latest release could not be confirmed.
 
-**Linux publisher-installed tools** — `ruff`, `yazi`, `himalaya`, `yq`,
+**Linux publisher-installed tools** — `ruff`, `himalaya`, `yq`,
 `cosign`, `openai`, `ant`, `gddy`, standalone `uv`, and `delta`, `eza` and `lazygit` where apt lacks them —
 have no package manager carrying them forward, so each run compares what is
 installed against what the project publishes and upgrades when the published version is newer. GoDaddy uses the same comparison on macOS.
@@ -1011,6 +1025,10 @@ download failures. Newer installed releases are preserved, and uv upgrades
 itself with `uv self update`. Nothing is replaced unless it identifies itself: an unreachable
 publisher, an unparseable version, or a file this project did not place all
 mean it is left alone and reported.
+
+RTK has a published Debian package. On Ubuntu, setup checks the current RTK
+release on reruns and installs updates through apt. Yazi updates through its
+signed apt repository with the other Ubuntu packages.
 
 Rust uses `rustup update stable` on reruns, preserving other toolchains and
 the selected default. Only the uv and npm tools declared in the manifest are
@@ -1102,7 +1120,7 @@ workspace-setup/
 │   │   └── apple-container-amd64/ # SKILL.md + scripts/optimize-builder.sh
 │   └── config/                    # kitty/, bat/, yazi/, gh/, opencode/, container/
 │       ├── environment.d/         # Linux OpenSSH-agent environment
-│       ├── shell/README           # what env.d is for; the directory itself is provisioned empty
+│       ├── shell/README           # host-local snippets and the managed PATH hook
 │       ├── kitty/kitty.conf       # platform-neutral base; ends in `include platform.conf`
 │       ├── kitty/platform-macos.conf  # → ~/.config/kitty/platform.conf on macOS
 │       ├── kitty/platform-linux.conf  # → ~/.config/kitty/platform.conf on Linux

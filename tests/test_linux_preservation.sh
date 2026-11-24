@@ -51,6 +51,8 @@ printf 'stage_bootstrap() { umask > "$LINUX_PRESERVATION_CALLS.umask"; }\n' \
 # shellcheck disable=SC2016
 printf 'stage_packages() { printf "%%s\\n" "${INSTALL_RECOMMENDS:-1}" > "$LINUX_PRESERVATION_CALLS.recommends"; }\n' \
   > "$fixture/scripts/stage_packages.sh"
+printf 'stage_command_providers() { :; }\n' >> "$fixture/scripts/stage_packages.sh"
+printf 'stage_reconcile_cli_providers() { :; }\n' >> "$fixture/scripts/stage_packages.sh"
 
 run_linux_setup() {
   : > "$calls"
@@ -71,7 +73,9 @@ stage_ssh
 stage_fonts_terminal
 stage_terminal_profile
 stage_apparmor
+stage_command_providers
 stage_postflight
+stage_reconcile_cli_providers
 stage_agents
 EXPECTED
 )
@@ -208,6 +212,7 @@ for function_name in \
     postflight_shell_env \
     postflight_completions \
     postflight_upstream_tools \
+    postflight_toolbox_commands \
     postflight_cloud_clis \
     postflight_headless_credentials \
     postflight_containers; do
@@ -237,6 +242,7 @@ postflight_shell_paths
 postflight_shell_env
 postflight_completions
 postflight_upstream_tools
+postflight_toolbox_commands
 postflight_cloud_clis
 postflight_headless_credentials
 postflight_containers

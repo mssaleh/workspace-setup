@@ -217,6 +217,12 @@ if array_has azure-cli "${PACKAGES_BREW[@]}"; then
   exit 1
 fi
 array_has cf "${NPM_TOOLS_COMMON[@]}"
+array_has bun "${NPM_TOOLS_LINUX[@]}"
+array_has oven-sh/bun/bun "${PACKAGES_BREW[@]}"
+array_has rtk-ai/tap/rtk "${PACKAGES_BREW[@]}"
+upstream_has_project rtk
+array_has yazi "${PACKAGES_APT[@]}"
+array_has yazi "${PACKAGES_BREW[@]}"
 for _cloud_tool in openai ant; do
   array_has "$_cloud_tool" "${PROVIDERS_LINUX_UPSTREAM[@]}"
   upstream_has_project "$_cloud_tool"

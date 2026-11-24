@@ -300,19 +300,24 @@ apt_newest_from_archive() {
     index($3, uri) { gsub(/^[ \t]+|[ \t]+$/, "", $2); print $2; exit }'
 }
 
-# vendor_command_state <package> <command> <archive uri> — current provider.
+# vendor_command_state <package> <command> <archive uri> [provider path]
 #   managed  the vendor package is installed and its command resolves
 #   foreign  something else provides the command; leave it alone
 #   wanted   neither, so register the archive and install the package
-# Both phases consult this, so a command another provider owns never gets an
-# apt source added behind its back.
+# Provisioning can inspect the package's destination independently of PATH.
 vendor_command_state() {
   local pkg="$1" cmd="$2" uri="${3%/}" path version
-  path=$(command -v "$cmd" 2>/dev/null || true)
+  if [[ $# -ge 4 ]]; then
+    path="$4"
+    [[ -x "$path" ]] || path=''
+  else
+    path=$(command -v "$cmd" 2>/dev/null || true)
+  fi
   if [[ -z "$path" ]]; then
     printf 'wanted\n'
     return
   fi
+  path=$(cli_provider_target "$path") || return 1
   path=$(readlink -f "$path")
   version=$(dpkg-query -W -f='${Version}' "$pkg" 2>/dev/null || true)
   if apt_package_installed "$pkg" \

@@ -50,6 +50,10 @@ for relative in "${sourced[@]}"; do
         'detect_host_context() { HOST_PROFILE=workstation; SESSION_KIND=noninteractive; export HOST_PROFILE SESSION_KIND; }' \
         'apply_host_profile_policy() { :; }' > "$fixture/$relative"
       ;;
+    scripts/stage_packages.sh)
+      printf '%s\n' 'stage_packages() { :; }' 'stage_command_providers() { :; }' \
+        'stage_reconcile_cli_providers() { :; }' > "$fixture/$relative"
+      ;;
     scripts/stage_fonts_terminal.sh)
       printf '%s\n' 'stage_fonts_terminal() { :; }' > "$fixture/$relative"
       ;;

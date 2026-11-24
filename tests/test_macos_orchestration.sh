@@ -44,6 +44,8 @@ write_stage_stub() {
 }
 write_stage_stub stage_bootstrap.sh stage_bootstrap
 write_stage_stub stage_packages.sh stage_packages
+printf 'stage_command_providers() { :; }\n' >> "$fixture/scripts/stage_packages.sh"
+printf 'stage_reconcile_cli_providers() { :; }\n' >> "$fixture/scripts/stage_packages.sh"
 write_stage_stub stage_docker.sh stage_docker
 write_stage_stub stage_groups.sh stage_groups
 write_stage_stub stage_flatpak.sh stage_flatpak
@@ -100,7 +102,9 @@ stage_macos_apps
 stage_macos_fonts
 stage_macos_kitty
 stage_macos_terminal_profile
+stage_command_providers
 stage_macos_postflight
+stage_reconcile_cli_providers
 stage_agents
 EXPECTED
 )

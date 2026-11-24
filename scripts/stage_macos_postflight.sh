@@ -173,6 +173,7 @@ postflight_macos_cli_paths() {
         /bin/bash --noprofile --norc -c \
         '. "$HOME/.bashrc"; command -v "$1" 2>/dev/null || true' bash "$command_name" \
         2>/dev/null | tail -n 1)
+      resolved=$(cli_provider_target "$resolved")
       if [[ -x "$vscode_app_bin/$command_name" && -n "$resolved" \
             && -x "$resolved" && "$resolved" -ef "$vscode_app_bin/$command_name" ]]; then
         postflight_pass "$command_name is available to shell and SSH sessions"
@@ -423,6 +424,7 @@ stage_macos_postflight() {
   postflight_macos_terminal_profile
   postflight_macos_completions
   postflight_macos_upstream_tools
+  postflight_toolbox_commands
   postflight_cloud_clis
   postflight_macos_kitty_platform_layer
   postflight_headless_credentials

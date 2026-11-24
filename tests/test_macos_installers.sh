@@ -167,6 +167,7 @@ brew_fixture() {
 }
 ensure_xterm_kitty_terminfo() { :; }
 remove_legacy_tmux() { :; }
+stage_command_providers() { :; }
 stage_packages >/dev/null
 [[ "$fixture_formula" == 0 && "$fixture_cask" == 1 ]]
 [[ "$(sed -n '/^fetch /p; /^uninstall /p; /^install --cask /p' "$calls")" == $'fetch --cask azure-cli\nuninstall --formula azure-cli\ninstall --cask azure-cli' ]]

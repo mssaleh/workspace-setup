@@ -33,6 +33,289 @@ ensure_local_command_alias() {
   info "linked $alias_name → $provider_name"
 }
 
+preferred_cli_paths() {
+  local name path pkg keg entry npm_packages=("${NPM_TOOLS_COMMON[@]}")
+  if [[ "$OS_KIND" == linux ]]; then
+    npm_packages+=("${NPM_TOOLS_LINUX[@]}")
+    # Ubuntu uses these names for the same upstream commands.
+    for entry in "${APT_COMMAND_ALIASES[@]}"; do
+      printf '%s\t/usr/bin/%s\n' "${entry%%:*}" "${entry#*:}"
+    done
+    for pkg in "${PACKAGES_APT[@]}" "${APT_CLI_PACKAGES[@]}"; do
+      case "$pkg" in
+        code) [[ -z "${SKIP_VSCODE:-}" ]] || continue ;;
+        docker-ce-cli) [[ -z "${SKIP_DOCKER:-}" ]] || continue ;;
+      esac
+      apt_package_installed "$pkg" || continue
+      dpkg-query -L "$pkg" | awk '/^\/(usr\/)?s?bin\/[^/]+$/ {
+        name = $0; sub(/^.*\//, "", name); printf "%s\t%s\n", name, $0
+      }' || return 1
+    done
+    for entry in "${APT_UPSTREAM_FALLBACKS[@]}"; do
+      if ! apt-cache show "${entry%%:*}" >/dev/null 2>&1; then
+        name=${entry#*:}
+        printf '%s\t%s/.local/bin/%s\n' "$name" "$HOME" "$name"
+      fi
+    done
+    if ! apt_repo_is_configured "$AZURE_CLI_APT_URI"; then
+      printf 'az\t%s/.local/bin/az\n' "$HOME"
+    fi
+  else
+    # Version-independent Homebrew opt links follow upgrades.
+    for pkg in "${PACKAGES_BREW[@]}"; do
+      keg="$BREW_PREFIX/opt/${pkg##*/}"
+      for path in "$keg/bin/"* "$keg/sbin/"*; do
+        [[ -f "$path" && -x "$path" ]] || continue
+        printf '%s\t%s\n' "${path##*/}" "$path"
+      done
+    done
+    # Bun's tap installs bun. Its standalone installer provides bunx as a symlink to it.
+    printf 'bunx\t%s/opt/bun/bin/bun\n' "$BREW_PREFIX"
+    for name in "${BREW_CLI_COMMANDS[@]}"; do
+      printf '%s\t%s/bin/%s\n' "$name" "$BREW_PREFIX" "$name"
+    done
+    for name in python python3; do
+      printf '%s\t%s/opt/python@%s/libexec/bin/%s\n' "$name" "$BREW_PREFIX" "$PYTHON_MINOR" "$name"
+    done
+    for name in "${GOOGLE_CLOUD_MACOS_COMMANDS[@]}"; do
+      printf '%s\t%s/.local/share/google-cloud-sdk/bin/%s\n' "${name%.sh}" "$HOME" "$name"
+    done
+    if [[ "${HOST_PROFILE:-workstation}" == workstation \
+      && -z "${SKIP_FONT:-}${SKIP_MACOS_APPS:-}${SKIP_VSCODE:-}" ]]; then
+      path="${VSCODE_APP_BIN:-$(macos_app_path visual-studio-code)/Contents/Resources/app/bin}"
+      for name in code code-tunnel; do
+        printf '%s\t%s/%s\n' "$name" "$path" "$name"
+      done
+    fi
+    printf 'container\t/usr/local/bin/container\n'
+  fi
+
+  for pkg in "${npm_packages[@]}"; do
+    path="$HOME/.npm/packages/lib/node_modules/$pkg/package.json"
+    [[ -f "$path" ]] || continue
+    jq -r --arg package "${pkg##*/}" \
+      '.bin | if type == "object" then keys[] elif type == "string" then $package else empty end' "$path" |
+      while IFS= read -r name; do
+        printf '%s\t%s/.npm/packages/bin/%s\n' "$name" "$HOME" "$name"
+      done || return 1
+  done
+  local local_commands=("${LOCAL_CLI_COMMON[@]}")
+  if [[ "$OS_KIND" == linux ]]; then
+    local_commands+=("${LOCAL_CLI_LINUX[@]}")
+  else
+    local_commands+=("${LOCAL_CLI_MACOS[@]}")
+  fi
+  for name in "${local_commands[@]}"; do
+    printf '%s\t%s/.local/bin/%s\n' "$name" "$HOME" "$name"
+  done
+  for name in rustup rustc cargo rustdoc rustfmt cargo-fmt cargo-clippy clippy-driver; do
+    printf '%s\t%s/.cargo/bin/%s\n' "$name" "$HOME" "$name"
+  done
+}
+
+stage_command_providers() {
+  local directory="$HOME/.local/share/workspace-setup/bin" name target link resolved paths current tmp
+  if [[ -L "$directory" ]]; then
+    warn "preserving unexpected command directory link: $directory"
+    return 1
+  fi
+  paths=$(preferred_cli_paths) || return 1
+  mkdir -p "$directory" || return 1
+
+  while IFS=$'\t' read -r name target; do
+    [[ "$name" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]*$ && -f "$target" && -x "$target" ]] || continue
+    case "$(type -t "$name" || true)" in builtin|keyword) continue ;; esac
+    link="$directory/$name"
+    current=$(cli_provider_target "$link") || return 1
+    if [[ -e "$link" && ! -L "$link" && "$current" == "$link" ]]; then
+      warn "preserving $link, which blocks selection of $target"
+      return 1
+    fi
+    resolved=$(command -v "$name" 2>/dev/null || true)
+    if head -c 2 "$target" | grep -qF '#!'; then
+      # Some scripts locate resources relative to their invocation path.
+      [[ "$current" != "$target" || ! -x "$link" ]] || continue
+      tmp=$(mktemp "$directory/.provider.XXXXXX") || return 1
+      if ! cli_provider_launcher "$target" > "$tmp" || ! chmod 0755 "$tmp" || ! mv -f "$tmp" "$link"; then
+        rm -f "$tmp"
+        return 1
+      fi
+    else
+      [[ ! -L "$link" || "$(readlink "$link")" != "$target" ]] || continue
+      ln -sfn "$target" "$link" || return 1
+    fi
+    if [[ -n "$resolved" && "$resolved" != "$link" && ! "$resolved" -ef "$target" ]]; then
+      info "$name: selecting $target ahead of $resolved"
+    fi
+  done < <(while IFS=$'\t' read -r name target; do
+    [[ -f "$target" && -x "$target" ]] && printf '%s\t%s\n' "$name" "$target"
+  done <<< "$paths" | awk -F '\t' '!seen[$1]++')
+
+  for link in "$directory/"*; do
+    if [[ -L "$link" ]]; then
+      target=$(readlink "$link") || return 1
+    else
+      target=$(cli_provider_target "$link") || return 1
+      [[ "$target" != "$link" ]] || continue
+    fi
+    name=${link##*/}
+    if ! awk -F '\t' -v name="$name" -v target="$target" \
+        '$1 == name && $2 == target { found = 1 } END { exit !found }' <<< "$paths" \
+        || [[ ! -x "$target" ]]; then
+      rm -f "$link" || return 1
+    fi
+  done
+  setup_path_prepend "$directory"
+}
+
+# An npm global launcher resolves into its prefix's lib/node_modules tree.
+retire_npm_cli() {
+  local directory="$1" package_dir="$2" candidate="$3" name="$4" prefix package entry names chosen
+  prefix=${package_dir%%/lib/node_modules/*}
+  package=${package_dir#"$prefix/lib/node_modules/"}
+  [[ "$package" =~ ^(@[a-zA-Z0-9._-]+/)?[a-zA-Z0-9][a-zA-Z0-9._-]*$ \
+    && -O "$package_dir" && -w "${package_dir%/*}" && -x "$directory/npm" \
+    && "$candidate" -ef "$prefix/bin/$name" ]] || return 2
+  names=$(jq -er --arg package "$package" '
+    select(.name == $package) | .bin |
+    if type == "object" then keys[] elif type == "string" then ($package | split("/") | last) else empty end
+  ' "$package_dir/package.json") || return 2
+  grep -Fxq "${package##*/}" <<< "$names" && grep -Fxq "$name" <<< "$names" || return 2
+  while IFS= read -r entry; do
+    [[ "$entry" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]*$ && -x "$directory/$entry" ]] || return 2
+    # A package can supply several commands. Each needs a separate replacement.
+    chosen=$(cli_provider_target "$directory/$entry") || return 1
+    [[ ! "$chosen" -ef "$prefix/bin/$entry" ]] || return 2
+  done <<< "$names"
+  info "removing alternate npm package $package from $prefix"
+  "$directory/npm" uninstall --global --prefix "$prefix" --ignore-scripts "$package" </dev/null || return 1
+}
+
+retire_uv_cli() {
+  local directory="$1" root="$2" package="$3" command_name="$4" names entry chosen selected files=''
+  [[ -x "$directory/uv" && -f "$root/$package/uv-receipt.toml" && -O "$root/$package" ]] || return 2
+  names=$(UV_TOOL_DIR="$root" "$directory/uv" tool list --show-paths --color never </dev/null \
+    | awk -v package="$package" '$1 == "-" { if (matched) print $2; next } { matched = ($1 == package) }') || return 1
+  [[ -n "$names" ]] || return 2
+  selected=$(cli_provider_target "$directory/$command_name") || return 1
+  selected=$(realpath "$selected") || return 1
+  if [[ "$OS_KIND" == linux && "$selected" == /usr/bin/* ]]; then
+    files=$(dpkg-query -L "$package" 2>/dev/null || true)
+    grep -Fxq "$selected" <<< "$files" || files=''
+  fi
+  while IFS= read -r entry; do
+    [[ "$entry" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]*$ ]] || return 2
+    if [[ -x "$directory/$entry" ]]; then
+      chosen=$(cli_provider_target "$directory/$entry") || return 1
+      [[ ! "$chosen" -ef "$root/$package/bin/$entry" ]] || return 2
+    elif [[ ! -f "${selected%/*}/$entry" ]]; then
+      # The selected package may ship completion and platform scripts outside PATH.
+      awk -F / -v entry="$entry" '$NF == entry { found = 1 } END { exit !found }' <<< "$files" || return 2
+    fi
+  done <<< "$names"
+  info "removing alternate uv tool $package"
+  UV_TOOL_DIR="$root" "$directory/uv" tool uninstall "$package" </dev/null || return 1
+}
+
+# Retire independently installed commands after the chosen providers pass postflight.
+stage_reconcile_cli_providers() {
+  [[ "${PRESERVE_CLI_DUPLICATES:-0}" != 1 ]] || return 0
+  local directory="$HOME/.local/share/workspace-setup/bin" link name chosen candidate actual parent home kind result
+  local bun_bin="${BUN_INSTALL:-$HOME/.bun}/bin"
+  local cargo_root="${CARGO_INSTALL_ROOT:-${CARGO_HOME:-$HOME/.cargo}}" pkg scope
+  local uv_root="${UV_TOOL_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/uv/tools}"
+  local status=0
+  home=$(realpath "$HOME") || return 1
+  [[ ! -d "$uv_root" ]] || uv_root=$(realpath "$uv_root") || return 1
+  for link in "$directory/"*; do
+    [[ -f "$link" && -x "$link" ]] || continue
+    name=${link##*/}
+    chosen=$(cli_provider_target "$link") || return 1
+    while IFS= read -r candidate; do
+      [[ "$candidate" == /* && ! "$candidate" -ef "$link" && ! "$candidate" -ef "$chosen" ]] || continue
+      parent=${candidate%/*}
+      if [[ ! -e "$candidate" ]]; then
+        # A link beside its retired standalone executable can become dangling.
+        if [[ -L "$candidate" && -O "$parent" \
+          && ( "$parent" == "$HOME/.local/bin" || "$parent" == "$HOME/bin" || "$parent" == "$bun_bin" ) \
+          && "$(realpath "$parent")" == "$home/${parent#"$HOME/"}" ]]; then
+          actual=$(readlink "$candidate") || return 1
+          actual=${actual#"$parent/"}
+          if [[ "$actual" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]*$ && -x "$directory/$actual" ]]; then
+            rm -- "$candidate" || status=1
+          fi
+        fi
+        continue
+      fi
+      [[ -f "$candidate" && -x "$candidate" ]] || continue
+      # The OS, application bundles and project environments can ship their own tools.
+      case "$parent" in
+        /bin|/sbin|/usr/bin|/usr/sbin|*/.app/*|*/node_modules/.bin|*/.venv/bin) continue ;;
+      esac
+      actual=$(realpath "$candidate") || return 1
+      # The two RTK projects use the same executable and Cargo package names.
+      if [[ "$name" == rtk ]] && ! LC_ALL=C grep -aFq 'github.com/rtk-ai/rtk' "$actual"; then
+        warn "rtk: could not identify $candidate as Rust Token Killer"
+        continue
+      fi
+      case "$actual" in
+        "$home/"*/lib/node_modules/*)
+          pkg=${actual#*/lib/node_modules/}
+          if [[ "$pkg" == @*/* ]]; then
+            scope=${pkg%%/*}; pkg=${pkg#*/}
+            pkg="$scope/${pkg%%/*}"
+          else
+            pkg=${pkg%%/*}
+          fi
+          result=0
+          retire_npm_cli "$directory" "${actual%%/lib/node_modules/*}/lib/node_modules/$pkg" "$candidate" "$name" || result=$?
+          case "$result" in
+            0) [[ ! -e "$candidate" ]] || status=1; continue ;;
+            1) status=1; continue ;;
+          esac
+          ;;
+        "$uv_root"/*/bin/"$name")
+          pkg=${actual#"$uv_root/"}; pkg=${pkg%%/*}
+          if [[ ( "$pkg" == "$name" || "$pkg:$name" == azure-cli:az ) \
+            && "$actual" == "$uv_root/$pkg/bin/$name" ]]; then
+            result=0
+            retire_uv_cli "$directory" "$uv_root" "$pkg" "$name" || result=$?
+            case "$result" in
+              0) [[ ! -e "$candidate" ]] || status=1; continue ;;
+              1) status=1; continue ;;
+            esac
+          fi
+          ;;
+      esac
+      if [[ "$parent" == "$cargo_root/bin" && -f "$cargo_root/.crates2.json" && -x "$directory/cargo" ]]; then
+        pkg=$(jq -r --arg name "$name" '.installs | to_entries[] |
+          select(.value.bins | index($name)) | .key | split(" ")[0]' "$cargo_root/.crates2.json") || return 1
+        if [[ "$pkg" =~ ^[A-Za-z0-9][A-Za-z0-9_-]*$ ]]; then
+          info "removing alternate Cargo executable $name from $pkg"
+          "$directory/cargo" uninstall --root "$cargo_root" --bin "$name" "$pkg" </dev/null || status=1
+          [[ ! -e "$candidate" ]] || status=1
+          continue
+        fi
+      fi
+      if [[ "$parent" == "$HOME/.local/bin" || "$parent" == "$HOME/bin" || "$parent" == "$bun_bin" ]]; then
+        if [[ ! -L "$candidate" && -O "$candidate" && "$actual" == "$home/${candidate#"$HOME/"}" ]]; then
+          kind=$(LC_ALL=C od -An -tx1 -N4 "$candidate" | tr -d '[:space:]') || return 1
+          case "$kind" in
+            7f454c46|feedface|cefaedfe|feedfacf|cffaedfe|cafebabe|cafebabf)
+              info "removing standalone $name at $candidate"
+              rm -- "$candidate" || status=1
+              [[ ! -e "$candidate" ]] || status=1
+              continue ;;
+          esac
+        fi
+        warn "$name: alternate at $candidate has no supported uninstall method"
+      fi
+    done < <({ type -ap "$name" || true; printf '%s\n' "$HOME/.local/bin/$name" "$HOME/bin/$name" "$bun_bin/$name" "$cargo_root/bin/$name"; } | LC_ALL=C sort -u)
+    [[ -x "$link" && -x "$chosen" ]] || return 1
+  done
+  return "$status"
+}
+
 
 # install_verified_binary <label> <url> <expected sha256> <destination>
 # Downloads a single-binary release, refuses it unless it hashes to what the
@@ -102,6 +385,23 @@ install_upstream_archive_tool() {
   rm -rf "$tmp"
   return "$status"
 }
+
+install_rtk_deb() (
+  local arch="$1" repo tag tmp asset="rtk_$1.deb"
+  if ! apt_package_installed rtk || upstream_artifact_needed rtk /usr/bin/rtk /usr/bin/rtk --version; then
+    repo=$(upstream_project_repo rtk) || return 1
+    tag=$(upstream_latest_tag "$repo") || return 1
+    tmp=$(mktemp -d) || return 1
+    trap 'rm -rf "$tmp"' EXIT
+    upstream_fetch_verified_asset "$repo" "$tag" "$asset" "$tmp/$asset" || return 1
+    [[ "$(dpkg-deb -f "$tmp/$asset" Package)" == rtk \
+        && "$(dpkg-deb -f "$tmp/$asset" Architecture)" == "$arch" ]] || return 1
+    apt_report_removals install '' "$tmp/$asset" || return 1
+    apt_install_packages "$tmp/$asset" || return 1
+  fi
+  apt_package_installed rtk || return 1
+  /usr/bin/rtk --version </dev/null
+)
 
 remove_legacy_tmux() {
   if [[ "$PKGMGR" == brew ]]; then
@@ -303,8 +603,15 @@ register_third_party_apt_repos() {
     fi
   fi
 
+  if ! apt_repo_is_configured "$YAZI_APT_URI" \
+      && apt_trust_repo_key Yazi "$YAZI_KEY_URL" "$YAZI_KEYRING" "$YAZI_KEY_FINGERPRINT"; then
+    source_changed=$(apt_write_repo_sources /etc/apt/sources.list.d/yazi.sources \
+      "$YAZI_APT_URI" stable main "$arch" "$YAZI_KEYRING") || return 1
+    [[ -z "$source_changed" ]] || changed=1
+  fi
+
   # --- kubectl — the Kubernetes project's archive (pkgs.k8s.io). ---
-  if [[ "$(vendor_command_state kubectl kubectl "$KUBERNETES_APT_URI")" != foreign ]]; then
+  if [[ "$(vendor_command_state kubectl kubectl "$KUBERNETES_APT_URI" /usr/bin/kubectl)" != foreign ]]; then
     if kubernetes_uri=$(kubernetes_apt_uri) \
         && apt_trust_repo_key kubectl "$kubernetes_uri/Release.key" \
           "$KUBERNETES_KEYRING" "$KUBERNETES_KEY_FINGERPRINT"; then
@@ -325,7 +632,7 @@ register_third_party_apt_repos() {
     fi
   fi
 
-  if [[ "$(vendor_command_state google-cloud-cli gcloud "$GOOGLE_CLOUD_APT_URI")" != foreign ]] \
+  if [[ "$(vendor_command_state google-cloud-cli gcloud "$GOOGLE_CLOUD_APT_URI" /usr/bin/gcloud)" != foreign ]] \
      && apt_trust_repo_key 'Google Cloud CLI' "$GOOGLE_CLOUD_KEY_URL" \
         "$GOOGLE_CLOUD_KEYRING" "$GOOGLE_CLOUD_KEY_FINGERPRINT"; then
     # Google's kubectl package uses an epoch and otherwise wins over pkgs.k8s.io.
@@ -358,7 +665,7 @@ register_third_party_apt_repos() {
   fi
 
   # --- helm — helm.sh's current official archive (packages.buildkite.com). ---
-  if [[ "$(vendor_command_state helm helm "$HELM_APT_URI")" != foreign ]] \
+  if [[ "$(vendor_command_state helm helm "$HELM_APT_URI" /usr/bin/helm)" != foreign ]] \
      && apt_trust_repo_key helm "$HELM_KEY_URL" \
         "$HELM_KEYRING" "$HELM_KEY_FINGERPRINT"; then
     source_changed=$(apt_write_repo_sources /etc/apt/sources.list.d/helm-stable-debian.sources \
@@ -524,12 +831,18 @@ install_nodesource_package() {
 # archive that is meant to supply it.
 install_vendor_package() {
   local pkg="$1" cmd="$2" uri="$3" docs="$4"
-  case "$(vendor_command_state "$pkg" "$cmd" "$uri")" in
+  local path
+  if [[ "$pkg" == code ]]; then
+    path=$(command -v "$cmd" 2>/dev/null || true)
+  else
+    path="/usr/bin/$cmd"
+  fi
+  case "$(vendor_command_state "$pkg" "$cmd" "$uri" "$path")" in
     managed)
       apt_install_candidate "$pkg" || return 1
       ;;
     foreign)
-      warn "preserving $pkg from an unrecognized provider at $(command -v "$cmd")"
+      warn "preserving $pkg from an unrecognized provider at $path"
       ;;
     *)
       if ! apt_repo_is_configured "$uri"; then
@@ -684,7 +997,7 @@ stage_packages() {
     #    with a single index refresh covering whatever it adds.
     # Keep the verified provider across a Kubernetes minor's index replacement.
     local kubectl_state
-    kubectl_state=$(vendor_command_state kubectl kubectl "$KUBERNETES_APT_URI")
+    kubectl_state=$(vendor_command_state kubectl kubectl "$KUBERNETES_APT_URI" /usr/bin/kubectl)
     register_third_party_apt_repos || return 1
 
     # 2. apt selects current candidates for every declared package in one batch.
@@ -828,27 +1141,6 @@ stage_packages() {
       # published; the download is checked against GitHub's recorded digest.
       install_upstream_archive_tool ruff "ruff-${rust_triple}.tar.gz" "ruff-${rust_triple}/ruff"
 
-      # --- yazi (TUI file manager, not in apt) — .zip archive ---
-      # yazi ships two executables and both come from the same release, so the
-      # version yazi reports governs the pair.
-      if upstream_artifact_needed yazi "$HOME/.local/bin/yazi" "$HOME/.local/bin/yazi" --version; then
-        local tmp tag; tmp=$(mktemp -d)
-        if tag=$(upstream_latest_tag sxyazi/yazi) \
-            && upstream_fetch_verified_asset sxyazi/yazi "$tag" "yazi-${rust_triple}.zip" "$tmp/yazi.zip" \
-            && unzip -o "$tmp/yazi.zip" -d "$tmp" >/dev/null 2>&1 \
-            && upstream_place_artifact yazi \
-              "$tmp/yazi-${rust_triple}/yazi" "$HOME/.local/bin/yazi" \
-            && upstream_place_artifact yazi \
-              "$tmp/yazi-${rust_triple}/ya" "$HOME/.local/bin/ya"; then
-          ok "yazi → ~/.local/bin/yazi"
-        else
-          warn "yazi download or installation failed (skipped)"
-          rm -rf "$tmp"
-          return 1
-        fi
-        rm -rf "$tmp"
-      fi
-
       # --- toolbox commands this release's apt does not carry ---
       # Where apt has the package it owns the command; otherwise the upstream
       # release does. See APT_UPSTREAM_FALLBACKS.
@@ -875,6 +1167,7 @@ stage_packages() {
     local dpkg_arch; dpkg_arch=$(dpkg --print-architecture 2>/dev/null || true)
     case "$dpkg_arch" in
       amd64|arm64)
+        install_rtk_deb "$dpkg_arch" || return 1
         # The published checksum decides both questions at once: whether the
         # artifact needs installing and whether the one already there is the
         # current release. Nothing is downloaded when the bytes already match.
@@ -916,12 +1209,10 @@ stage_packages() {
     # --- apt name aliases: some apt packages install binaries under a different
     #     name than what the dotfiles or muscle memory expect. Create symlinks
     #     in ~/.local/bin/ so they're on PATH without requiring a bash alias. ---
-    # fd-find package provides `fdfind`, dotfiles call `fd`
-    ensure_local_command_alias fd fdfind
-    # bat package provides `batcat`, dotfiles call `bat`
-    ensure_local_command_alias bat batcat
-    # 7zip package provides `7z`, but the official 7-Zip binary is `7zz`
-    ensure_local_command_alias 7zz 7z
+    local alias_entry
+    for alias_entry in "${APT_COMMAND_ALIASES[@]}"; do
+      ensure_local_command_alias "${alias_entry%%:*}" "${alias_entry#*:}"
+    done
   fi
 
   # TERM describes the client terminal, not whether this host has a desktop.
@@ -929,4 +1220,5 @@ stage_packages() {
   # SSH session can run ncurses applications on a headless target.
   ensure_xterm_kitty_terminfo
   remove_legacy_tmux || warn "the legacy tmux package stays installed; postflight reports it"
+  stage_command_providers
 }

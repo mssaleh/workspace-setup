@@ -26,3 +26,4 @@ qdrant/skills/meta/qdrant-advisor	*	whole
 livekit/agent-skills	*	whole
 typesafe-ai/skills	*	whole
 assistant-ui/skills	*	whole
+cloudflare/skills	*	whole

@@ -88,7 +88,7 @@ fi
 # ── 4. Every declared archive is registered in that phase ──────────────────
 # A new vendor repository added to the install half would reintroduce exactly
 # the ordering defect this file exists to prevent.
-for archive in HELM CLAUDE_DESKTOP NODESOURCE KITWARE GITHUB_CLI GOOGLE_CLOUD AZURE_CLI; do
+for archive in HELM CLAUDE_DESKTOP NODESOURCE KITWARE GITHUB_CLI GOOGLE_CLOUD AZURE_CLI YAZI; do
   key_var="${archive}_KEY_URL"
   [[ -n "${!key_var:-}" ]] || fail "$key_var is not declared in the manifest"
   grep -q "\$$key_var" <<< "$register_body" \

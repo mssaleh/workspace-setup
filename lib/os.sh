@@ -85,6 +85,29 @@ setup_path_prepend() {
   PATH="$wanted${new_path:+:$new_path}"
 }
 
+cli_provider_launcher() {
+  printf '#!/bin/bash\n# workspace-setup target: %s\nexec %q "$@"\n' "$1" "$1"
+}
+
+# Report the installed executable behind a setup-owned launcher.
+cli_provider_target() {
+  local path="$1" target
+  if [[ "$path" == "$HOME/.local/share/workspace-setup/bin/"* && -f "$path" && ! -L "$path" ]]; then
+    target=$(sed -n '2s/^# workspace-setup target: //p' "$path") || return 1
+    if [[ "$target" == /* && "$(cat "$path")" == "$(cli_provider_launcher "$target")" ]]; then
+      printf '%s\n' "$target"
+      return
+    fi
+  fi
+  printf '%s\n' "$path"
+}
+
+cli_command_path() {
+  local resolved
+  resolved=$(command -v "$1" 2>/dev/null || true)
+  cli_provider_target "$resolved"
+}
+
 refresh_brew_environment() {
   local found
   found=$(find_brew 2>/dev/null || true)

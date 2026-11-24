@@ -65,24 +65,19 @@ done
 aws --version
 
 if apt_repo_is_configured "$AZURE_CLI_APT_URI"; then
-  printf '\n== Azure migration retains uv until the apt command works ==\n'
+  printf '\n== Azure migration retires the uv copy after verifying apt ==\n'
   uv tool install azure-cli
-  [[ "$(command -v az)" -ef "$HOME/.local/bin/az" ]]
-  sudo mv /usr/bin/az /usr/bin/az.qa-disabled
-  if stage_toolchains; then
-    printf 'FAIL: Azure migration accepted a missing apt command\n' >&2
-    exit 1
-  fi
-  uv tool list | awk '$1 == "azure-cli" { found = 1 } END { exit !found }'
   "$HOME/.local/bin/az" --version
-  sudo mv /usr/bin/az.qa-disabled /usr/bin/az
   /usr/bin/az --version
-  stage_toolchains
+  stage_command_providers
+  PRESERVE_CLI_DUPLICATES=1 stage_reconcile_cli_providers
+  [[ -x "$HOME/.local/bin/az" ]]
+  stage_reconcile_cli_providers
   if uv tool list | awk '$1 == "azure-cli" { found = 1 } END { exit !found }'; then
     printf 'FAIL: Azure migration retained the duplicate uv installation\n' >&2
     exit 1
   fi
-  [[ "$(command -v az)" -ef /usr/bin/az ]]
+  [[ "$(cli_command_path az)" -ef /usr/bin/az ]]
   az --version
 fi
 

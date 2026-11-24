@@ -14,6 +14,7 @@ mkdir -p "$HOME/.local/bin" "$TEST_TMP/providers"
 . "$TEST_ROOT/lib/log.sh"
 # shellcheck disable=SC1091
 . "$TEST_ROOT/lib/upstream.sh"
+. "$TEST_ROOT/lib/os.sh"
 # shellcheck disable=SC1091
 . "$TEST_ROOT/scripts/stage_packages.sh"
 
@@ -48,5 +49,38 @@ printf '%s\n' 'do not replace' > "$HOME/.local/bin/blocked-tool"
 install_executable_if_path_free \
   "$TEST_TMP/providers/downloaded-tool" "$HOME/.local/bin/blocked-tool" 'blocked tool'
 [[ "$(<"$HOME/.local/bin/blocked-tool")" == 'do not replace' ]]
+
+# Different package providers can win from the same isolated PATH.
+make_provider managed-bun
+make_provider managed-rg
+printf '#!/bin/sh\ncat "${0%%/*}/managed-bun.version"\n' > "$TEST_TMP/providers/managed-bun"
+printf '1.4.5\n' > "$TEST_TMP/providers/managed-bun.version"
+cp "$TEST_TMP/providers/managed-bun" "$HOME/.local/bin/bun"
+printf '1.4.0\n' > "$HOME/.local/bin/managed-bun.version"
+cp "$TEST_TMP/providers/managed-rg" "$HOME/.local/bin/rg"
+preferred_cli_paths() {
+  printf 'bun\t%s/providers/managed-bun\nrg\t%s/providers/managed-rg\n' "$TEST_TMP" "$TEST_TMP"
+}
+PATH="$HOME/.local/bin:$PATH"
+stage_command_providers
+stage_command_providers
+for tool in bun rg; do
+  [[ "$(cli_command_path "$tool")" -ef "$TEST_TMP/providers/managed-$tool" ]]
+  [[ -f "$HOME/.local/bin/$tool" && ! -L "$HOME/.local/bin/$tool" ]]
+done
+[[ "$(bun)" == 1.4.5 ]]
+
+# Retiring an independently installed binary also covers an alternate off PATH.
+mkdir -p "$HOME/bin" "$HOME/.bun/bin"
+cp /bin/bash "$HOME/bin/bash"
+cp /bin/bash "$HOME/.bun/bin/bash"
+preferred_cli_paths() { printf 'bash\t/bin/bash\n'; }
+stage_command_providers
+PRESERVE_CLI_DUPLICATES=1 stage_reconcile_cli_providers
+[[ -x "$HOME/bin/bash" && -x "$HOME/.bun/bin/bash" ]]
+stage_reconcile_cli_providers
+[[ ! -e "$HOME/bin/bash" && ! -e "$HOME/.bun/bin/bash" ]]
+[[ "$(command -v bash)" -ef /bin/bash ]]
+stage_reconcile_cli_providers
 
 printf 'package alias tests: ok\n'

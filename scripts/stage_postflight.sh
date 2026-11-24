@@ -79,7 +79,7 @@ postflight_nodejs_is_nodesource_only() {
 # installs rather than a same-named program: check both path and publisher.
 postflight_parity_command() {
   local name="$1" expected="$2" resolved
-  resolved=$(command -v "$name" 2>/dev/null || true)
+  resolved=$(cli_command_path "$name")
   if [[ -z "$resolved" ]]; then
     postflight_fail "$name is not on PATH"
   elif [[ -e "$expected" && "$resolved" -ef "$expected" ]]; then
@@ -496,16 +496,14 @@ postflight_packages() {
   fi
 
   local alias_name provider_name alias_failures=()
-  while read -r alias_name provider_name; do
+  for entry in "${APT_COMMAND_ALIASES[@]}"; do
+    alias_name=${entry%%:*}
+    provider_name=${entry#*:}
     if command -v "$provider_name" >/dev/null 2>&1 \
         && ! command -v "$alias_name" >/dev/null 2>&1; then
       alias_failures+=("$alias_name→$provider_name")
     fi
-  done <<'ALIASES'
-fd fdfind
-bat batcat
-7zz 7z
-ALIASES
+  done
   if ((${#alias_failures[@]} == 0)); then
     postflight_pass "Linux package command names are usable"
   else
@@ -546,7 +544,7 @@ postflight_shell_paths() {
   else
     postflight_fail "bash uv PATH winner is wrong (got '${uv_path:-missing}')"
   fi
-  if [[ "$rustup_path" == "$HOME/.cargo/bin/rustup" ]]; then
+  if [[ -n "$rustup_path" && "$rustup_path" -ef "$HOME/.cargo/bin/rustup" ]]; then
     postflight_pass "bash resolves the rustup-owned Rust toolchain"
   else
     postflight_fail "bash rustup PATH resolution is wrong (got '${rustup_path:-missing}')"
@@ -572,7 +570,7 @@ postflight_shell_paths() {
     else
       postflight_fail "zsh uv PATH winner is wrong (got '${uv_path:-missing}')"
     fi
-    if [[ "$rustup_path" == "$HOME/.cargo/bin/rustup" ]]; then
+    if [[ -n "$rustup_path" && "$rustup_path" -ef "$HOME/.cargo/bin/rustup" ]]; then
       postflight_pass "zsh resolves the rustup-owned Rust toolchain"
     else
       postflight_fail "zsh rustup PATH resolution is wrong (got '${rustup_path:-missing}')"
@@ -580,6 +578,35 @@ postflight_shell_paths() {
   fi
 
   postflight_vendor_toolchain_paths
+  postflight_command_providers
+}
+
+postflight_command_providers() {
+  local directory="$HOME/.local/share/workspace-setup/bin" shell startup output
+  [[ -d "$directory" ]] || return 0
+  local probe='
+    for link in "$HOME/.local/share/workspace-setup/bin/"*; do
+      [ -f "$link" ] && [ -x "$link" ] || continue
+      name=${link##*/}
+      actual=$(command -v "$name" 2>/dev/null || true)
+      case "$actual" in /*|"") ;; *) continue ;; esac
+      [ "$actual" -ef "$link" ] || printf "%s " "$name"
+    done'
+  for shell in bash sh zsh; do
+    case "$shell" in
+      bash) startup='. "$HOME/.bashrc" >/dev/null' ;;
+      sh) startup='. "$HOME/.profile" >/dev/null' ;;
+      zsh)
+        [[ "$OS_KIND" == macos ]] || continue
+        startup='setopt nonomatch; source "$HOME/.zshenv" >/dev/null; source "$HOME/.zprofile" >/dev/null' ;;
+    esac
+    if output=$(env -i HOME="$HOME" USER="${USER:-$(id -un)}" PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+        "/bin/$shell" -c "$startup && { $probe; }") && [[ -z "$output" ]]; then
+      postflight_pass "$shell resolves the selected command providers"
+    else
+      postflight_fail "$shell could not resolve the selected providers: ${output:-startup failed}"
+    fi
+  done
 }
 
 # Source one installed dotfile from a throwaway HOME and print the probe
@@ -888,7 +915,7 @@ postflight_upstream_tools() {
     if [[ "$OS_KIND" == macos && "$agent" == opencode ]]; then
       artifact="$BREW_PREFIX/bin/$agent"
     fi
-    resolved=$(command -v "$agent" 2>/dev/null || true)
+    resolved=$(cli_command_path "$agent")
     if [[ -x "$artifact" && -n "$resolved" && "$resolved" -ef "$artifact" ]] \
         && "$artifact" --version </dev/null >/dev/null 2>&1; then
       postflight_pass "$agent native artifact runs and resolves on PATH"
@@ -901,7 +928,7 @@ postflight_upstream_tools() {
   elif [[ -x "$HOME/.opencode/bin/opencode" && -x "$HOME/.local/bin/opencode" ]] \
       && { [[ "$HOME/.local/bin/opencode" -ef "$HOME/.opencode/bin/opencode" ]] \
         || cmp -s "$HOME/.opencode/bin/opencode" "$HOME/.local/bin/opencode"; } \
-      && [[ "$(command -v opencode)" -ef "$HOME/.local/bin/opencode" ]] \
+      && [[ "$(cli_command_path opencode)" -ef "$HOME/.local/bin/opencode" ]] \
       && "$HOME/.local/bin/opencode" --version </dev/null >/dev/null 2>&1; then
     postflight_pass "OpenCode native artifact runs and resolves on PATH"
   else
@@ -909,8 +936,9 @@ postflight_upstream_tools() {
   fi
   if [[ "$OS_KIND" == linux ]]; then
     local linux_upstream_missing=() artifact name probe entry unrunnable=""
-    local upstream_names=(zmx ruff yazi ya himalaya yq cosign apex git-credential-manager)
+    local upstream_names=(zmx ruff himalaya yq cosign apex git-credential-manager)
     for entry in "${APT_UPSTREAM_FALLBACKS[@]}"; do
+      apt-cache show "${entry%%:*}" >/dev/null 2>&1 && continue
       [[ -e "$HOME/.local/bin/${entry#*:}" ]] && upstream_names+=("${entry#*:}")
     done
     for name in "${upstream_names[@]}"; do
@@ -1198,7 +1226,7 @@ postflight_containers() {
 }
 
 postflight_cloud_clis() {
-  local tool expected resolved output
+  local tool expected resolved target output
   for tool in gh aws gcloud az kubectl cf gddy openai ant; do
     resolved=$(command -v "$tool" 2>/dev/null || true)
     if [[ -z "$resolved" ]]; then
@@ -1216,7 +1244,8 @@ postflight_cloud_clis() {
       gcloud) [[ "$OS_KIND" != macos ]] || expected="$HOME/.local/share/google-cloud-sdk/bin/gcloud" ;;
       az) [[ "$OS_KIND" != macos ]] || expected="$BREW_PREFIX/bin/az" ;;
     esac
-    if [[ -n "$expected" && ! "$resolved" -ef "$expected" ]]; then
+    target=$(cli_provider_target "$resolved")
+    if [[ -n "$expected" && ! "$target" -ef "$expected" ]]; then
       postflight_fail "$tool resolves to $resolved; expected $expected"
       continue
     fi
@@ -1253,6 +1282,28 @@ postflight_cloud_clis() {
   fi
 }
 
+postflight_toolbox_commands() {
+  local tool failures=()
+  for tool in bun yazi ya rtk; do
+    "$tool" --version </dev/null >/dev/null 2>&1 || failures+=("$tool")
+  done
+  bunx --help </dev/null >/dev/null 2>&1 || failures+=(bunx)
+  if [[ "$OS_KIND" == linux ]] && ! apt_package_installed yazi; then
+    failures+=("Yazi apt package")
+  fi
+  # Rust Type Kit also publishes an rtk command. Token Killer provides gain.
+  # https://www.rtk-ai.app/docs/getting-started/installation/#name-collision-warning
+  if command -v rtk >/dev/null 2>&1 \
+      && ! rtk gain --help </dev/null 2>/dev/null | grep '^Usage: rtk gain' >/dev/null; then
+    failures+=("RTK Token Killer")
+  fi
+  if ((${#failures[@]})); then
+    postflight_fail "unusable toolbox commands: ${failures[*]}"
+  else
+    postflight_pass "Bun, bunx, Yazi, ya, and RTK Token Killer run"
+  fi
+}
+
 stage_postflight() {
   POSTFLIGHT_PASSES=0
   POSTFLIGHT_FAILURES=0
@@ -1270,6 +1321,7 @@ stage_postflight() {
   postflight_shell_env
   postflight_completions
   postflight_upstream_tools
+  postflight_toolbox_commands
   postflight_cloud_clis
   postflight_headless_credentials
   postflight_containers

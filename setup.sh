@@ -44,6 +44,7 @@
 #   CONTAINER_START — set to 1 to start Apple Container; default is installed,
 #                configured, and stopped for on-demand laptop use
 #   SKIP_LIBREOFFICE — set to 1 to skip LibreOffice (both platforms)
+#   PRESERVE_CLI_DUPLICATES — set to 1 to keep alternate CLI installations
 #   CONFIG_ADOPT — replace preserved conflicts and kept shell files with the
 #                shipped version. Either `all` or a colon-separated list of
 #                paths or basenames. The existing content is copied to
@@ -84,6 +85,8 @@ Usage: bash setup.sh [host | agents [OPTIONS]]
   host          Provision and verify the host only.
   agents        Synchronize skills, MCP servers, and plugins without provisioning.
   --help        Show this help without changing the host.
+
+Set PRESERVE_CLI_DUPLICATES=1 to keep existing alternate CLI installations.
 
 Agent options: --dry-run, --update, --only skills|mcp|plugins|verify,
                --prune-skills, --prune-plugin-cache, --prune-duplicate-mcp.
@@ -418,6 +421,7 @@ main() {
   if [[ "$OS_KIND" == linux ]]; then
     stage "apparmor: converge Edge profile"          stage_apparmor
   fi
+  stage "commands: select installed providers"      stage_command_providers
 
   if [[ "$OS_KIND" == macos ]]; then
     if ! stage "postflight: verify the converged host" stage_macos_postflight; then
@@ -426,6 +430,7 @@ main() {
   elif ! stage "postflight: verify the converged host" stage_postflight; then
     fail "postflight found an incomplete or conflicting setup; review the checks above"
   fi
+  stage "commands: retire alternate installations" stage_reconcile_cli_providers
 
   if [[ "$SETUP_SCOPE" == all ]]; then
     stage "agents: skills, MCP servers, and plugins" stage_agents

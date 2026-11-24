@@ -6,6 +6,7 @@
 stage_toolchains() {
   mkdir -p "$HOME/.local/bin"
   export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH:$HOME/.npm/packages/bin"
+  setup_path_prepend "$HOME/.local/share/workspace-setup/bin"
 
   # --- rustup ---
   if [[ "$OS_KIND" == macos ]]; then
@@ -73,13 +74,6 @@ stage_toolchains() {
   fi
 
   # --- Python applications owned by uv ---
-  # Inspect installed tools before migrating Azure to its apt provider.
-  local uv_installed=""
-  if [[ -x "$HOME/.local/bin/uv" ]]; then
-    uv_installed=$("$HOME/.local/bin/uv" tool list 2>/dev/null | awk '/^[a-z]/ { print $1 }')
-  fi
-  # azure-cli is Homebrew-owned on macOS; adding uv's copy there would put a
-  # second launcher ahead of Homebrew's on PATH.
   local uv_tools=("${UV_TOOLS_COMMON[@]}")
   if [[ "$OS_KIND" == linux ]]; then
     uv_tools+=("${UV_TOOLS_LINUX[@]}")
@@ -87,16 +81,12 @@ stage_toolchains() {
     uv_tools+=("${UV_TOOLS_MACOS[@]}")
   fi
 
-  local tool tool_name
+  local tool
   for tool in "${uv_tools[@]}"; do
-    tool_name=${tool%%\[*}
-    if [[ "$tool_name" == azure-cli ]] && apt_repo_is_configured "$AZURE_CLI_APT_URI"; then
+    if [[ "$tool" == azure-cli ]] && apt_repo_is_configured "$AZURE_CLI_APT_URI"; then
       if ! apt_package_installed azure-cli || ! /usr/bin/az --version >/dev/null 2>&1; then
-        warn "Azure CLI apt installation is unusable; retaining the uv copy"
+        warn "Azure CLI apt installation is unusable"
         return 1
-      fi
-      if grep -Fx azure-cli >/dev/null <<<"$uv_installed"; then
-        "$HOME/.local/bin/uv" tool uninstall azure-cli || return 1
       fi
       continue
     fi
@@ -334,16 +324,28 @@ install_cloud_clis() {
   rm -rf "$tmp"
   ((status == 0)) || return 1
   "$HOME/.local/bin/aws" --version || return 1
+  install_managed_npm_tools
+}
 
+install_managed_npm_tools() {
   # An explicit user prefix works before stage_npm_config on a fresh host.
-  for tool in "${NPM_TOOLS_COMMON[@]}"; do
+  local tool script_args npm_tools=("${NPM_TOOLS_COMMON[@]}")
+  [[ "$OS_KIND" != linux ]] || npm_tools+=("${NPM_TOOLS_LINUX[@]}")
+  for tool in "${npm_tools[@]}"; do
+    script_args=()
+    # Bun uses postinstall to expose its platform binary. npm 12 blocks that hook by default.
+    [[ "$tool" != bun ]] || script_args=(--allow-scripts=bun)
     if [[ ! -x "$HOME/.npm/packages/bin/$tool" ]] \
         || ! npm ls --global --prefix "$HOME/.npm/packages" --depth=0 --json "$tool" \
           | jq -e --arg name "$tool" '.dependencies[$name].version' >/dev/null; then
-      npm install --global --prefix "$HOME/.npm/packages" "$tool@latest" </dev/null || return 1
+      npm install --global --prefix "$HOME/.npm/packages" ${script_args[@]+"${script_args[@]}"} "$tool@latest" </dev/null || return 1
     else
-      npm update --global --prefix "$HOME/.npm/packages" --tag=latest "$tool" </dev/null || return 1
+      npm update --global --prefix "$HOME/.npm/packages" --tag=latest \
+        ${script_args[@]+"${script_args[@]}"} "$tool" </dev/null || return 1
+      if [[ "$tool" == bun ]] && ! "$HOME/.npm/packages/bin/bun" --version </dev/null >/dev/null 2>&1; then
+        npm rebuild --global --prefix "$HOME/.npm/packages" --allow-scripts=bun bun </dev/null || return 1
+      fi
     fi
-    "$HOME/.npm/packages/bin/$tool" --version || return 1
+    "$HOME/.npm/packages/bin/$tool" --version </dev/null || return 1
   done
 }

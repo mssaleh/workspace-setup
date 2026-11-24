@@ -3,8 +3,7 @@
 #
 # This file describes who owns each installed capability. It is part of the
 # disposable setup payload and is never copied into the configured machine.
-# The stages consume these arrays; no runtime receipt or managed-state file is
-# created under $HOME.
+# The stages consume these arrays and detect packages from installed artifacts.
 # shellcheck disable=SC2034 # arrays are consumed by separately sourced stages
 
 # Host runtime release lines; package managers select their current patches.
@@ -15,12 +14,14 @@ PYTHON_MINOR=3.14
 # brew, so it carries nothing a Mac does not want: xsel is an X11 clipboard
 # client and lives in PACKAGES_APT alone.
 #
-# These taps are maintained by the software's authors. The core toolbox below
-# uses Homebrew as a fallback; catalog membership does not imply vendor ownership.
+# These taps are maintained by the software's authors. Homebrew also supplies
+# the baseline toolbox below.
 # https://developers.openai.com/api/docs/libraries/openai-cli
 # https://platform.claude.com/docs/en/cli-sdks-libraries/cli/quickstart
 # https://opencode.ai/v2/docs/
 BREW_TAPS=(
+  oven-sh/bun
+  rtk-ai/tap
   neurosnap/tap
   ttscoff/thelab
   openai/tools
@@ -37,6 +38,7 @@ PACKAGES_BREW=(
   direnv
   cmake ninja
   "node@$NODE_MAJOR" "python@$PYTHON_MINOR"
+  oven-sh/bun/bun rtk-ai/tap/rtk
   helm kubernetes-cli cosign container-compose
   ffmpeg poppler nano
   himalaya ncdu smartmontools pkgconf
@@ -70,6 +72,7 @@ CHATGPT_MACOS_DOWNLOAD_URL=https://persistent.oaistatic.com/codex-app-prod/Codex
 CLAUDE_MACOS_RELEASES_URL=https://downloads.claude.ai/releases/darwin/universal/RELEASES.json
 MACCY_MACOS_DOWNLOAD_URL=https://github.com/p0deje/Maccy/releases/latest/download/Maccy.app.zip
 GOOGLE_CLOUD_MACOS_DOWNLOAD_BASE=https://dl.google.com/dl/cloudsdk/channels/rapid/downloads
+GOOGLE_CLOUD_MACOS_COMMANDS=(gcloud bq gsutil git-credential-gcloud.sh docker-credential-gcloud)
 
 macos_app_path() {
   local entry
@@ -86,7 +89,7 @@ macos_app_path() {
 # explicitly below instead of being smuggled into this array.
 PACKAGES_APT=(
   bash-completion coreutils
-  fd-find bat ripgrep zoxide fzf
+  fd-find bat ripgrep zoxide fzf yazi
   git lazygit gh shellcheck
   git-filter-repo pre-commit git-delta
   rsync rclone nmap wget curl
@@ -124,7 +127,7 @@ PACKAGES_APT=(
 UPSTREAM_RELEASE_PROJECTS=(
   zmx:neurosnap/zmx
   ruff:astral-sh/ruff
-  yazi:sxyazi/yazi
+  rtk:rtk-ai/rtk
   himalaya:pimalaya/himalaya
   copilot:github/copilot-cli
   git-credential-manager:git-ecosystem/git-credential-manager
@@ -144,6 +147,15 @@ UPSTREAM_RELEASE_PROJECTS=(
 # Packages with upstream providers when the configured apt archive lacks them.
 # Each entry maps the package to the command installed into ~/.local/bin.
 APT_UPSTREAM_FALLBACKS=(git-delta:delta eza:eza lazygit:lazygit)
+APT_COMMAND_ALIASES=(fd:fdfind bat:batcat 7zz:7z)
+
+# CLI packages installed outside the toolbox batch.
+APT_CLI_PACKAGES=(nodejs kubectl helm google-cloud-cli azure-cli rtk docker-ce-cli code)
+
+# Commands whose declared installers expose them in ~/.local/bin.
+LOCAL_CLI_COMMON=(uv uvx aws aws_completer claude codex copilot gddy agy markitdown)
+LOCAL_CLI_LINUX=(zmx ruff himalaya yq cosign apex git-credential-manager opencode openai ant kitty kitten)
+LOCAL_CLI_MACOS=(ruff kitty kitten)
 
 # Python applications installed with `uv tool install`, which gives each its own
 # environment and a launcher in ~/.local/bin. Preferred over pipx or a shared
@@ -157,6 +169,7 @@ UV_TOOLS_MACOS=(ruff)
 UV_TOOLS_LINUX=(azure-cli)
 
 NPM_TOOLS_COMMON=(cf)
+NPM_TOOLS_LINUX=(bun)
 AWS_CLI_INSTALL_URL=https://awscli.amazonaws.com/v2/install.sh
 CLAUDE_INSTALL_URL=https://claude.ai/install.sh
 CODEX_INSTALL_URL=https://chatgpt.com/codex/install.sh
@@ -225,12 +238,12 @@ PROVIDERS_MACOS_UPSTREAM=(apple-container-signed-pkg rosetta google-cloud-cli vi
 # macOS gets: Ubuntu's `yq` is kislyuk's jq wrapper rather than the mikefarah
 # program, and its `cosign` is a major behind. Both come from the upstream
 # release instead — see YQ_RELEASE_BASE and COSIGN_RELEASE_BASE above.
-PROVIDERS_LINUX_UPSTREAM=(zmx ruff yazi himalaya yq cosign git-credential-manager apex uv-standalone claude codex copilot opencode openai ant)
+PROVIDERS_LINUX_UPSTREAM=(zmx ruff himalaya yq cosign git-credential-manager apex uv-standalone claude codex copilot opencode openai ant)
 # Capabilities the distribution either does not package or packages too far
 # behind to use, taken from the vendor's own signed archive instead.
 PROVIDERS_LINUX_OFFICIAL_REPO=(
   kubectl helm docker-engine docker-compose-v2 claude-desktop nodejs
-  cmake gh chatgpt code google-cloud-cli azure-cli
+  cmake gh chatgpt code google-cloud-cli azure-cli yazi
 )
 
 # Equivalent application packages: apt package, store, application id.
@@ -275,6 +288,12 @@ KUBERNETES_STABLE_URL=https://dl.k8s.io/release/stable.txt
 KUBERNETES_APT_URI=https://pkgs.k8s.io/core:/stable:
 KUBERNETES_KEYRING=/etc/apt/keyrings/kubernetes-apt-keyring.gpg
 KUBERNETES_KEY_FINGERPRINT=DE15B14486CD377B9E876E1A234654DA9A296436
+
+# https://yazi-rs.github.io/docs/installation/#debian-and-ubuntu
+YAZI_APT_URI=https://yazi-rs.github.io/builds/
+YAZI_KEY_URL=${YAZI_APT_URI}yazi-keyring.gpg
+YAZI_KEY_FINGERPRINT=B77B412E5B653539B78695DC9243857960560E6C
+YAZI_KEYRING=/usr/share/keyrings/yazi-keyring.gpg
 
 # helm. Ubuntu does not publish a binary package by this name;
 # the Emacs framework owns `helm` as a source package and ships it as

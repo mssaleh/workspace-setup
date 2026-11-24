@@ -151,10 +151,6 @@ upstream_binary_is_current "$TEST_TMP/nonexistent" "$sum" \
 fake_tool yazi "$(printf 'Yazi\n    Version: 26.8.15 (1f3588d 2026-08-15)')"
 [[ "$(upstream_installed_version "$HOME/.local/bin/yazi" --version)" == 26.8.15 ]] \
   || fail_test 'the version on the line after a banner was not read'
-STUB_PUBLISHED=26.9.1
-[[ "$(decide yazi)" == upgrade ]] || fail_test 'yazi behind its release was not upgraded'
-STUB_PUBLISHED=26.8.15
-[[ "$(decide yazi)" == skip ]] || fail_test 'a current yazi was replaced'
 
 # HTTP/2 lowercases header names; HTTP/1.1, as through many proxies, does not.
 # Ubuntu's mawk and macOS awk have no case-insensitive matching switch.

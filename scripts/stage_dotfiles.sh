@@ -104,8 +104,8 @@ bash_path_probe() {
     EXPECTED_BREW="$expected_brew" PATH=/usr/bin:/bin:/usr/sbin:/sbin \
     /bin/bash --noprofile --norc -c '
       . "$1"
-      [[ "$(command -v uv 2>/dev/null)" == "$HOME/.local/bin/uv" ]] &&
-      [[ "$(command -v rustup 2>/dev/null)" == "$HOME/.cargo/bin/rustup" ]] &&
+      [[ "$(command -v uv 2>/dev/null)" -ef "$HOME/.local/bin/uv" ]] &&
+      [[ "$(command -v rustup 2>/dev/null)" -ef "$HOME/.cargo/bin/rustup" ]] &&
       [[ -z "$EXPECTED_BREW" || "$(command -v brew 2>/dev/null)" == "$EXPECTED_BREW" ]]
     ' bash "$1" >/dev/null 2>&1
 }
@@ -163,7 +163,7 @@ shell_legacy_ds_converge() {
 
 profile_path_probe() {
   env -i HOME="$HOME" USER="${USER:-$(id -un)}" PATH=/usr/bin:/bin:/usr/sbin:/sbin \
-    /bin/sh -c '. "$1"; [ "$(command -v uv 2>/dev/null)" = "$HOME/.local/bin/uv" ] && [ "$(command -v rustup 2>/dev/null)" = "$HOME/.cargo/bin/rustup" ]' \
+    /bin/sh -c '. "$1"; [ "$(command -v uv 2>/dev/null)" -ef "$HOME/.local/bin/uv" ] && [ "$(command -v rustup 2>/dev/null)" -ef "$HOME/.cargo/bin/rustup" ]' \
     sh "$1" >/dev/null 2>&1
 }
 
@@ -181,8 +181,8 @@ zsh_path_probe() {
     PATH=/usr/bin:/bin:/usr/sbin:/sbin /bin/zsh -dfc '
       [[ "$1" == "$HOME/.zshenv" ]] || source "$HOME/.zshenv"
       source "$1"
-      [[ "$(command -v uv 2>/dev/null)" == "$HOME/.local/bin/uv" ]] &&
-      [[ "$(command -v rustup 2>/dev/null)" == "$HOME/.cargo/bin/rustup" ]] &&
+      [[ "$(command -v uv 2>/dev/null)" -ef "$HOME/.local/bin/uv" ]] &&
+      [[ "$(command -v rustup 2>/dev/null)" -ef "$HOME/.cargo/bin/rustup" ]] &&
       [[ "$(command -v brew 2>/dev/null)" == "$EXPECTED_BREW" ]]
     ' zsh "$1" >/dev/null 2>&1
 }
@@ -496,8 +496,7 @@ stage_npm_config() {
   rm -f "$tmp"
 }
 
-# The directory is provisioned; snippet contents never are. What is enforced is
-# the part that can be got wrong silently: the mode on a file full of tokens.
+# Keep host-local snippets private and install setup's PATH snippet.
 stage_shell_env() {
   local dir="$HOME/.config/shell" env_dir="$HOME/.config/shell/env.d"
   local repo="$1" file mode
@@ -537,6 +536,10 @@ stage_shell_env() {
     fi
   done < <(find "$env_dir" -mindepth 1 -maxdepth 1 -print0)
 
+  if [[ -d "$HOME/.local/share/workspace-setup/bin" ]]; then
+    install_repo_config "$repo" dotfiles/config/shell/workspace-setup-path.sh \
+      "$env_dir/99-workspace-setup-path.sh" 0600 || return 1
+  fi
   install_repo_config "$repo" dotfiles/config/shell/README "$dir/README"
 }
 

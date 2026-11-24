@@ -12,8 +12,8 @@ This is where a secret belongs when the tool that needs it reads an environment
 variable and offers no credential store of its own. A tool that has a file
 store should keep using it.
 
-The directory is provisioned; its contents never are. Nothing here is shared
-between machines, backed up by this setup, or replaced by a later run.
+Setup maintains 99-workspace-setup-path.sh for command selection. The other
+snippets belong to you and stay on this host.
 
 
 Format
