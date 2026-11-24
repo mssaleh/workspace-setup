@@ -762,6 +762,13 @@ shadcn, Pydantic, LlamaIndex, CopilotKit, Temporal, Qdrant, LiveKit, TypeSafe,
 assistant-ui, and [Cloudflare](https://github.com/cloudflare/skills).
 The Cloudflare collection includes the `cf-cli` skill.
 
+The toolbox selections in [the skills manifest](manifests/skills.tsv) teach
+GitHub CLI, uv, Ruff, Bun, fd, ripgrep, fzf, RTK, jq, yq, Pandoc, ShellCheck,
+FFmpeg, Docker and Compose, and Google Cloud CLI. The AWS skill covers CLI
+sign-in and profile selection. Setup fetches the named skills from Skills.sh
+publishers through `npx skills`. Run `bash setup.sh agents --only skills` to
+sync them on an existing host.
+
 The skills CLI owns the shared payloads and lock. An ordinary run installs
 missing sources or payloads; `--update` refreshes declared collections and
 discovers newly added upstream skills. It does not refresh unrelated sources.
@@ -879,15 +886,18 @@ These are prefix rules that stop accidental package changes, not a boundary:
 `sudo apt-get install`, options before the subcommand (`apt-get -y install`)
 and environment-prefixed commands do not match them.
 
-## Apple Container agent skill
+## Bundled agent skills
 
-Claude Code and Codex both discover skills at `<agent-home>/skills/<name>/`, so the setup converges one source tree into both agent homes:
+Host setup installs the bundled `SKILL.md` files into each agent's native skills directory.
 
-| Skill | Installed to | When |
+| Skill | Agents | When |
 |---|---|---|
-| `apple-container-amd64` | `~/.claude/skills/` and `~/.codex/skills/` | macOS, unless `SKIP_CONTAINER=1` |
+| `workspace-tools` | Claude Code, Codex, OpenCode, Copilot | Both platforms |
+| `apple-container-amd64` | Claude Code, Codex | macOS, unless `SKIP_CONTAINER=1` |
 
-It describes Apple's `container` CLI, Rosetta-translated `linux/amd64`
+`workspace-tools` highlights tools for search, diffs, documents, and terminal
+workflows with one example per command.
+`apple-container-amd64` describes Apple's `container` CLI, Rosetta-translated `linux/amd64`
 builds, native builder sizing, current build-context handling, and the optional
 third-party `container-compose` workflow. It is installed only on macOS.
 
@@ -1119,7 +1129,8 @@ workspace-setup/
 │   ├── claude/settings.json       # permissions.deny denylist
 │   ├── codex/rules/default.rules  # Starlark prefix_rule() denylist
 │   ├── agents/skills/             # skills converged into every agent home
-│   │   └── apple-container-amd64/ # SKILL.md + scripts/optimize-builder.sh
+│   │   ├── apple-container-amd64/ # SKILL.md + scripts/optimize-builder.sh
+│   │   └── workspace-tools/       # CLI and TUI quick reference
 │   └── config/                    # kitty/, bat/, yazi/, gh/, opencode/, container/
 │       ├── environment.d/         # Linux OpenSSH-agent environment
 │       ├── shell/README           # host-local snippets and the managed PATH hook

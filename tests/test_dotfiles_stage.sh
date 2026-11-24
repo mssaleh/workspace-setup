@@ -101,10 +101,13 @@ grep -Fq '# user preference' "$HOME/.bashrc"
 cp "$TEST_ROOT/dotfiles/bashrc" "$HOME/.bashrc"
 rm "$HOME/.local/bin/uv" "$HOME/.cargo/bin/rustup" "$HOME/.cargo/env"
 
-# Both agents must find the skill in their own home, and its helper script must
-# stay executable so an agent can actually run it. The skill describes Apple
-# Container, so it is installed on macOS only — a Linux host runs Docker and
-# the skill tells agents never to emit docker commands.
+# Each agent discovers the toolbox skill in its native directory.
+for agent_home in "$HOME/.claude" "$HOME/.codex" "$HOME/.config/opencode" "$HOME/.copilot"; do
+  cmp "$TEST_ROOT/dotfiles/agents/skills/workspace-tools/SKILL.md" \
+    "$agent_home/skills/workspace-tools/SKILL.md"
+done
+
+# The Apple Container skill and its executable helper are macOS-only.
 if [[ "$OS_KIND" == macos ]]; then
   for agent_home in "$HOME/.claude" "$HOME/.codex"; do
     [[ -f "$agent_home/skills/apple-container-amd64/SKILL.md" ]]

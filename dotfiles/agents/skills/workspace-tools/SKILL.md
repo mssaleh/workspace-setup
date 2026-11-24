@@ -1,0 +1,30 @@
+---
+name: workspace-tools
+description: Available CLI and TUI tools include bat, bun, cf, chafa, delta, eza, fd, fzf, gh, jq, lazygit, markitdown, ncdu, pandoc, rclone, rg, rsync, rtk, ruff, shellcheck, uv, yazi, yq, zmx, zoxide
+---
+
+- `bat` – read highlighted lines · Example: `bat --paging=never --line-range :80 README.md`
+- `bun` – run JavaScript tests · Example: `bun test`
+- `cf` – discover Cloudflare CLI operations · Example: `cf cli search 'list workers scripts'`
+- `chafa` – preview images in a terminal · Example: `chafa --size 40x20 logo.png`
+- `delta` – highlight diffs · Example: `git diff --no-color | delta --paging=never`
+- `eza` – show a directory tree · Example: `eza --tree --level=2 src`
+- `fd` – find files by name or extension · Example: `fd -e ts . src`
+- `fzf` – fuzzy match without opening the TUI · Example: `fd -t f | fzf --filter config`
+- `gh` – query GitHub pull requests · Example: `gh pr list --json number,title`
+- `jq` – extract JSON fields · Example: `jq -r '.name' package.json`
+- `lazygit` – inspect and stage Git changes in a TUI · Example: `lazygit`
+- `markitdown` – extract Markdown from documents · Example: `markitdown report.docx`
+- `ncdu` – inspect disk usage in a read-only TUI · Example: `ncdu -r .`
+- `pandoc` – convert between document formats · Example: `pandoc README.md -o readme.html`
+- `rclone` – list files on a storage remote · Example: `rclone lsf remote:path`
+- `rg` – search code by type · Example: `rg -n -t sh 'TODO'`
+- `rsync` – preview a directory sync · Example: `rsync -avn source/ dest/`
+- `rtk` – compact verbose command output · Example: `rtk git status`
+- `ruff` – lint Python · Example: `ruff check .`
+- `shellcheck` – lint shell scripts · Example: `shellcheck setup.sh`
+- `uv` – run in a project's Python environment · Example: `uv run pytest`
+- `yazi` – browse files in a TUI · Example: `yazi .`
+- `yq` – extract YAML fields · Example: `yq '.services | keys' compose.yaml`
+- `zmx` – list persistent terminal sessions · Example: `zmx list`
+- `zoxide` – find frequently visited directories · Example: `zoxide query workspace-setup`

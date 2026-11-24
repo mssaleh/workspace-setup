@@ -27,3 +27,17 @@ livekit/agent-skills	*	whole
 typesafe-ai/skills	*	whole
 assistant-ui/skills	*	whole
 cloudflare/skills	*	whole
+
+# CLI and TUI skills for tools provisioned by setup.sh.
+cli/cli	gh	select
+astral-sh/agent-plugins	uv,ruff	select
+affaan-m/ecc/skills/bun-runtime	bun-runtime	select
+laurigates/claude-plugins/tools-plugin/skills	fd-file-finding,rg-code-search,jq-json-processing,yq-yaml-processing	select
+dashed/claude-marketplace/plugins/fzf/skills/fzf	fzf	select
+edm115/skills	rtk	select
+plinde/claude-plugins	pandoc	select
+wshobson/agents	shellcheck-configuration	select
+n0an/ffmpeg-skill	ffmpeg	select
+docker/skills	docker-build-strategies,docker-compose-patterns	select
+google/skills/skills/cloud/gcloud	gcloud	select
+aws/agent-toolkit-for-aws/skills/core-skills/signing-in-to-aws	signing-in-to-aws	select
