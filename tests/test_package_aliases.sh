@@ -83,4 +83,11 @@ stage_reconcile_cli_providers
 [[ "$(command -v bash)" -ef /bin/bash ]]
 stage_reconcile_cli_providers
 
+# A full workstation inventory can exceed Bash 3.2's open-file limit.
+managed_bin="$HOME/.local/share/workspace-setup/bin"
+for ((entry=0; entry<290; entry++)); do
+  ln -s /bin/bash "$managed_bin/managed-command-$entry"
+done
+stage_reconcile_cli_providers
+
 printf 'package alias tests: ok\n'

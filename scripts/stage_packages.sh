@@ -220,7 +220,7 @@ retire_uv_cli() {
 # Retire independently installed commands after the chosen providers pass postflight.
 stage_reconcile_cli_providers() {
   [[ "${PRESERVE_CLI_DUPLICATES:-0}" != 1 ]] || return 0
-  local directory="$HOME/.local/share/workspace-setup/bin" link name chosen candidate actual parent home kind result
+  local directory="$HOME/.local/share/workspace-setup/bin" link name chosen candidates candidate actual parent home kind result
   local bun_bin="${BUN_INSTALL:-$HOME/.bun}/bin"
   local cargo_root="${CARGO_INSTALL_ROOT:-${CARGO_HOME:-$HOME/.cargo}}" pkg scope
   local uv_root="${UV_TOOL_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/uv/tools}"
@@ -231,6 +231,11 @@ stage_reconcile_cli_providers() {
     [[ -f "$link" && -x "$link" ]] || continue
     name=${link##*/}
     chosen=$(cli_provider_target "$link") || return 1
+    # Bash 3.2 keeps process-substitution descriptors open until this function returns.
+    candidates=$({
+      type -ap "$name" || true
+      printf '%s\n' "$HOME/.local/bin/$name" "$HOME/bin/$name" "$bun_bin/$name" "$cargo_root/bin/$name"
+    } | LC_ALL=C sort -u) || return 1
     while IFS= read -r candidate; do
       [[ "$candidate" == /* && ! "$candidate" -ef "$link" && ! "$candidate" -ef "$chosen" ]] || continue
       parent=${candidate%/*}
@@ -310,7 +315,7 @@ stage_reconcile_cli_providers() {
         fi
         warn "$name: alternate at $candidate has no supported uninstall method"
       fi
-    done < <({ type -ap "$name" || true; printf '%s\n' "$HOME/.local/bin/$name" "$HOME/bin/$name" "$bun_bin/$name" "$cargo_root/bin/$name"; } | LC_ALL=C sort -u)
+    done <<< "$candidates"
     [[ -x "$link" && -x "$chosen" ]] || return 1
   done
   return "$status"
