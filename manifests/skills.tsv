@@ -8,25 +8,16 @@
 #           whole  — install every skill the source exposes, including new ones
 #                    on --update. Source paths can limit discovery to a subfolder.
 #
-# Additional installed skills are preserved unless --prune-skills is requested.
+# This file is the core every host gets. Opt-in profiles under profiles/ and
+# the user's own rows add to it; see the README. Additional installed skills
+# are preserved unless --prune-skills is requested.
 #
 # Skill names are the `name:` in each SKILL.md, which is what `--skill` matches.
 # They are not always the repo's directory name (react-best-practices installs as
 # vercel-react-best-practices), so take them from `skills add <source> -l`.
 
-vercel-labs/agent-skills	*	whole
-vercel-labs/skills	*	whole
-vercel/next.js	*	whole
-shadcn-ui/ui	*	whole
-pydantic/skills	*	whole
-run-llama/llamaparse-agent-skills	*	whole
-CopilotKit/CopilotKit	*	whole
-temporalio/skill-temporal-developer	*	whole
-qdrant/skills/meta/qdrant-advisor	*	whole
-livekit/agent-skills	*	whole
-typesafe-ai/skills	*	whole
-assistant-ui/skills	*	whole
-cloudflare/skills	*	whole
+# Skills published by this repository. The macOS profile adds apple-container-amd64.
+mssaleh/workspace-setup/dotfiles/agents/skills	workspace-tools	select
 
 # CLI and TUI skills for tools provisioned by setup.sh.
 cli/cli	gh	select
@@ -41,3 +32,10 @@ n0an/ffmpeg-skill	ffmpeg	select
 docker/skills	docker-build-strategies,docker-compose-patterns	select
 google/skills/skills/cloud/gcloud	gcloud	select
 aws/agent-toolkit-for-aws/skills/core-skills/signing-in-to-aws	signing-in-to-aws	select
+cloudflare/skills	cf-cli	select
+vercel-labs/agent-browser	agent-browser	select
+
+# Skill discovery, skill and MCP authoring, browser checks, and office documents
+# through the pandoc, poppler and LibreOffice tools setup.sh installs.
+vercel-labs/skills	find-skills	select
+anthropics/skills	skill-creator,mcp-builder,webapp-testing,docx,pdf,pptx,xlsx	select

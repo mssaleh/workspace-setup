@@ -116,6 +116,7 @@ macos_app_download_url() {
         "$LIBREOFFICE_DOWNLOAD_BASE" "$version" "$arch" "$version" "$arch"
       ;;
     maccy) printf '%s\n' "$MACCY_MACOS_DOWNLOAD_URL" ;;
+    google-chrome) printf '%s\n' "$GOOGLE_CHROME_MACOS_DOWNLOAD_URL" ;;
     chatgpt)
       [[ "$arch" == arm64 ]] || { warn "OpenAI's documented macOS app download requires Apple silicon"; return 1; }
       printf '%s\n' "$CHATGPT_MACOS_DOWNLOAD_URL" ;;
@@ -199,6 +200,7 @@ stage_macos_apps() {
   for app in "${MACOS_DIRECT_APPS[@]}"; do
     [[ "$app" != libreoffice || -z "${SKIP_LIBREOFFICE:-}" ]] || continue
     [[ "$app" != visual-studio-code || -z "${SKIP_VSCODE:-}" ]] || continue
+    [[ "$app" != google-chrome || -z "${SKIP_CHROME:-}" ]] || continue
     install_macos_app "$app" || return 1
   done
   [[ "${INSTALL_CHATGPT_APP:-}" != 1 ]] || install_macos_app chatgpt || return 1

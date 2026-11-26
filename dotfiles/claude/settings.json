@@ -1,5 +1,6 @@
 {
   "permissions": {
+    "defaultMode": "auto",
     "deny": [
       "Bash(brew install *)",
       "Bash(brew uninstall *)",
@@ -27,7 +28,52 @@
       "Bash(apt-get update *)",
       "Bash(snap install *)",
       "Bash(snap remove *)",
-      "Bash(snap refresh *)"
+      "Bash(snap refresh *)",
+      "Bash(pkill *)"
     ]
+  },
+  "model": "opus",
+  "effortLevel": "xhigh",
+  "modelSettings": {
+    "claude-fable-5": {
+      "effortLevel": "xhigh"
+    },
+    "claude-fable-5-2": {
+      "effortLevel": "xhigh"
+    },
+    "claude-opus-5-5": {
+      "effortLevel": "xhigh",
+      "autoCompactWindow": "auto"
+    },
+    "claude-haiku-5-5": {
+      "effortLevel": "xhigh"
+    }
+  },
+  "autoUpdatesChannel": "stable",
+  "theme": "auto",
+  "statusLine": {
+    "type": "command",
+    "command": "\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/statusline.sh\""
+  },
+  "enableArtifact": false,
+  "feedbackDrafts": "off",
+  "askUserQuestionTimeout": "10m",
+  "skipDangerousModePermissionPrompt": true,
+  "voice": {
+    "enabled": true,
+    "mode": "hold"
+  },
+  "remoteControlAtStartup": true,
+  "inputNeededNotifEnabled": true,
+  "agentPushNotifEnabled": true,
+  "crossSessionInbound": "accept",
+  "switchModelsOnFlag": true,
+  "workflowSizeGuideline": "small",
+  "pluginConfigs": {
+    "cc-plugin-easel@builtin": {
+      "options": {
+        "autoCharts": true
+      }
+    }
   }
 }

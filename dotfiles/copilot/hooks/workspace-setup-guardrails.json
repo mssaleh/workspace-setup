@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "hooks": {
+    "preToolUse": [
+      {
+        "type": "command",
+        "bash": "sh \"$COPILOT_HOOK_DIR/workspace-setup-guardrails.sh\"",
+        "matcher": "bash",
+        "timeoutSec": 10
+      }
+    ]
+  }
+}

@@ -47,6 +47,7 @@ versions() {
   opencode --version
   copilot --version
   skills --version
+  if command -v agy >/dev/null 2>&1; then agy --version; fi
 }
 
 native_installers() (
@@ -98,8 +99,14 @@ snapshot() {
       "$XDG_CONFIG_HOME/opencode/opencode.json" "$XDG_CONFIG_HOME/opencode/opencode.jsonc" \
       "$CLAUDE_CONFIG_DIR/plugins/known_marketplaces.json" \
       "$CLAUDE_CONFIG_DIR/plugins/installed_plugins.json" \
-      "$XDG_STATE_HOME/skills/.skill-lock.json"; do
+      "$XDG_STATE_HOME/skills/.skill-lock.json" "$HOME/.gemini/config/mcp_config.json"; do
       [[ ! -f "$path" ]] || cksum "$path"
+    done
+    for path in "$HOME/.agents/AGENTS.md" "$CLAUDE_CONFIG_DIR/CLAUDE.md" "$CODEX_HOME/AGENTS.md" \
+      "$XDG_CONFIG_HOME/opencode/AGENTS.md" "$COPILOT_HOME/copilot-instructions.md" \
+      "$HOME/.gemini/config/AGENTS.md"; do
+      if [[ -L "$path" ]]; then printf '%s -> %s\n' "$path" "$(readlink "$path")"
+      elif [[ -f "$path" ]]; then cksum "$path"; fi
     done
     if [[ -d "$HOME/.agents/skills" ]]; then
       find -H "$HOME/.agents/skills" -type f -exec cksum {} +
@@ -134,14 +141,22 @@ convergence() {
 }
 
 native_readback() {
-  local name _transport target agents dir skill
-  while IFS=$'\t' read -r name _transport target agents; do
+  local name transport target agents dir skill
+  # agy 1.5.17 lists servers as NAME TYPE STATUS COMMAND/URL, with no JSON form.
+  agy mcp list < /dev/null > "$results/agy-mcp.txt"
+  while IFS=$'\t' read -r name transport target agents; do
     [[ -n "$name" && "$name" != \#* ]] || continue
+    # JSON readers list a stdio package and its arguments separately.
     case ",$agents," in
-      *,codex,*) codex mcp get "$name" --json < /dev/null > "$results/codex-$name.json"; grep -qF "$target" "$results/codex-$name.json" ;;
+      *,codex,*|',*,') codex mcp get "$name" --json < /dev/null > "$results/codex-$name.json"; grep -qF "${target%% *}" "$results/codex-$name.json" ;;
     esac
     case ",$agents," in
-      *,github-copilot,*) copilot mcp get "$name" --json < /dev/null > "$results/copilot-$name.json"; grep -qF "$target" "$results/copilot-$name.json"; grep -q '"enabled": true' "$results/copilot-$name.json" ;;
+      *,github-copilot,*|',*,') copilot mcp get "$name" --json < /dev/null > "$results/copilot-$name.json"; grep -qF "${target%% *}" "$results/copilot-$name.json"; grep -q '"enabled": true' "$results/copilot-$name.json" ;;
+    esac
+    case ",$agents," in
+      *,antigravity,*|',*,')
+        [[ "$transport" == sse ]] && continue
+        awk -v n="$name" '$1 == n && $3 == "enabled"' "$results/agy-mcp.txt" | grep -qF "$target" ;;
     esac
   done < /repo/manifests/mcp.tsv
   opencode api --standalone config.get < /dev/null > "$results/opencode-config.json"
@@ -165,6 +180,41 @@ native_readback() {
     if (missing.length) { console.error("Copilot does not read: " + missing.join(" ")); process.exit(1); }
   ' "$results/copilot-skills.json" ${skills[@]+"${skills[@]}"}
   sync_agents --only verify
+}
+
+# One real instruction file is adopted and every agent links to it; Copilot's
+# own listing must name it as a personal source.
+instructions_readback() {
+  local path
+  printf '# integration rules\n' > "$CODEX_HOME/AGENTS.md"
+  sync_agents --only instructions
+  [[ "$(cat "$HOME/.agents/AGENTS.md")" == '# integration rules' ]]
+  for path in "$CLAUDE_CONFIG_DIR/CLAUDE.md" "$CODEX_HOME/AGENTS.md" "$XDG_CONFIG_HOME/opencode/AGENTS.md" \
+      "$COPILOT_HOME/copilot-instructions.md" "$HOME/.gemini/config/AGENTS.md"; do
+    [[ "$path" -ef "$HOME/.agents/AGENTS.md" ]] || die "Not linked to the shared instructions: $path"
+  done
+  (cd "$(mktemp -d)" && copilot instruction list --json < /dev/null) > "$results/copilot-instructions.json"
+  grep -qF "\"sourcePath\": \"$COPILOT_HOME/copilot-instructions.md\"" "$results/copilot-instructions.json" \
+    || grep -qF "\"sourcePath\":\"$COPILOT_HOME/copilot-instructions.md\"" "$results/copilot-instructions.json"
+}
+
+# A profile adds its sources, and a declared skill copied into the store by
+# hand is adopted by the real skills CLI with the differing copy kept.
+profile_adoption() {
+  mkdir -p "$HOME/.agents/skills/build-mcp-server"
+  printf -- '---\nname: build-mcp-server\ndescription: Hand copy.\n---\nEdited by hand.\n' \
+    > "$HOME/.agents/skills/build-mcp-server/SKILL.md"
+  AGENT_PROFILES=mcp-dev dry_run --only skills
+  grep -qF 'adopting' "$results/$current_step.log" || grep -qF 'fetching all skills' "$results/$current_step.log"
+  AGENT_PROFILES=mcp-dev sync_agents --only skills
+  [[ -n "$(source_names anthropics/claude-plugins-official/plugins/mcp-server-dev | grep -x build-mcp-server)" ]]
+  [[ -n "$(source_names modelcontextprotocol/ext-apps/plugins/mcp-apps/skills | grep -x create-mcp-app)" ]]
+  grep -rqF 'Edited by hand.' "$HOME/.agents/superseded" || die 'The differing hand copy was not kept'
+  if grep -qF 'Edited by hand.' "$HOME/.agents/skills/build-mcp-server/SKILL.md"; then
+    die 'The hand copy was not replaced'
+  fi
+  [[ "$CLAUDE_CONFIG_DIR/skills/create-mcp-app" -ef "$HOME/.agents/skills/create-mcp-app" ]]
+  AGENT_PROFILES=mcp-dev sync_agents --only verify
 }
 
 source_names() (
@@ -372,6 +422,9 @@ EOF
   grep -qF '"Bash(apt-get install *)"' "$CLAUDE_CONFIG_DIR/settings.json"
   grep -qF '"apt-get install *": "deny"' "$XDG_CONFIG_HOME/opencode/opencode.jsonc"
   cmp /repo/dotfiles/codex/rules/default.rules "$CODEX_HOME/rules/default.rules"
+  # agy validates --settings against its schema and rejects a malformed deny list.
+  HOME="$fixture" agy --settings "$(cat /repo/dotfiles/gemini/antigravity-cli/settings.json)" \
+    mcp list < /dev/null > "$results/agy-settings.txt"
 
   export CLAUDE_HOME="$fixture/plugin-home"
   mkdir -p "$fixture/market/.claude-plugin" "$fixture/market/plugins/scoped/.claude-plugin" "$fixture/project"
@@ -451,6 +504,7 @@ step unit-suite bash /repo/tests/run.sh --only agents
 step clean-dry-run dry_run
 step streamed-install streamed_install
 step native-readback native_readback
+step instructions instructions_readback
 step checkout-convergence convergence
 step update sync_agents --update
 step update-readback native_readback
@@ -463,14 +517,16 @@ prune_names=$(source_names "$prune_source")
 repair_skill=$(printf '%s\n' "$prune_names" | sed -n '1p')
 remote_name=$(awk -F'\t' '$2 == "http" { print $1; exit }' /repo/manifests/mcp.tsv)
 remote_target=$(awk -F'\t' '$2 == "http" { print $3; exit }' /repo/manifests/mcp.tsv)
-stdio_name=$(awk -F'\t' '$2 == "stdio" { print $1; exit }' /repo/manifests/mcp.tsv)
-stdio_package=$(awk -F'\t' '$2 == "stdio" { print $3; exit }' /repo/manifests/mcp.tsv)
+# A row without declared arguments, which the duplicate and argv checks need.
+stdio_name=$(awk -F'\t' '$2 == "stdio" && $3 !~ / / { print $1; exit }' /repo/manifests/mcp.tsv)
+stdio_package=$(awk -F'\t' '$2 == "stdio" && $3 !~ / / { print $3; exit }' /repo/manifests/mcp.tsv)
 step seed-additions seed_user_additions
 step inject-damage damage_configuration
 step detect-damage detect_damage
 step repair sync_agents
 step repair-readback assert_repaired
 step disabled-server disabled_server
+step profile-adoption profile_adoption
 step skill-pruning skill_pruning
 step plugin-update-and-cache-pruning plugin_update_and_cache_pruning
 step duplicate-pruning duplicate_pruning

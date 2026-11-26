@@ -1,0 +1,3 @@
+# Building MCP servers, bundles and MCP Apps.
+anthropics/claude-plugins-official/plugins/mcp-server-dev	*	whole
+modelcontextprotocol/ext-apps/plugins/mcp-apps/skills	*	whole

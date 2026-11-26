@@ -60,19 +60,20 @@ packages without their recommendations; each control still overrides it.
 |---|---|
 | **context** | On macOS, separately classifies the host as `workstation`/`headless` and the current run as `local`/`ssh`/`noninteractive`. Host role controls installation; session kind controls whether GUI activation is permitted. Neither the login shell nor the default terminal is changed. On Linux only the host role applies: `HOST_PROFILE=headless` drops the desktop stages, GUI applications and SSH key generation. |
 | **bootstrap** | On macOS, verifies that the selected Xcode Command Line Tools actually provide `xcrun clang` before touching Homebrew, then discovers Homebrew at its real prefix or installs it. It never launches the asynchronous CLT installer dialog. On Linux, ensures curl + git. |
-| **packages** | Installs the cross-platform CLI toolbox: `eza`, `fd`, `bat`, `ripgrep` (`rg`), `fzf`, `zoxide`, `yazi`, `bun`, `rtk`, `git`, `git-delta` (`delta`), `lazygit`, `gh`, `zmx`, `rsync`, `rclone`, `nmap`, `jq`, `yq`, `pandoc`, `7zz` (`7z`), `cmake`, `ninja`, `node`, `uv`, `ruff`, `helm`, `kubectl`, `cosign`, `ffmpeg`, `poppler` (`poppler-utils`), `nano`, `himalaya`, `ncdu`, `shellcheck`, `pre-commit`, … It installs `xterm-kitty` terminfo as a non-GUI SSH capability on every host. Where a Linux release's apt has no `git-delta`, `eza` or `lazygit`, their upstream releases install into `~/.local/bin`. On Linux it registers **every** vendor archive before installing anything (see below), then installs the toolbox, the **Claude Desktop** app (skip with `SKIP_CLAUDE_DESKTOP=1`) and the **Codex app** (skip with `SKIP_CODEX_APP=1`). |
+| **packages** | Installs the cross-platform CLI toolbox: `eza`, `fd`, `bat`, `ripgrep` (`rg`), `fzf`, `zoxide`, `yazi`, `bun`, `rtk`, `git`, `git-delta` (`delta`), `lazygit`, `gh`, `zmx`, `rsync`, `rclone`, `nmap`, `jq`, `yq`, `pandoc`, `7zz` (`7z`), `cmake`, `ninja`, `node`, `uv`, `ruff`, `helm`, `kubectl`, `cosign`, `ffmpeg`, `poppler` (`poppler-utils`), `nano`, `himalaya`, `ncdu`, `shellcheck`, `pre-commit`, … It installs `xterm-kitty` terminfo as a non-GUI SSH capability on every host. Where a Linux release's apt has no `git-delta`, `eza` or `lazygit`, their upstream releases install into `~/.local/bin`. On Linux it registers **every** vendor archive before installing anything (see below), then installs the toolbox, the **Claude Desktop** app (skip with `SKIP_CLAUDE_DESKTOP=1`), the **Codex app** (skip with `SKIP_CODEX_APP=1`) and **Google Chrome** (skip with `SKIP_CHROME=1`). |
 | **docker** | Linux only: installs the official **Docker Engine** + **Docker Compose v2** from download.docker.com. Docker's documented pre-clean of the distribution's `docker.io`, `containerd` and `runc` names every package apt would take with them before it runs, since those runtimes carry reverse dependencies of their own. A complete, responsive official installation is a no-op on rerun. |
 | **toolchains** | Updates Rust stable through native rustup while preserving the selected default and other toolchains. Astral's installer owns uv. Coding and cloud CLIs use vendor-maintained Brew taps or practical vendor installers; Linux cloud CLIs also use official apt repositories. npm tracks the registry's stable release alongside Cloudflare CLI and Linux Bun. `markitdown[all]` and macOS Ruff use uv tools. |
-| **configuration** | Converges ordinary files under `$HOME`; repairs old links into temporary checkouts, atomically upgrades exact known historical versions, semantically merges supported JSON/TOML/Git/ssh formats and repairs a shell startup file that has lost the host-local environment loader, preserves ambiguous user-owned content, installs the coding-agent skills into each agent home, and provisions the host-local environment directory `~/.config/shell/env.d/` that the supported shells source. |
+| **configuration** | Converges ordinary files under `$HOME`; repairs old links into temporary checkouts, atomically upgrades exact known historical versions, semantically merges supported JSON/TOML/Git/ssh formats and repairs a shell startup file that has lost the host-local environment loader, preserves ambiguous user-owned content, installs the coding-agent guardrails, removes the bundled-skill copies earlier runs placed in agent homes when they are unedited, and provisions the host-local environment directory `~/.config/shell/env.d/` that the supported shells source. |
 | **completions** | macOS only: runs `brew completions link` when Homebrew reports that external-command completions are not linked, then generates and syntax-checks Bash/Zsh completions from the installed Codex, rustup/cargo, opencode, Container, and Container Compose binaries. Existing files without this setup's ownership marker are preserved. Linux retains its existing himalaya loader only. |
 | **containers** | macOS only: installs or updates Apple's signed Container package while stopped, ensures Rosetta, and writes only the stable build/registry defaults. The Container system remains stopped for on-demand laptop use unless `CONTAINER_START=1`; it is never stopped automatically. `container-compose` is supplied separately by Homebrew. |
 | **ssh** | Generates an ed25519 keypair if none exists, locks down `~/.ssh` permissions (700 dir, 600 files), and wires up the host-local SSH agent (macOS: Keychain; Linux: systemd user unit) without replacing an agent-forwarding socket supplied by `sshd`. Does **not** push to GitHub — run `gh auth login` manually. |
 | **remote readiness** | macOS only, read-only: reports effective Remote Login state and ACL, authorized-key count/mode, FileVault, firewall/stealth mode, and remote-relevant power settings; it calls out Full Disk Access as a separate manual TCC decision. It changes none of them. |
-| **applications + terminals** | A macOS workstation gets missing VS Code, Maccy, and LibreOffice applications from vendor downloads and preserves existing bundles for app-managed updates. Setup updates Kitty through its installed provider on both platforms. VS Code's bundled `code` and `code-tunnel` receive user-local links when free. ChatGPT and Claude Desktop are explicit opt-ins. The macOS Nerd Font uses a Homebrew cask. Linux workstation runs keep the Nerd Font current with its upstream stable release. Terminal selection stays with the user. |
+| **applications + terminals** | A macOS workstation gets missing VS Code, Maccy, LibreOffice, and Google Chrome applications from vendor downloads and preserves existing bundles for app-managed updates. Setup updates Kitty through its installed provider on both platforms. VS Code's bundled `code` and `code-tunnel` receive user-local links when free. ChatGPT and Claude Desktop are explicit opt-ins. The macOS Nerd Font uses a Homebrew cask. Linux workstation runs keep the Nerd Font current with its upstream stable release. Terminal selection stays with the user. |
+| **browser** | Gives agent-browser a browser: it drives an installed Google Chrome, and otherwise `agent-browser install` downloads Chrome for Testing. Its `--with-deps` option is not used because it runs its own apt transaction. A failed download is reported and does not stop setup. |
 | **terminal profile** | macOS imports the scalar-only "Workspace" profile (a name Terminal.app does not ship; macOS 27 bundles its own "Clear Dark") only with `CONFIGURE_APPLE_TERMINAL=1` in a local interactive session, and selects it only with the additional `SET_APPLE_TERMINAL_DEFAULT=1`. Linux converges only previously untouched Ptyxis behavior keys. User choices are preserved. |
 | **updates** | Normal reruns update declared CLI providers within the selected runtime lines and refresh the managed Linux desktop packages from their configured apt repositories. On macOS, desktop bundles use vendor updates, Apple Container updates while stopped, and Homebrew cleanup stays manual. Linux `UPDATE_SYSTEM=1` runs the separate full system update path. |
 | **postflight** | Retains the existing Linux checks. macOS additionally verifies Node 26 and Python 3.14 in actual Bash/Zsh login shells, generated completion registration/security, Kitty's platform layer, Terminal's effective domain when requested, launchd/forwarded SSH-agent state, and Container's requested running/stopped state. |
-| **agents** | After host verification, installs missing declared skill collections, reconciles user-scope MCP servers using native agent commands, installs Claude plugins, and verifies the resulting configuration. A converged agent run makes no configuration changes; source refresh and pruning are explicit options. |
+| **agents** | After host verification, links one user-level instruction file into every agent, installs missing declared skill collections, reconciles user-scope MCP servers using native agent commands, installs Claude plugins, and verifies the resulting configuration. A converged agent run makes no configuration changes; source refresh and pruning are explicit options. |
 
 Desktop features and headless access are independent. Linux desktop integration
 does not select a default terminal. Interactive and non-interactive SSH shells
@@ -132,20 +133,22 @@ platform package is unavailable.
 
 | Capability | Owner |
 |---|---|
-| macOS baseline CLI toolbox, runtimes, Container Compose, Azure CLI, and fonts | Homebrew |
+| macOS baseline CLI toolbox, runtimes, Container Compose, agent-browser, Azure CLI, and fonts | Homebrew |
 | macOS Bun, RTK, OpenAI CLI, Anthropic CLI, OpenCode, Zmx, and Apex | Vendor-maintained Homebrew taps |
 | Linux base toolbox | apt; official vendor repositories where the distribution build is too far behind to use; `ppa:libreoffice/ppa` when LibreOffice is absent and `ppa:git-core/ppa` on Ubuntu |
 | Rust manager and toolchains | upstream rustup |
 | uv, AWS CLI, GoDaddy, Claude Code, Codex, Copilot, Antigravity, and Kitty | each project's upstream installer |
-| macOS Google Cloud, Apple Container, and desktop applications | vendor SDK, signed package, or application download |
+| macOS Google Cloud, Apple Container, and desktop applications, including Google Chrome | vendor SDK, signed package, or application download |
 | macOS Ruff and cross-platform MarkItDown | uv tools |
-| npm, Cloudflare CLI, and Ubuntu Bun | npm registry packages |
+| npm, Cloudflare CLI, Ubuntu Bun, and Ubuntu agent-browser | npm registry packages |
+| Linux Google Chrome | Google's package, which registers Google's apt repository |
 | Ubuntu Yazi and RTK | apt installs Yazi from its stable repository and RTK from its published Debian package |
 | Linux OpenCode and API CLIs | each project's upstream installer or release |
 | Configuration | ordinary files at their native paths |
-| Shared skills and their lock file | `npx skills`, from `manifests/skills.tsv` |
-| MCP configuration | native agent commands, from `manifests/mcp.tsv` |
-| Claude plugins and marketplaces | `claude plugin`, from `manifests/plugins.tsv` |
+| Shared skills and their lock file | `npx skills`, from the skills manifests |
+| MCP configuration | native agent commands, from the MCP manifests |
+| Claude plugins and marketplaces | `claude plugin`, from the plugin manifests |
+| User-level agent instructions | links to one file you own, by default `~/.agents/AGENTS.md` |
 
 Vendor apt entries use deb822 `.sources` files. Matching legacy `.list`
 entries migrate with inactive `.list.bak` backups; existing backups are
@@ -223,7 +226,7 @@ All optional:
 |---|---|---|
 | `GIT_NAME` | `Your Name` | Name for `~/.gitconfig` `[user].name` |
 | `GIT_EMAIL` | `you@example.com` | Email for `~/.gitconfig` `[user].email` |
-| `HOST_PROFILE` | `workstation` | `workstation` installs the requested desktop payload regardless of whether setup is run locally or over SSH; `headless` sets the platform's graphical skip controls (on Linux `SKIP_FONT`, `SKIP_FLATPAK`, `SKIP_LIBREOFFICE`, `SKIP_VSCODE`, `SKIP_CLAUDE_DESKTOP`, `SKIP_CODEX_APP`, `SKIP_GNOME_EXTENSIONS` and `SKIP_SSH`, plus `INSTALL_RECOMMENDS=0`). |
+| `HOST_PROFILE` | `workstation` | `workstation` installs the requested desktop payload regardless of whether setup is run locally or over SSH; `headless` sets the platform's graphical skip controls (on Linux `SKIP_FONT`, `SKIP_FLATPAK`, `SKIP_LIBREOFFICE`, `SKIP_VSCODE`, `SKIP_CLAUDE_DESKTOP`, `SKIP_CODEX_APP`, `SKIP_CHROME`, `SKIP_GNOME_EXTENSIONS` and `SKIP_SSH`, plus `INSTALL_RECOMMENDS=0`). |
 | `SETUP_SESSION_KIND` | auto-detected | macOS only: test/orchestration override, exactly `local`, `ssh`, or `noninteractive`; SSH/CI evidence cannot be relabeled `local`, and normal runs should leave this unset |
 | `SKIP_FONT` | (unset) | Existing cross-platform umbrella: skip the graphical font/Kitty stages (and, on macOS, workstation applications and Terminal integration); SSH terminfo remains installed |
 | `SKIP_NERD_FONT` | (unset) | macOS only: skip only the Nerd Font |
@@ -242,6 +245,7 @@ All optional:
 | `SKIP_VSCODE` | (unset) | Skip Visual Studio Code (both platforms); on macOS this also skips the `code`/`code-tunnel` user-local links |
 | `SKIP_CLAUDE_DESKTOP` | (unset) | Set to `1` to skip the Claude Desktop app — it is a GUI application, so set this on a headless host (Linux only) |
 | `SKIP_CODEX_APP` | (unset) | Set to `1` to skip the Codex app — it is a GUI application, so set this on a headless host (Linux only) |
+| `SKIP_CHROME` | (unset) | Set to `1` to skip Google Chrome, which the browser MCP servers and agent-browser drive (both platforms); agent-browser then downloads Chrome for Testing |
 | `SKIP_COMPLETIONS` | (unset) | macOS only: skip Homebrew external-command linking and generated upstream CLI completions |
 | `SKIP_REMOTE_AUDIT` | (unset) | macOS only: skip the read-only Remote Login/FileVault/firewall/power report |
 | `SKIP_HEADLESS_CREDENTIALS` | (unset) | Set to `1` to skip the check that credentials are reachable without a GUI session, on a Mac only ever used at its own keyboard (macOS only) |
@@ -744,12 +748,14 @@ where a service offers nothing else:
 | ssh, servers, registries with key auth | `~/.ssh` + agent | keys are files; no Keychain involved |
 | `gh` | `~/.config/gh/hosts.yml` (0600) | no key-based mode exists; use `gh auth login --insecure-storage` |
 | Claude Code | `~/.claude/.credentials.json` (0600) | first-class file fallback, the same path used on Linux |
+| Antigravity (`agy`) | its file token store, which agy 1.5.18 selects by itself in an SSH session; desk sessions use the Keychain | sign in once over SSH: `ssh -t <mac> agy` |
 | aws, npm, kube | already file-based | unaffected |
 | a library that only reads an environment variable | `~/.config/shell/env.d/*.sh` | nothing else exists to point at; see below |
 
 File stores are protected at rest by FileVault and by `0600` permissions,
 matching Linux, where no Keychain exists. Postflight reports confirmed
-Keychain-only credentials with the specific fix. An unconfirmed Claude login
+Keychain-only credentials, and a Claude file store older than its Keychain
+login, with the specific fix. An unconfirmed Claude login
 is reported without blocking fresh host setup. Set
 `SKIP_HEADLESS_CREDENTIALS=1` on a Mac only ever used at its own keyboard.
 
@@ -823,25 +829,79 @@ Missing or unreadable manifests stop the run before configuration changes.
 
 | Manifest | Fields | Writer |
 |---|---|---|
-| `manifests/skills.tsv` | source, skills, mode | `npx skills` |
-| `manifests/mcp.tsv` | name, transport, target, agents | `claude mcp`, `codex mcp`, `opencode mcp`, optional `copilot mcp` |
-| `manifests/plugins.tsv` | agent, marketplace, marketplace source, plugin | `claude plugin` |
+| `skills.tsv` | source, skills, mode | `npx skills` |
+| `mcp.tsv` | name, transport, target, agents | `claude mcp`, `codex mcp`, `opencode mcp`, optional `copilot mcp` and `agy mcp` |
+| `plugins.tsv` | agent, marketplace, marketplace source, plugin | `claude plugin` |
+
+### Core, profiles, and your own rows
+
+Every host gets the core in `manifests/`: skills for the tools setup installs,
+skill and MCP authoring, office documents, browser checks, documentation
+servers for the cloud CLIs, and the two browser MCP servers. Rows are read in
+three layers, in this order:
+
+1. `manifests/{skills,mcp,plugins}.tsv`, the core.
+2. `manifests/profiles/<name>/`, for each selected profile. A profile holds any
+   of the three files.
+3. `~/.config/workspace-setup/agents/{skills,mcp,plugins}.tsv`, your own rows,
+   such as a private server or a plugin only you use.
+
+Profiles are selected in `~/.config/workspace-setup/agents/profiles`, one name
+per line, or for one run with `AGENT_PROFILES=a,b`. The `macos` profile is
+selected automatically on macOS unless `SKIP_CONTAINER=1`. An unknown profile,
+or a skill, server, or plugin declared in two layers, stops the run before
+configuration changes.
+
+| Profile | Contents |
+|---|---|
+| `macos` | `apple-container-amd64` |
+| `ai-agents` | Pydantic, LlamaIndex, CopilotKit, Temporal, Qdrant, LiveKit, TypeSafe, and assistant-ui skills; Temporal, LlamaIndex, CopilotKit, and LiveKit documentation servers |
+| `web` | Vercel, Next.js, shadcn/ui, modern web guidance, and Cloudflare skills; the Next.js DevTools server |
+| `mcp-dev` | Anthropic's `build-mcp-server`, `build-mcp-app`, and `build-mcpb`; the MCP Apps skills from `modelcontextprotocol/ext-apps` |
+
+```bash
+mkdir -p ~/.config/workspace-setup/agents
+printf '%s\n' web mcp-dev > ~/.config/workspace-setup/agents/profiles
+bash setup.sh agents --dry-run
+```
+
+### Instructions
+
+Each agent reads one user-level instruction file. Synchronization links every
+installed agent's file to `AGENTS_INSTRUCTIONS`, by default
+`~/.agents/AGENTS.md`. This repository ships no instructions; the file is yours.
+
+| Agent | Path linked to the shared file |
+|---|---|
+| Claude Code | `$CLAUDE_CONFIG_DIR/CLAUDE.md`, default `~/.claude/CLAUDE.md` |
+| Codex | `$CODEX_HOME/AGENTS.md` |
+| OpenCode | `$XDG_CONFIG_HOME/opencode/AGENTS.md` |
+| GitHub Copilot CLI | `$COPILOT_HOME/copilot-instructions.md` ([`copilot help config`](https://docs.github.com/en/copilot/how-tos/copilot-cli)) |
+| Antigravity | `~/.gemini/config/AGENTS.md` |
+
+When the shared file does not exist and every agent that has an instruction
+file has the same text, that file moves to the shared path and the agents link
+to it. Agents with different texts keep them until you create the shared file.
+Once it exists, a file with the same text is replaced by a link and a file with
+different text is reported and left alone. Content is never merged. Codex's
+`AGENTS.override.md` and Antigravity's other global rule files
+(`~/.gemini/AGENTS.md`, `~/.gemini/GEMINI.md`, `~/.gemini/config/GEMINI.md`) are
+reported when they hold other text. Antigravity truncates a rule file at 24,000
+bytes, and Codex stops reading instructions after 32,768 bytes of global and
+project files together; a larger shared file is reported.
 
 ### Skills
 
 Skill sources use `owner/repo` or `owner/repo/path/to/skills`. `whole` mode with
 `*` follows a complete collection; `select` mode lists comma-separated skill
 names from their `SKILL.md` frontmatter. Discover names with
-`npx skills add <source> -l`. The shipped collections cover Vercel, Next.js,
-shadcn, Pydantic, LlamaIndex, CopilotKit, Temporal, Qdrant, LiveKit, TypeSafe,
-assistant-ui, and [Cloudflare](https://github.com/cloudflare/skills).
-The Cloudflare collection includes the `cf-cli` skill.
+`npx skills add <source> -l`.
 
-The toolbox selections in [the skills manifest](manifests/skills.tsv) teach
-GitHub CLI, uv, Ruff, Bun, fd, ripgrep, fzf, RTK, jq, yq, Pandoc, ShellCheck,
-FFmpeg, Docker and Compose, and Google Cloud CLI. The AWS skill covers CLI
-sign-in and profile selection. Setup fetches the named skills from Skills.sh
-publishers through `npx skills`. Run `bash setup.sh agents --only skills` to
+The core selections teach GitHub CLI, uv, Ruff, Bun, fd, ripgrep, fzf, RTK, jq,
+yq, Pandoc, ShellCheck, FFmpeg, Docker and Compose, Google Cloud CLI, AWS
+sign-in, the Cloudflare `cf` CLI, and agent-browser. Anthropic's `skill-creator`,
+`mcp-builder`, `webapp-testing`, `docx`, `pdf`, `pptx`, and `xlsx` skills and
+Vercel's `find-skills` complete it. Run `bash setup.sh agents --only skills` to
 sync them on an existing host.
 
 The skills CLI owns the shared payloads and lock. An ordinary run installs
@@ -852,38 +912,55 @@ paths from the shared store and cleans up its mirror links. The skills CLI
 updates the lock. Mirroring and pruning leave manually copied skills outside
 that lock alone, including existing links that resolve to those skills.
 
+A declared skill that is in the store but not in the lock, such as a copy made
+by hand, is adopted: the skills CLI replaces the directory and records it in
+the lock. The previous copy is saved under `~/.agents/superseded/` first and
+removed when it matches what the fetch installed; a different copy stays there.
+A copied directory in a mirrored agent directory is replaced by a link to the
+store skill of that name; a copy that differs from the store is moved to
+`~/.agents/superseded/` first.
+
 | Agent | Skills | MCP configuration |
 |---|---|---|
 | Claude Code | `$CLAUDE_HOME/skills`, default `~/.claude/skills` | `$CLAUDE_CONFIG_DIR/.claude.json` when set, otherwise `~/.claude.json` |
 | Codex | `~/.agents/skills` and a `$CODEX_HOME/skills` mirror | `$CODEX_HOME/config.toml` |
 | OpenCode | shared skills and native skill directories | `$XDG_CONFIG_HOME/opencode/opencode.json` or `.jsonc` |
 | GitHub Copilot CLI | `~/.agents/skills`; a `$COPILOT_HOME/skills` mirror only for a custom `COPILOT_HOME` | `$COPILOT_HOME/mcp-config.json` |
+| Antigravity | `~/.agents/skills` and `~/.gemini/config/skills` | `~/.gemini/config/mcp_config.json` |
 
 Claude uses a mirror. Codex reads the shared store and also uses its legacy
 mirror. Setup creates these mirrors on the first sync when their CLIs are
 installed. OpenCode reads the shared store directly. Copilot reads it directly at
 its default home (`copilot skill --help`: "Personal ~/.copilot/skills/ or
 ~/.agents/skills/") and gets a mirror only with a custom `COPILOT_HOME`; an
-existing `~/.copilot/skills` is left alone. Each managed mirror is checked with
-`-ef` against its own payload. A whole agent skills directory may link to the
+existing `~/.copilot/skills` is left alone. Antigravity reads the shared store
+from agy 1.5.16 (its changelog) and prefers `~/.gemini/config/skills` on a name
+collision. A separate copy of a store skill in the Copilot, OpenCode, or
+Antigravity directory is reported. Each managed mirror is checked with `-ef`
+against its own payload. A whole agent skills directory may link to the
 shared store.
 
 ### MCP servers and plugins
 
-MCP transports are `stdio`, `http`, or `sse`. Stdio targets are npm package
-specifications; remote targets are complete URLs. Agent lists contain
-`claude-code`, `codex`, `opencode`, and optional `github-copilot`. Codex does not
-support SSE, so such a declaration fails validation.
+MCP transports are `stdio`, `http`, or `sse`. A stdio target is an npm package
+specification, optionally followed by single-spaced arguments; remote targets
+are complete URLs. Agent lists contain `claude-code`, `codex`, `opencode`, and
+the optional `github-copilot` and `antigravity`, or `*` for each of them that is
+installed. Codex and Antigravity do not support SSE: an `sse` row naming them
+fails validation, and `*` leaves them out.
 
 A server satisfies its declaration only when its name, target, kind, and
 enabled state agree. Stdio comparison ignores the runner and installation
 directory, and accepts a resolved version unless the manifest requests a
-specific version. Existing matching command arguments are carried to agents
+specific version. Arguments a row declares must match exactly; the core uses
+this to start `chrome-devtools-mcp` with `--no-usage-statistics`. Without
+declared arguments, existing matching command arguments are carried to agents
 missing that server, including spaces and empty arguments.
 
 Claude uses native user scope. Replacing an existing Claude or Copilot name
-requires native removal first; Copilot also uses native enable. Codex and
-OpenCode named adds replace entries. OpenCode V2 uses `--global`; V1 named adds
+requires native removal first; Copilot also uses native enable. Codex,
+OpenCode, and Antigravity named adds replace entries; `agy mcp enable` then
+clears a disabled flag. OpenCode V2 uses `--global`; V1 named adds
 already write global configuration. Failed native writes return nonzero, and
 a later run can repair an incomplete replacement. Codex starts an interactive
 OAuth login inside `codex mcp add` when it discovers OAuth support, so remote
@@ -892,8 +969,12 @@ with `codex mcp login <name>`. The [Temporal documentation server](https://docs.
 requires a one-time OAuth sign-in before it can answer queries. A declared Claude
 plugin that the user disabled is reported and left disabled.
 
+The browser servers start Chrome when a tool is first used. A headless host
+without Chrome keeps the entries and reports the missing browser at that point.
+
 Inspection uses native Codex JSON output, Claude plugin and marketplace JSON
-listings, Copilot's effective enabled state, and OpenCode's effective config.
+listings, Copilot's effective enabled state, OpenCode's effective config, and
+Antigravity's `mcp_config.json`, because `agy mcp list` has no JSON output.
 OpenCode V2 inspection uses `opencode api --standalone config.get`; V1 uses
 `opencode --pure debug config`. Configuration is inspected outside projects,
 and MCP health checks are not run. V2 documents are applied in precedence
@@ -911,7 +992,7 @@ disabled choices are reported and preserved.
 | Option after `agents` | Effect |
 |---|---|
 | `--dry-run` | Report proposed changes and unresolved differences without changing agent configuration or skill payloads |
-| `--only skills\|mcp\|plugins\|verify` | Run one pass and verify its result; `verify` applies no configuration changes |
+| `--only instructions\|skills\|mcp\|plugins\|verify` | Run one pass and verify its result; `verify` applies no configuration changes |
 | `--update` | Refresh declared skill collections, marketplaces, and plugins |
 | `--prune-skills` | Remove fetched skills outside the manifest's selections and whole sources |
 | `--prune-plugin-cache` | Delete cache directories with no registered marketplace or installed plugin reference |
@@ -922,6 +1003,8 @@ entry as unresolved and exits nonzero; its configuration needs separate editing.
 
 | Variable | Default or behavior |
 |---|---|
+| `AGENT_PROFILES` | Profiles for this run, comma-separated, added to those in `~/.config/workspace-setup/agents/profiles` |
+| `AGENTS_INSTRUCTIONS` | `$AGENTS_HOME/AGENTS.md`, the instruction file every agent links to |
 | `AGENTS_HOME` | `~/.agents`, shared skill root |
 | `AGENTS_STORE` | `$AGENTS_HOME/skills` |
 | `AGENTS_LOCK` | `$XDG_STATE_HOME/skills/.skill-lock.json` when set, otherwise `$AGENTS_HOME/.skill-lock.json` |
@@ -929,7 +1012,7 @@ entry as unresolved and exits nonzero; its configuration needs separate editing.
 | `CLAUDE_HOME` | Skill and plugin root; defaults to `$CLAUDE_CONFIG_DIR` or `~/.claude`. Claude plugin commands receive it as `CLAUDE_CONFIG_DIR` only when it differs from that default, which also moves Claude's global config to `$CLAUDE_HOME/.claude.json` |
 | `CODEX_HOME` | `~/.codex`, shared by provisioning and native Codex commands |
 | `COPILOT_HOME` | `~/.copilot`, also honored by native Copilot commands |
-| `XDG_CONFIG_HOME` | Defaults to `~/.config` for OpenCode |
+| `XDG_CONFIG_HOME` | Defaults to `~/.config` for OpenCode and the user's manifest directory |
 | `OPENCODE_CONFIG` | Explicit OpenCode config file; otherwise prefer an existing `.json`, then `.jsonc` |
 | `SKILLS_CLI_VERSION` | `latest`, skills CLI release selector |
 
@@ -942,9 +1025,9 @@ a conflict without merging or deleting content. Dry runs report these operations
 Agent-only dependencies are Bash 3.2+, coreutils, POSIX `awk`, `sed`, `npx`,
 Claude Code, Codex, and OpenCode. The skills CLI requires
 [Node.js 22.20+](https://github.com/vercel-labs/skills#install-a-skill), which the
-declared Node 26 line satisfies. Copilot is used when installed. Native commands
-run with stdin closed. Verification establishes configuration, not remote
-service availability or authentication.
+declared Node 26 line satisfies. Copilot and Antigravity are used when
+installed. Native commands run with stdin closed. Verification establishes
+configuration, not remote service availability or authentication.
 
 ## Coding-agent guardrails
 
@@ -952,29 +1035,69 @@ The script installs or narrowly merges permission rules for direct package-manag
 
 | Agent | Config file | Blocked commands |
 |---|---|---|
-| Claude Code | `~/.claude/settings.json` → `permissions.deny` | `brew install/uninstall/upgrade/tap/services/… *`, `apt install/remove/upgrade/… *`, `snap install/remove/refresh *` |
+| Claude Code | `~/.claude/settings.json` → `permissions.deny` | `brew install/uninstall/upgrade/tap/services/… *`, `apt install/remove/upgrade/… *`, `snap install/remove/refresh *`, and `pkill *` |
 | Codex | `~/.codex/rules/default.rules` → `prefix_rule()` | same (Starlark rules, `decision="forbidden"`) |
 | OpenCode | `~/.config/opencode/opencode.jsonc` | Direct package-manager commands use deny rules in legacy `permission.bash` or the ordered V2 `permissions` array. [OpenCode permissions](https://opencode.ai/docs/permissions/) |
+| GitHub Copilot CLI | `~/.copilot/hooks/workspace-setup-guardrails.json` and its `.sh` | same, as a user `preToolUse` hook that answers `deny`; Copilot takes `permissions.deny` only from organization policy (`copilot help permissions`) |
+| Antigravity | `~/.gemini/antigravity-cli/settings.json` → `permissions.deny` | same, as `command(<prefix>)` deny rules. [Antigravity permissions](https://antigravity.google/docs/permissions) |
 
 Read-only commands (`brew list`, `apt show`, `snap list`, etc.) are not blocked.
 These are prefix rules that stop accidental package changes, not a boundary:
 `sudo apt-get install`, options before the subcommand (`apt-get -y install`)
-and environment-prefixed commands do not match them.
+and environment-prefixed commands do not match them. The Copilot hook needs
+`jq` and lets a command through when `jq` is missing, because Copilot denies
+every call whose hook fails.
+
+## Claude Code settings
+
+Host setup merges `dotfiles/claude/settings.json` into `$CLAUDE_CONFIG_DIR/settings.json`
+(default `~/.claude/settings.json`): settings the file lacks are added, values it
+already holds are kept, and the deny lists are combined. A later change you make
+in `/config` therefore survives reruns.
+
+| Setting | Value |
+|---|---|
+| `model`, `effortLevel`, `modelSettings` | Opus; `xhigh` effort for every model; automatic compaction window for Opus 5.5 |
+| `permissions.defaultMode` | `auto` |
+| `autoUpdatesChannel` | `stable`, the channel setup installs |
+| `theme` | `auto`, following the terminal background |
+| `statusLine` | `statusline.sh`, installed beside the settings; a `statusline.sh` you wrote yourself is kept (`CONFIG_ADOPT=statusline.sh` replaces it, keeping a backup) |
+| `enableArtifact`, `feedbackDrafts` | Artifacts off; feedback drafts off |
+| `askUserQuestionTimeout` | `10m` |
+| `skipDangerousModePermissionPrompt` | `true` |
+| `voice` | dictation on, hold to talk |
+| `remoteControlAtStartup`, `inputNeededNotifEnabled`, `agentPushNotifEnabled` | Remote Control at startup with push notifications |
+| `crossSessionInbound`, `switchModelsOnFlag` | accept messages from your other sessions; switch models when a request is flagged |
+| `workflowSizeGuideline` | `small` |
+| `pluginConfigs` | charts on for the built-in easel plugin |
+
+Settings only you want, such as an organization's sandbox domains or a hook
+with your paths, go in `~/.config/workspace-setup/agents/claude-settings.json`
+beside your profiles. When `settings.json` does not exist yet, that file starts
+it, so its values outrank the shipped ones; afterwards host setup merges it the
+same way, keeping values already in `settings.json`. A hook script can live in the same directory and be referenced as
+`"$HOME"/.config/workspace-setup/agents/<script>`, because Claude Code runs hook
+commands with `sh -c`.
 
 ## Bundled agent skills
 
-Host setup installs the bundled `SKILL.md` files into each agent's native skills directory.
+This repository publishes two skills in `dotfiles/agents/skills/`. The core
+skills manifest installs `workspace-tools` from this repository through the
+skills CLI, and the `macos` profile installs `apple-container-amd64`, so both
+live in the shared store and reach every agent like any other skill. Host
+setup removes the copies earlier versions placed in each agent's directory when
+every file is a shipped version, and reports edited copies.
 
-| Skill | Agents | When |
-|---|---|---|
-| `workspace-tools` | Claude Code, Codex, OpenCode, Copilot | Both platforms |
-| `apple-container-amd64` | Claude Code, Codex | macOS, unless `SKIP_CONTAINER=1` |
+| Skill | When |
+|---|---|
+| `workspace-tools` | Both platforms |
+| `apple-container-amd64` | macOS, unless `SKIP_CONTAINER=1` |
 
-`workspace-tools` highlights tools for search, diffs, documents, and terminal
-workflows with one example per command.
+`workspace-tools` highlights tools for search, diffs, documents, browsers, and
+terminal workflows with one example per command.
 `apple-container-amd64` describes Apple's `container` CLI, Rosetta-translated `linux/amd64`
 builds, native builder sizing, current build-context handling, and the optional
-third-party `container-compose` workflow. It is installed only on macOS.
+third-party `container-compose` workflow.
 
 The baseline preserves Apple's CPU and memory defaults. The bundled
 `scripts/optimize-builder.sh CPUS MEMORY` delegates explicit resource choices
@@ -1164,7 +1287,8 @@ packages built on it; the run names them before it proceeds.
 workspace-setup/
 ├── setup.sh                      # entry point (curl | bash friendly)
 ├── AGENTS.md                     # canonical project guidance; CLAUDE.md includes it
-├── manifests/                    # shared skills, MCP servers, and Claude plugins
+├── manifests/                    # core skills, MCP servers, and Claude plugins
+│   └── profiles/                  # opt-in sets: macos (automatic), ai-agents, web, mcp-dev
 ├── lib/
 │   ├── agents/                   # native agent paths, reconciliation, and verification
 │   ├── log.sh                     # logging + stage runner
@@ -1204,9 +1328,12 @@ workspace-setup/
 │   ├── bashrc, bash_profile, profile, inputrc, nanorc # shell/editor — both platforms
 │   ├── zshenv, zprofile, zshrc                  # zsh — macOS only, enforced by tests
 │   ├── ssh/config                 # example Host block + keepalive defaults
-│   ├── claude/settings.json       # permissions.deny denylist
+│   ├── claude/settings.json       # Claude Code settings and permissions.deny denylist
+│   ├── claude/statusline.sh       # Claude Code status line
 │   ├── codex/rules/default.rules  # Starlark prefix_rule() denylist
-│   ├── agents/skills/             # skills converged into every agent home
+│   ├── copilot/hooks/             # preToolUse hook with the same denylist
+│   ├── gemini/antigravity-cli/settings.json # Antigravity command deny rules
+│   ├── agents/skills/             # skills this repo publishes; manifests install them
 │   │   ├── apple-container-amd64/ # SKILL.md + scripts/optimize-builder.sh
 │   │   └── workspace-tools/       # CLI and TUI quick reference
 │   └── config/                    # kitty/, bat/, yazi/, gh/, opencode/, container/

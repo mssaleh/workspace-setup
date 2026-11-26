@@ -57,6 +57,9 @@ for relative in "${sourced[@]}"; do
     scripts/stage_fonts_terminal.sh)
       printf '%s\n' 'stage_fonts_terminal() { :; }' > "$fixture/$relative"
       ;;
+    scripts/stage_toolchains.sh)
+      printf '%s\n' 'stage_toolchains() { :; }' 'agent_browser_ensure_browser() { :; }' > "$fixture/$relative"
+      ;;
     scripts/stage_macos_graphical.sh)
       printf '%s\n' \
         'stage_macos_apps() { :; }' \
@@ -76,7 +79,7 @@ for relative in "${sourced[@]}"; do
 done
 
 mkdir -p "$fixture/lib/agents"
-cp "$TEST_ROOT/lib/agents/log.sh" "$TEST_ROOT/lib/agents/manifest.sh" "$fixture/lib/agents/"
+cp "$TEST_ROOT/lib/agents/log.sh" "$TEST_ROOT/lib/agents/manifest.sh" "$TEST_ROOT/lib/agents/paths.sh" "$fixture/lib/agents/"
 cp -R "$TEST_ROOT/manifests" "$fixture/"
 tar -czf "$TEST_TMP/payload.tar.gz" -C "$TEST_TMP/fixture" workspace-setup-main
 

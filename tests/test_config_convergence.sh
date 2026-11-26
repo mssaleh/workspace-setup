@@ -176,14 +176,20 @@ assert_regular_equal "$src" "$dst"
 [[ "$(cat "$dst".superseded.*)" == 'working custom shell file' ]]
 rm -f "$dst".superseded.*
 
-# Claude JSON uses a narrow union merge and preserves unrelated settings.
+# Claude JSON gains missing shipped settings, keeps the values it already holds,
+# and takes the union of the deny rules.
 claude_src="$TEST_ROOT/dotfiles/claude/settings.json"
 claude_dst="$TEST_TMP/claude.json"
-printf '%s\n' '{"theme":"custom","permissions":{"allow":["Read(*)"],"deny":["Bash(custom *)"]}}' > "$claude_dst"
-install_regular_file "$claude_src" "$claude_dst" claude-fixture 0644 merge_claude_settings
-jq -e '.theme == "custom" and (.permissions.allow | index("Read(*)")) and (.permissions.deny | index("Bash(custom *)")) and (.permissions.deny | index("Bash(brew install *)"))' \
+printf '%s\n' '{"theme":"custom","modelSettings":{"claude-opus-5-5":{"effortLevel":"low"}},"permissions":{"allow":["Read(*)"],"deny":["Bash(custom *)"]}}' > "$claude_dst"
+install_regular_file "$claude_src" "$claude_dst" claude-fixture 0644 merge_settings_json
+jq -e '.theme == "custom" and (.permissions.allow | index("Read(*)")) and (.permissions.deny | index("Bash(custom *)")) and (.permissions.deny | index("Bash(brew install *)"))
+  and .model == "opus" and .permissions.defaultMode == "auto"
+  and .modelSettings["claude-opus-5-5"] == {"effortLevel":"low","autoCompactWindow":"auto"}' \
   "$claude_dst" >/dev/null
 [[ "$CONFIG_LAST_ACTION" == merged ]]
+cp "$claude_dst" "$TEST_TMP/claude.before"
+install_regular_file "$claude_src" "$claude_dst" claude-fixture 0644 merge_settings_json
+cmp "$TEST_TMP/claude.before" "$claude_dst"
 
 # Native OpenCode rules take precedence over legacy permissions.
 opencode_src="$TEST_ROOT/dotfiles/config/opencode/opencode.jsonc"

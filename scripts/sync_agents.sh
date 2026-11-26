@@ -9,14 +9,17 @@
 #   curl -fsSL https://raw.githubusercontent.com/mssaleh/workspace-setup/main/setup.sh | bash -s -- agents
 #   bash setup.sh agents                      converge everything, then verify
 #   bash setup.sh agents --dry-run             report changes without applying them
-#   bash setup.sh agents --only skills         one pass (skills | mcp | plugins | verify)
+#   bash setup.sh agents --only skills         one pass (instructions | skills | mcp | plugins | verify)
 #   bash setup.sh agents --update              refresh declared sources and plugins
 #   bash setup.sh agents --prune-skills        remove fetched skills outside the manifest
 #   bash setup.sh agents --prune-plugin-cache  delete abandoned marketplace clones
 #   bash setup.sh agents --prune-duplicate-mcp remove duplicate names for declared endpoints
 #
 # Environment:
+#   AGENT_PROFILES  extra manifest profiles, comma-separated, beside those listed in
+#                   ~/.config/workspace-setup/agents/profiles
 #   AGENTS_HOME   shared skill store root      (default ~/.agents)
+#   AGENTS_INSTRUCTIONS  instructions linked into every agent (default ~/.agents/AGENTS.md)
 #   CLAUDE_HOME   Claude Code state            (default $CLAUDE_CONFIG_DIR or ~/.claude)
 #   CODEX_HOME    Codex state                  (default ~/.codex)
 #   SKILLS_CLI_VERSION   select the skills CLI release (default latest)
@@ -50,6 +53,8 @@ MANIFEST_DIR=${MANIFEST_DIR:-$REPO_DIR/manifests}
 . "$REPO_DIR/lib/agents/plugins.sh"
 # shellcheck source=lib/agents/verify.sh
 . "$REPO_DIR/lib/agents/verify.sh"
+# shellcheck source=lib/agents/instructions.sh
+. "$REPO_DIR/lib/agents/instructions.sh"
 
 ONLY=""
 usage() { awk 'NR>1 { if ($0 !~ /^#/) exit; sub(/^# ?/, ""); print }' "$REPO_DIR/scripts/sync_agents.sh"; exit 0; }
@@ -61,12 +66,12 @@ while (($#)); do
     --prune-skills)       PRUNE_SKILLS=1 ;;
     --only|--only=*)
       if [[ "$1" == --only ]]; then
-        (($# >= 2)) || fail "--only requires skills, mcp, plugins or verify"
+        (($# >= 2)) || fail "--only requires instructions, skills, mcp, plugins or verify"
         ONLY="$2"; shift
       else
         ONLY="${1#*=}"
       fi
-      case "$ONLY" in skills|mcp|plugins|verify) ;; *) fail "invalid --only value: $ONLY" ;; esac ;;
+      case "$ONLY" in instructions|skills|mcp|plugins|verify) ;; *) fail "invalid --only value: $ONLY" ;; esac ;;
     --prune-plugin-cache) PRUNE_PLUGIN_CACHE=1 ;;
     --prune-duplicate-mcp) PRUNE_DUPLICATE_MCP=1 ;;
     -h|--help)            usage ;;
@@ -86,6 +91,7 @@ for tool_path in "${tool_paths[@]}"; do
   esac
 done
 export PATH
+agents_detect
 export DRY_RUN=${DRY_RUN:-}
 export PRUNE_PLUGIN_CACHE=${PRUNE_PLUGIN_CACHE:-}
 export PRUNE_DUPLICATE_MCP=${PRUNE_DUPLICATE_MCP:-}
@@ -105,11 +111,17 @@ manifest_validate || fail "fix the manifests above before running"
 
 [[ -n "$DRY_RUN" ]] && info "dry run — no configuration changes"
 
+pass_instructions() {
+  instructions_converge
+  if [[ "$ONLY" == instructions ]]; then verify_instructions; fi
+}
+
 pass_skills() {
   skills_prepare_paths || return
   skills_install
   skills_prune
   skills_mirror
+  skills_report_shadowing
   if [[ "$ONLY" == skills ]]; then verify_store; verify_mirrors; fi
 }
 
@@ -134,12 +146,14 @@ pass_plugins() {
 
 pass_verify() {
   verify_dry_run_notice
+  verify_instructions
   verify_store
   verify_mirrors
   verify_mcp
   verify_plugins
 }
 
+selected instructions && stage "instructions: one file for every agent" pass_instructions
 selected skills  && stage "skills: store and mirrors"          pass_skills
 selected mcp     && stage "mcp: servers into every agent"       pass_mcp
 selected plugins && stage "plugins: declared installs"          pass_plugins

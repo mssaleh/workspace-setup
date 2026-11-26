@@ -333,5 +333,59 @@ mv "$root/bin/copilot" "$root/bin/copilot.disabled"
 test_bash=$(command -v bash)
 out=$(PATH="$root/bin:${test_bash%/*}:/usr/bin:/bin" "$REPO_DIR/setup.sh" agents --only mcp 2>&1); status=$?
 assert_eq "Copilot targets are optional when the CLI is absent" "$status" 0
+mv "$root/bin/copilot.disabled" "$root/bin/copilot"
+
+# --- * names every installed agent; Antigravity uses agy's own commands ---
+printf 'every\thttp\thttps://every.example/mcp\t*\n' > "$MANIFEST_DIR/mcp.tsv"
+agent_mcp_invalidate
+out=$(mcp_converge 2>&1)
+assert_contains "* installs into every installed agent" "$out" \
+  "installing every into claude-code,codex,opencode,github-copilot,antigravity"
+assert_contains "agy adds a remote server by type" "$(cat "$SANDBOX/calls/antigravity")" "mcp add --type http every https://every.example/mcp"
+assert_contains "agy's file is read back from serverUrl" \
+  "$(agent_mcp_target antigravity every)" "$(printf 'remote\thttps://every.example/mcp\ttrue')"
+out=$(mcp_converge 2>&1)
+assert_eq "a converged * row writes nothing" "$(grep -c '^~' <<< "$out")" "0"
+
+printf 'every\n' > "$SANDBOX/state/disabled-antigravity"
+"$SANDBOX/bin/sandbox-render"
+agent_mcp_invalidate
+out=$(verify_mcp 2>&1)
+assert_contains "agy's disabled flag is read" "$out" "antigravity → disabled"
+mcp_converge >/dev/null 2>&1
+agent_mcp_invalidate
+out=$(verify_mcp 2>&1)
+assert_absent "agy re-enables the server" "$out" "✗"
+
+printf 'legacy\tsse\thttps://legacy.example/sse\t*\n' >> "$MANIFEST_DIR/mcp.tsv"
+agent_mcp_invalidate
+out=$(mcp_converge 2>&1)
+assert_contains "* leaves out the agents with no SSE client" "$out" \
+  "installing legacy into claude-code,opencode,github-copilot"
+
+mv "$root/bin/agy" "$root/bin/agy.disabled"
+agent_mcp_invalidate
+out=$(PATH="$root/bin:${test_bash%/*}:/usr/bin:/bin"; agents_detect; mcp_converge 2>&1)
+assert_absent "without agy, * does not name Antigravity" "$out" "antigravity"
+mv "$root/bin/agy.disabled" "$root/bin/agy"
+
+# --- declared arguments are part of the target ---
+printf 'quiet\tstdio\tquiet-mcp@latest --no-usage-statistics\tclaude-code,antigravity\n' > "$MANIFEST_DIR/mcp.tsv"
+agent_mcp_invalidate
+mcp_converge >/dev/null 2>&1
+agent_mcp_invalidate
+assert_eq "declared arguments reach the command" \
+  "$(agent_mcp_command antigravity quiet | tr '\t' ' ')" "npx -y quiet-mcp@latest --no-usage-statistics"
+sandbox_set_mcp claude-code quiet stdio quiet-mcp@latest
+agent_mcp_invalidate
+out=$(verify_mcp 2>&1)
+assert_contains "an entry without the declared arguments is wrong" "$out" "claude-code → arguments ''"
+out=$(mcp_converge 2>&1)
+assert_contains "and is reinstalled as declared" "$out" "installing quiet into claude-code"
+agent_mcp_invalidate
+assert_eq "with the declared arguments" \
+  "$(agent_mcp_command claude-code quiet | tr '\t' ' ')" "npx -y quiet-mcp@latest --no-usage-statistics"
+out=$(mcp_converge 2>&1)
+assert_eq "and then converges" "$(grep -c '^~' <<< "$out")" "0"
 
 test_summary

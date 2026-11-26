@@ -65,6 +65,7 @@
 #                plugin, for a host with no desktop store
 #   SKIP_CLAUDE_DESKTOP — set to 1 to skip the Claude Desktop app (Linux only)
 #   SKIP_CODEX_APP — set to 1 to skip the Codex app (Linux only)
+#   SKIP_CHROME — set to 1 to skip Google Chrome, which the browser tools drive
 #   SKIP_HEADLESS_CREDENTIALS — set to 1 to skip the check that credentials are
 #                reachable without a GUI session (macOS only)
 #   SKIP_REMOTE_AUDIT — macOS only: skip the read-only Remote Login, FileVault,
@@ -88,7 +89,7 @@ Usage: bash setup.sh [host | agents [OPTIONS]]
 
 Set PRESERVE_CLI_DUPLICATES=1 to keep existing alternate CLI installations.
 
-Agent options: --dry-run, --update, --only skills|mcp|plugins|verify,
+Agent options: --dry-run, --update, --only instructions|skills|mcp|plugins|verify,
                --prune-skills, --prune-plugin-cache, --prune-duplicate-mcp.
 Run bash setup.sh agents --help for details. Dry-run applies to agents only.
 USAGE
@@ -316,13 +317,14 @@ apply_linux_host_profile() {
       SKIP_VSCODE=${SKIP_VSCODE:-1}
       SKIP_CLAUDE_DESKTOP=${SKIP_CLAUDE_DESKTOP:-1}
       SKIP_CODEX_APP=${SKIP_CODEX_APP:-1}
+      SKIP_CHROME=${SKIP_CHROME:-1}
       SKIP_GNOME_EXTENSIONS=${SKIP_GNOME_EXTENSIONS:-1}
       # A server is reached over SSH; it has no use for a key of its own, and
       # generating one would stop an unattended run at the passphrase prompt.
       SKIP_SSH=${SKIP_SSH:-1}
       INSTALL_RECOMMENDS=${INSTALL_RECOMMENDS:-0}
       export SKIP_FONT SKIP_FLATPAK SKIP_LIBREOFFICE SKIP_VSCODE \
-        SKIP_CLAUDE_DESKTOP SKIP_CODEX_APP SKIP_GNOME_EXTENSIONS \
+        SKIP_CLAUDE_DESKTOP SKIP_CODEX_APP SKIP_CHROME SKIP_GNOME_EXTENSIONS \
         SKIP_SSH INSTALL_RECOMMENDS
       ;;
     *) fail "HOST_PROFILE must be 'workstation' or 'headless' (got '$HOST_PROFILE')" ;;
@@ -421,6 +423,7 @@ main() {
   if [[ "$OS_KIND" == linux ]]; then
     stage "apparmor: converge Edge profile"          stage_apparmor
   fi
+  stage "browser: a Chrome for agent-browser"       agent_browser_ensure_browser
   stage "commands: select installed providers"      stage_command_providers
 
   if [[ "$OS_KIND" == macos ]]; then

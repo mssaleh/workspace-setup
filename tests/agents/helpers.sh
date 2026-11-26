@@ -45,11 +45,11 @@ sandbox_new() {
            "$root/home/.claude/skills" "$root/home/.claude/plugins" \
            "$root/home/.codex/skills" \
            "$root/home/.copilot/skills" \
-           "$root/home/.config/opencode" \
+           "$root/home/.config/opencode" "$root/home/.gemini/config" \
            "$root/bin" "$root/state" "$root/calls"
   : > "$root/state/lock"
   : > "$root/state/mcp-claude-code"; : > "$root/state/mcp-codex"; : > "$root/state/mcp-opencode"
-  : > "$root/state/mcp-github-copilot"
+  : > "$root/state/mcp-github-copilot"; : > "$root/state/mcp-antigravity"
   : > "$root/state/projects"; : > "$root/state/plugins"; : > "$root/state/marketplaces"
 
   # ---- renderers: flat state in, real config formats out ----
@@ -136,6 +136,29 @@ json_servers() {           # <state file> <indent> — "name": { … } members
   json_servers "$S/mcp-github-copilot" "    "
   printf '  }\n}\n'
 } > "$H/.copilot/mcp-config.json"
+
+# agy 1.5.17 writes serverUrl and a disabled flag.
+{ printf '{\n  "mcpServers": {\n'
+  first=1
+  while IFS=$'\t' read -r name kind target; do
+    [[ -n "$name" ]] || continue
+    ((first)) || printf ',\n'; first=0
+    printf '    "%s": {\n' "$name"
+    if [[ -f "$S/disabled-antigravity" ]] && grep -qxF "$name" "$S/disabled-antigravity"; then
+      printf '      "disabled": true,\n'
+    fi
+    if [[ "$kind" == remote ]]; then
+      printf '      "serverUrl": "%s"\n' "$target"
+    else
+      printf '      "args": '; server_command antigravity "$name" "$target" args
+      printf ',\n      "command": '; server_command antigravity "$name" "$target" command
+      printf '\n'
+    fi
+    printf '    }'
+  done < "$S/mcp-antigravity"
+  ((first)) || printf '\n'
+  printf '  }\n}\n'
+} > "$H/.gemini/config/mcp_config.json"
 
 { printf '{\n  "$schema": "https://opencode.ai/config.json",\n'
   printf '  // a comment, because this file permits them\n'
@@ -300,6 +323,7 @@ while (($#)); do
     --global) scope=global ;;
     --transport) transport="$2"; shift ;;
     --url) transport=http; target="$2"; shift ;;
+    --type) transport="$2"; shift ;;
     --)
       shift
       printf '%s\0' "$@" > "$SANDBOX/state/argv-$agent-$name"
@@ -335,6 +359,11 @@ case "$action" in
     exit 0 ;;
   add)
     [[ -n "$target" ]] || exit 1
+    # agy 1.5.17 replaces a name and clears its disabled flag.
+    if [[ "$agent" == antigravity && -f "$SANDBOX/state/disabled-antigravity" ]]; then
+      grep -vxF "$name" "$SANDBOX/state/disabled-antigravity" > "$SANDBOX/state/disabled-antigravity.tmp" || true
+      mv "$SANDBOX/state/disabled-antigravity.tmp" "$SANDBOX/state/disabled-antigravity"
+    fi
     if [[ "$agent" == claude-code || "$agent" == github-copilot ]] && cut -f1 "$f" | grep -qxF "$name"; then
       printf 'MCP server %s already exists in user config\n' "$name" >&2
       exit 1
@@ -409,6 +438,15 @@ STUB
   cat > "$root/bin/copilot" <<'STUB'
 #!/usr/bin/env bash
 if [[ "${1:-}" == mcp && "${2:-}" == add && "${3:-}" == --help ]]; then exit 0; fi
+if [[ "${1:-}" == instruction && "${2:-}" == list ]]; then
+  f="$COPILOT_HOME/copilot-instructions.md"
+  if [[ -f "$f" ]]; then
+    printf '[{"id":"home","type":"home","location":"user","sourcePath":"%s"}]\n' "$f"
+  else
+    printf '[]\n'
+  fi
+  exit 0
+fi
 if [[ "${1:-}" == mcp && "${2:-}" == list ]]; then
   cat "$COPILOT_HOME/mcp-config.json"
   exit
@@ -433,6 +471,12 @@ if [[ "${1:-}" == debug && "${2:-}" == config ]]; then
   exit
 fi
 exec "$SANDBOX/bin/stub-native-mcp" opencode "$@"
+STUB
+
+  cat > "$root/bin/agy" <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == --version ]]; then printf '%s\n' "${AGY_STUB_VERSION:-1.5.17}"; exit 0; fi
+exec "$SANDBOX/bin/stub-native-mcp" antigravity "$@"
 STUB
 
   chmod +x "$root/bin/"*

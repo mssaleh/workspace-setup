@@ -241,11 +241,23 @@ apt_manifest_package_wanted nodejs || fail_application 'a Node Snap displaced th
   apt_repo_is_configured() { [[ "$1" == "$CLAUDE_DESKTOP_APT_URI" || "$1" == "$VSCODE_APT_URI" ]]; }
   apt_trust_repo_key() { [[ "$1" == 'Claude Desktop' || "$1" == 'Visual Studio Code' ]]; }
   apt_write_repo_sources() { printf '%s\n' "$1" >> "$db/registered-sources"; printf 'changed\n'; }
+  VSCODE_SOURCES="$db/vscode.sources"
   register_third_party_apt_repos >/dev/null
   grep -Fxq '/etc/apt/sources.list.d/claude-desktop.sources' "$db/registered-sources" \
     || fail_application 'an existing Claude Desktop archive was not maintained'
-  grep -Fxq '/etc/apt/sources.list.d/vscode.sources' "$db/registered-sources" \
+  grep -Fxq "$VSCODE_SOURCES" "$db/registered-sources" \
     || fail_application 'an existing VS Code archive was not maintained'
+  # The code package writes this file itself on every update; a source it
+  # wrote under Microsoft's key is kept instead of being rewritten.
+  : > "$db/registered-sources"
+  printf '### THIS FILE IS AUTOMATICALLY CONFIGURED ###\nTypes: deb\nURIs: %s\nSuites: stable\nComponents: main\nArchitectures: amd64\nSigned-By: %s\n' \
+    "$VSCODE_APT_URI" "$db/microsoft.gpg" > "$VSCODE_SOURCES"
+  : > "$db/microsoft.gpg"
+  apt_keyring_is_trusted() { [[ "$1" == "$db/microsoft.gpg" && "$2" == "$VSCODE_KEY_FINGERPRINT" ]]; }
+  register_third_party_apt_repos >/dev/null
+  if grep -Fxq "$VSCODE_SOURCES" "$db/registered-sources"; then
+    fail_application "the code package's own VS Code source was rewritten"
+  fi
   : > "$db/registered-sources"
   SKIP_CLAUDE_DESKTOP=1 SKIP_VSCODE=1
   register_third_party_apt_repos >/dev/null

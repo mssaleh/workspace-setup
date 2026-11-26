@@ -22,8 +22,12 @@ mkdir -p "$HOME/.config/gh" "$HOME/.claude" "$HOME/.local/bin"
 # than the real one belonging to whoever runs the suite.
 export GIT_CONFIG_GLOBAL="$HOME/.gitconfig"
 fixture_keychain_status=0
+fixture_keychain_mdat=''
 security() {
   [[ "$*" == "find-generic-password -a ${USER:-$(id -un)} -s Claude Code-credentials" ]] || return 99
+  # SecurityTool prints the item's attributes, modification date included.
+  [[ -z "$fixture_keychain_mdat" ]] \
+    || printf '    "mdat"<timedate>=0x00  "%sZ\\000"\n' "$fixture_keychain_mdat"
   return "$fixture_keychain_status"
 }
 
@@ -42,6 +46,19 @@ chmod +x "$HOME/.local/bin/claude"
 run_check
 [[ "$POSTFLIGHT_FAILURES" == 0 ]] || { printf 'FAIL: reachable credentials were reported as broken\n' >&2; exit 1; }
 [[ "$POSTFLIGHT_PASSES" == 3 ]] || { printf 'FAIL: expected 3 passes, got %s\n' "$POSTFLIGHT_PASSES" >&2; exit 1; }
+
+# ── Claude's file store older than its Keychain login ─────────────────────
+# A desk login refreshed the Keychain on 6 Nov; the file is from 24 Aug.
+touch -t 202608240943 "$HOME/.claude/.credentials.json"
+fixture_keychain_mdat=20261106004326
+run_check > "$TEST_TMP/stale.log" 2>&1
+[[ "$POSTFLIGHT_FAILURES" == 1 ]] || { printf 'FAIL: a stale Claude file store was not reported\n' >&2; exit 1; }
+grep -Fq 'predate its Keychain login' "$TEST_TMP/stale.log" || { printf 'FAIL: the stale store was not named\n' >&2; exit 1; }
+# Refreshing the file from the Keychain makes it current.
+touch "$HOME/.claude/.credentials.json"
+run_check
+[[ "$POSTFLIGHT_FAILURES" == 0 ]] || { printf 'FAIL: a refreshed Claude file store was reported\n' >&2; exit 1; }
+fixture_keychain_mdat=''
 
 # ── git falling back to a credential helper ────────────────────────────────
 git config --global --unset-all 'url.git@github.com:.pushInsteadOf'

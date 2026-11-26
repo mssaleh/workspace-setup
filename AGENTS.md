@@ -37,7 +37,11 @@ stdin so children cannot consume manifests or the streamed script.
 Keep the agent worker's header contiguous because its help prints that header.
 
 Host providers belong in `lib/manifest.sh`; agent sources and targets belong in
-`manifests/`. Agent locations belong in `lib/agents/paths.sh`.
+`manifests/`. The top-level manifests are the core every user gets; stack-specific
+sets belong in `manifests/profiles/`, and personal rows in the user's
+`~/.config/workspace-setup/agents/`, including Claude settings only one user wants
+(`claude-settings.json`). Shipped agent settings add missing keys and keep the
+values a user already chose. Agent locations belong in `lib/agents/paths.sh`.
 Keep configuration ordinary and independent of the disposable payload.
 
 Prefer apt packages and Homebrew formulae or casks that package the intended
@@ -58,17 +62,25 @@ replacing a name requires native removal first. Codex and OpenCode named adds
 replace names. OpenCode V2 requires `--global`; V1 does not. Neither OpenCode
 version has native MCP removal: report requested removal as unresolved.
 Copilot is optional and requires native removal before replacement and native
-enable to clear disabled state. Preserve unsupported and undeclared entries.
+enable to clear disabled state. Antigravity is optional; `agy mcp add` replaces a
+name and `agy mcp enable` clears disabled state. `agy mcp list` has no JSON, so
+read its `mcp_config.json`. Preserve unsupported and undeclared entries.
 
 Compare MCP names, remote-versus-stdio kind, complete URLs, enabled state, and
-stdio package identity. An explicitly versioned target requires that version.
+stdio package identity. An explicitly versioned target requires that version,
+and declared stdio arguments require those arguments.
 Read effective native configuration after writes. Dry runs subtract only their
 recorded plan; real verification reads the resulting state.
 
-The skills CLI owns its lock file. Install missing sources and payloads;
-refresh only with `agents --update`. Prune only with the requested pruning
+The skills CLI owns its lock file. Install missing sources and payloads, and
+adopt declared skills the lock does not record, keeping a differing previous
+copy; refresh only with `agents --update`. Prune only with the requested pruning
 option. Retain all entries from declared whole sources and preserve skills
 outside the lock. Verify that each mirror resolves to its own payload.
+
+Link each installed agent's user-level instruction file to the one shared file.
+Adopt an existing file only when every agent has the same text; never merge or
+overwrite different text. The repository ships no instruction content.
 
 ## Host changes
 

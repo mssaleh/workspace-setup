@@ -1,0 +1,32 @@
+{
+  "permissions": {
+    "deny": [
+      "command(brew install)",
+      "command(brew uninstall)",
+      "command(brew reinstall)",
+      "command(brew upgrade)",
+      "command(brew tap)",
+      "command(brew untap)",
+      "command(brew services)",
+      "command(brew pin)",
+      "command(brew unpin)",
+      "command(brew link)",
+      "command(brew unlink)",
+      "command(brew fetch)",
+      "command(brew extract)",
+      "command(apt install)",
+      "command(apt remove)",
+      "command(apt purge)",
+      "command(apt upgrade)",
+      "command(apt update)",
+      "command(apt-get install)",
+      "command(apt-get remove)",
+      "command(apt-get purge)",
+      "command(apt-get upgrade)",
+      "command(apt-get update)",
+      "command(snap install)",
+      "command(snap remove)",
+      "command(snap refresh)"
+    ]
+  }
+}

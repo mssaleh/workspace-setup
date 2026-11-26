@@ -218,6 +218,13 @@ if array_has azure-cli "${PACKAGES_BREW[@]}"; then
 fi
 array_has cf "${NPM_TOOLS_COMMON[@]}"
 array_has bun "${NPM_TOOLS_LINUX[@]}"
+# agent-browser: the managed npm tools on Linux, its Homebrew formula on macOS.
+array_has agent-browser "${NPM_TOOLS_LINUX[@]}"
+array_has agent-browser "${PACKAGES_BREW[@]}"
+# Google Chrome: Google's own package on Linux, its disk image on macOS.
+array_has google-chrome-stable "${PROVIDERS_LINUX_OFFICIAL_REPO[@]}"
+array_has google-chrome "${MACOS_DIRECT_APPS[@]}"
+[[ "$(macos_app_path google-chrome)" == "/Applications/Google Chrome.app" ]]
 array_has oven-sh/bun/bun "${PACKAGES_BREW[@]}"
 array_has rtk-ai/tap/rtk "${PACKAGES_BREW[@]}"
 upstream_has_project rtk

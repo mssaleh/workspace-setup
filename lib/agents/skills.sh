@@ -193,7 +193,7 @@ lock_source_skill_names() {
 
 skills_declared_names() {
   local row rows names
-  rows=$(manifest_rows "$MANIFEST_DIR/skills.tsv") || return
+  rows=$(manifest_rows_of skills) || return
   names=$(manifest_skill_names) || return
   {
     printf '%s\n' "$names"
@@ -226,10 +226,66 @@ skills_remove_from_store() (
     skills_cli remove -g -a universal "$@" -y
 )
 
-# Plain runs fetch missing payloads; --update re-fetches declared sources.
+# Real store directories the lock does not record, as "directory<TAB>name".
+# A link is a deliberate pointer at a working copy and is not listed.
+skills_unmanaged() {
+  local locked dir name
+  locked=$(lock_skill_names) || return 1
+  while IFS= read -r dir; do
+    [[ -n "$dir" && ! -L "$AGENTS_STORE/$dir" ]] || continue
+    name=$(skill_frontmatter_name "$AGENTS_STORE/$dir/SKILL.md")
+    grep -qxF "${name:-$dir}" <<< "$locked" || printf '%s\t%s\n' "$dir" "${name:-$dir}"
+  done < <(store_skill_dirs)
+}
+
+# skills 1.9 replaces an existing store directory of the same name without
+# reading the lock (cleanAndCreateDirectory), so unmanaged copies are saved
+# before a fetch and compared with whatever the fetch leaves in their place.
+skills_save_unmanaged() {
+  local backup="$1" dir name
+  while IFS=$'\t' read -r dir name; do
+    [[ -n "$dir" ]] || continue
+    if [[ ! -d "$backup" ]]; then run mkdir -p "$backup" || return 1; fi
+    run cp -Rp "$AGENTS_STORE/$dir" "$backup/$dir" || return 1
+  done <<< "$2"
+}
+
+skills_settle_unmanaged() {
+  local backup="$1" locked dir name
+  [[ -d "$backup" ]] || return 0
+  locked=$(lock_skill_names) || { problem "skills: cannot read lock to compare adopted skills"; return 1; }
+  while IFS=$'\t' read -r dir name; do
+    [[ -n "$dir" && -d "$backup/$dir" ]] || continue
+    if ! grep -qxF "$name" <<< "$locked" \
+        || diff -r -q "$backup/$dir" "$AGENTS_STORE/$dir" >/dev/null 2>&1; then
+      run rm -rf -- "${backup:?}/$dir"
+      grep -qxF "$name" <<< "$locked" && ok "adopted $name: the managed copy matches the previous one"
+    else
+      warn "adopted $name; the previous copy differs and is kept at $backup/$dir"
+    fi
+  done <<< "$2"
+  rmdir "$backup" "${backup%/*}" 2>/dev/null
+  return 0
+}
+
+# The lock records skills, not how they were requested, so a whole source
+# counts as fetched once it records a skill that no select row of the same
+# source names.
+whole_source_fetched() {
+  local locked selected
+  locked=$(lock_source_skill_names "$1") || return 1
+  [[ -n "$locked" ]] || return 1
+  selected=$(manifest_rows_of skills | awk -F'\t' -v s="$1" '$1 == s && $3 == "select" { print $2 }' \
+    | tr ',' '\n' | sed '/^$/d' | sort -u)
+  [[ -n "$(comm -23 <(printf '%s\n' "$locked") <(printf '%s\n' "$selected"))" ]]
+}
+
+# Plain runs fetch missing payloads and adopt declared skills the lock does not
+# record; --update re-fetches declared sources.
 skills_install() {
-  local row source names mode want missing flags f
+  local row source names mode want missing unmanaged adopt flags f backup=""
   local fetched=0
+  unmanaged=$(skills_unmanaged) || { problem "skills: cannot read lock at $AGENTS_LOCK"; return 1; }
   while IFS= read -r row; do
     source=$(manifest_field "$row" 1)
     names=$(manifest_field "$row" 2)
@@ -238,20 +294,31 @@ skills_install() {
     want=$({ printf '%s\n' "$names" | tr ',' '\n' | grep -v -e '^\*$' -e '^$';
              [[ "$mode" != whole ]] || lock_source_skill_names "$source"; } | sort -u)
     missing=$(comm -23 <(printf '%s\n' "$want") <(store_skill_names))
-    [[ -n "$missing" || -n "${UPDATE_SKILLS:-}" || ( "$mode" == whole && -z "$want" ) ]] || continue
+    adopt=$(comm -12 <(printf '%s\n' "$want") <(cut -f2 <<< "$unmanaged" | sort -u))
+    if [[ -z "$missing$adopt" && -z "${UPDATE_SKILLS:-}" ]]; then
+      [[ "$mode" == whole ]] && ! whole_source_fetched "$source" || continue
+    fi
     fetched=1
 
     if [[ -n "${UPDATE_SKILLS:-}" ]]; then
       delta "refreshing skills from $source"
     elif [[ -n "$missing" ]]; then
       delta "$source: fetching $(oneline "$missing")"
-    else
+    elif [[ -z "$adopt" ]]; then
       delta "$source: fetching all skills"
     fi
+    [[ -z "$adopt" ]] || delta "$source: adopting the unmanaged $(oneline "$adopt"); the previous copies are compared after the fetch"
     plan "skills-source:$source"
     while IFS= read -r f; do [[ -n "$f" ]] && plan "skill:$f"; done <<< "$missing"
+    while IFS= read -r f; do [[ -n "$f" ]] && plan "adopt:$f"; done <<< "$adopt"
+    if [[ -z "${DRY_RUN:-}" && -z "$backup" && -n "$unmanaged" ]]; then
+      backup="$AGENTS_HOME/superseded/$(date -u +%Y%m%dT%H%M%SZ)"
+      skills_save_unmanaged "$backup" "$unmanaged" \
+        || { problem "skills: cannot save unmanaged skills to $backup before fetching"; return 1; }
+    fi
     case "$mode" in
       select)
+        missing=$(printf '%s\n%s\n' "$missing" "$adopt" | sed '/^$/d')
         [[ -z "${UPDATE_SKILLS:-}" ]] || missing="$want"
         # `paste -` names stdin, which BSD paste requires; ${flags[@]+…} keeps
         # bash 3.2 from calling an empty array unbound.
@@ -263,8 +330,33 @@ skills_install() {
           || problem "could not install skills from $source" ;;
       *) fail "unknown mode '$mode' for $source in skills.tsv" ;;
     esac
-  done < <(manifest_rows "$MANIFEST_DIR/skills.tsv")
+  done < <(manifest_rows_of skills)
+  [[ -z "$backup" ]] || skills_settle_unmanaged "$backup" "$unmanaged"
   ((fetched)) || ok "store has every declared skill"
+  return 0
+}
+
+# Copilot, OpenCode and Antigravity read the store and a directory of their
+# own; agy 1.5.16 prefers its own on a name collision. A separate copy there
+# shadows or duplicates the store's and goes stale.
+skills_report_shadowing() {
+  local agent dir name found
+  for agent in github-copilot opencode antigravity; do
+    [[ " $SKILL_MIRROR_AGENTS " != *" $agent "* ]] || continue
+    agent_available "$agent" || continue
+    dir=$(agent_skills_dir "$agent") || continue
+    [[ -d "$dir" && ! "$dir" -ef "$AGENTS_STORE" ]] || continue
+    found=""
+    while IFS= read -r name; do
+      [[ -n "$name" ]] || continue
+      [[ -e "$dir/$name" || -L "$dir/$name" ]] || continue
+      [[ "$dir/$name" -ef "$AGENTS_STORE/$name" ]] && continue
+      found="$found$name
+"
+    done < <(store_skill_dirs)
+    [[ -z "$found" ]] \
+      || warn "$agent: $dir has its own copies of store skills, which it also loads: $(oneline "$found")"
+  done
   return 0
 }
 
@@ -333,7 +425,7 @@ skill_mirror_owned() {
 # A real directory under a mirrored name is a stale full copy shadowing the
 # store. The sweep skips links owned by the mirror loop.
 skills_mirror() {
-  local agent dir target name link mirrored locked skill
+  local agent dir target name link mirrored locked skill saved
   locked=$(lock_skill_names) || { problem "skills: cannot read lock for mirroring"; return 1; }
   mirrored=$(mirror_set "$locked")
   for agent in $SKILL_MIRROR_AGENTS; do
@@ -352,9 +444,17 @@ skills_mirror() {
         delta "$agent: repointing $name at the store"
         run rm -f "$link" || { problem "$agent: cannot remove $link"; continue; }
       elif [[ -d "$link" ]]; then
-        [[ -d "$target" ]] || { warn "$agent: $name is a local directory and the store has no such skill — left alone"; continue; }
+        [[ -d "$target" ]] || planned "skill:$name" \
+          || { warn "$agent: $name is a local directory and the store has no such skill — left alone"; continue; }
         delta "$agent: replacing the copied $name with a link into the store"
-        run rm -rf "$link" || { problem "$agent: cannot replace $link"; continue; }
+        if [[ -d "$target" ]] && ! diff -r -q "$link" "$target" >/dev/null 2>&1; then
+          saved="$AGENTS_HOME/superseded/$(date -u +%Y%m%dT%H%M%SZ)/$agent"
+          delta "$agent: $name differs from the store; keeping the copy at $saved/$name"
+          { run mkdir -p "$saved" && run mv "$link" "$saved/$name"; } \
+            || { problem "$agent: cannot move $link to $saved"; continue; }
+        else
+          run rm -rf "$link" || { problem "$agent: cannot replace $link"; continue; }
+        fi
       elif [[ -e "$link" ]]; then
         warn "$agent: $name exists and is neither a link nor a directory — left alone"
         continue

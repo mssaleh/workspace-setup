@@ -1,0 +1,6 @@
+# The Temporal server needs a one-time OAuth sign-in in each agent:
+# https://docs.temporal.io/with-ai
+temporal-docs	http	https://temporal.mcp.kapa.ai	*
+llamaindex-docs	http	https://developers.llamaindex.ai/mcp	*
+copilotkit	http	https://mcp.copilotkit.ai/mcp	*
+livekit-docs	http	https://docs.livekit.io/mcp/	*

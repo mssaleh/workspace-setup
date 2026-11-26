@@ -18,6 +18,26 @@ postflight_fail() {
   warn "$*"
 }
 
+# The CLI is required; a browser it can drive is reported, because a headless
+# host may have neither Chrome nor the libraries Chrome for Testing needs.
+postflight_agent_browser() {
+  local tool status
+  if [[ "${OS_KIND:-}" == macos ]]; then tool="$BREW_PREFIX/bin/agent-browser"
+  else tool="$HOME/.npm/packages/bin/agent-browser"; fi
+  if ! "$tool" --version </dev/null >/dev/null 2>&1; then
+    postflight_fail "agent-browser does not run from $tool"
+    return 0
+  fi
+  status=$("$tool" doctor --offline --quick --json </dev/null 2>/dev/null \
+    | jq -r '.checks[]? | select(.id == "chrome.installed") | .status' 2>/dev/null)
+  if [[ "$status" == pass ]]; then
+    postflight_pass "agent-browser runs and finds a Chrome"
+  else
+    postflight_pass "agent-browser runs"
+    warn "agent-browser finds no Chrome; run: agent-browser install"
+  fi
+}
+
 # A line that explains or remedies the failure above it. Not counted: a check
 # that has already failed should not fail twice for saying what to do about it.
 postflight_note() {
@@ -257,9 +277,11 @@ postflight_desktop_ssh_agent() {
 }
 
 postflight_configs() {
-  local claude_home codex_home opencode_config opencode_json
+  local claude_home codex_home copilot_home antigravity_home opencode_config opencode_json
   claude_home=$(claude_config_home)
   codex_home=$(agent_home codex)
+  copilot_home=$(agent_home github-copilot)
+  antigravity_home=$(agent_home antigravity)
   opencode_config=$(opencode_config_path opencode.jsonc)
   local files=(
     "$HOME/.bashrc"
@@ -285,7 +307,11 @@ postflight_configs() {
     "$HOME/.config/shell/README"
     "$HOME/.config/uv/uv.toml"
     "$claude_home/settings.json"
+    "$claude_home/statusline.sh"
     "$codex_home/rules/default.rules"
+    "$copilot_home/hooks/workspace-setup-guardrails.json"
+    "$copilot_home/hooks/workspace-setup-guardrails.sh"
+    "$antigravity_home/antigravity-cli/settings.json"
     "$HOME/.local/share/bash-completion/completions/himalaya"
   )
   if [[ "$OS_KIND" == macos ]]; then
@@ -318,7 +344,8 @@ postflight_configs() {
     postflight_fail "$HOME/.gitconfig does not parse"
   fi
   if opencode_json=$(config_json_read "$opencode_config") \
-      && jq empty "$claude_home/settings.json" >/dev/null 2>&1; then
+      && jq empty "$claude_home/settings.json" "$copilot_home/hooks/workspace-setup-guardrails.json" \
+        "$antigravity_home/antigravity-cli/settings.json" >/dev/null 2>&1; then
     postflight_pass "agent JSON configuration parses"
   else
     postflight_fail "one or more agent JSON configs do not parse"
@@ -339,7 +366,13 @@ postflight_configs() {
         end
       ' <<< "$opencode_json" >/dev/null 2>&1 \
       && grep -Fq 'pattern = ["brew", "install"]' "$codex_home/rules/default.rules" \
-      && grep -Fq 'pattern = ["apt-get", "install"]' "$codex_home/rules/default.rules"; then
+      && grep -Fq 'pattern = ["apt-get", "install"]' "$codex_home/rules/default.rules" \
+      && jq -e '[.hooks.preToolUse[]?.bash] | index("sh \"$COPILOT_HOOK_DIR/workspace-setup-guardrails.sh\"") != null' \
+        "$copilot_home/hooks/workspace-setup-guardrails.json" >/dev/null 2>&1 \
+      && jq -e '
+        (.permissions.deny | index("command(brew install)")) != null and
+        (.permissions.deny | index("command(apt-get install)")) != null
+      ' "$antigravity_home/antigravity-cli/settings.json" >/dev/null 2>&1; then
     postflight_pass "agent package-mutation guardrails are present"
   else
     postflight_fail "one or more agent package-mutation guardrails are missing"
@@ -440,28 +473,6 @@ postflight_ssh_agent() {
     postflight_pass "default SSH identity is loaded in the OpenSSH agent"
   else
     postflight_fail "default SSH identity is not loaded in the OpenSSH agent"
-  fi
-}
-
-postflight_agent_skills() {
-  # Skills are installed only where the runtime they describe is the one in use.
-  [[ "$OS_KIND" == macos && -z "${SKIP_CONTAINER:-}" ]] || return 0
-
-  local bad=() agent_home skill_md skill_script
-  for agent_home in "$(agent_home claude-code)" "$(agent_home codex)"; do
-    skill_md="$agent_home/skills/apple-container-amd64/SKILL.md"
-    skill_script="$agent_home/skills/apple-container-amd64/scripts/optimize-builder.sh"
-    if [[ ! -f "$skill_md" ]] || ! grep -Fq 'name: apple-container-amd64' "$skill_md"; then
-      bad+=("$skill_md")
-    fi
-    if [[ ! -x "$skill_script" ]]; then
-      bad+=("$skill_script")
-    fi
-  done
-  if ((${#bad[@]} == 0)); then
-    postflight_pass "Apple Container agent skill is readable by Claude Code and Codex"
-  else
-    postflight_fail "agent skill files missing or not executable: ${bad[*]}"
   fi
 }
 
@@ -1046,6 +1057,17 @@ postflight_upstream_tools() {
       esac
     fi
 
+    if [[ -n "${SKIP_CHROME:-}" ]]; then
+      :
+    elif apt_package_installed "$GOOGLE_CHROME_PACKAGE"; then
+      postflight_pass "Google Chrome apt package is installed"
+    else
+      case "$(dpkg --print-architecture 2>/dev/null || true)" in
+        amd64|arm64)
+          postflight_fail "Google Chrome apt package is missing (set SKIP_CHROME=1 on a headless host)" ;;
+      esac
+    fi
+
     if [[ -z "${SKIP_LIBREOFFICE:-}" ]]; then
       if libreoffice_installed; then
         postflight_pass "LibreOffice is installed"
@@ -1176,7 +1198,10 @@ postflight_headless_credentials() {
   if [[ -x "$HOME/.local/bin/claude" ]]; then
     local credentials_file credentials_argument credential_status=0
     credentials_file="$(claude_config_home)/.credentials.json"
-    if [[ -s "$credentials_file" ]]; then
+    printf -v credentials_argument '%q' "$credentials_file"
+    if [[ -s "$credentials_file" ]] && claude_keychain_newer_than "$credentials_file"; then
+      postflight_fail "Claude Code's file credentials predate its Keychain login, so ssh sessions use an expired sign-in; from a desktop terminal run: security find-generic-password -a \"\$USER\" -s 'Claude Code-credentials' -w > $credentials_argument"
+    elif [[ -s "$credentials_file" ]]; then
       postflight_pass "Claude Code credentials are in its file store"
     else
       security find-generic-password -a "${USER:-$(id -un)}" -s 'Claude Code-credentials' \
@@ -1186,7 +1211,6 @@ postflight_headless_credentials() {
       # https://github.com/apple-oss-distributions/Security/blob/main/SecurityTool/macOS/keychain_find.c
       case "$credential_status" in
         0)
-          printf -v credentials_argument '%q' "$credentials_file"
           postflight_fail "Claude Code credentials are Keychain-only — unusable over ssh; from a desktop terminal run: touch $credentials_argument && chmod 600 $credentials_argument && security find-generic-password -a \"\$USER\" -s 'Claude Code-credentials' -w > $credentials_argument"
           ;;
         44) info "Claude Code login is unconfirmed; authenticate and verify its file credentials before remote use" ;;
@@ -1194,6 +1218,21 @@ postflight_headless_credentials() {
       esac
     fi
   fi
+}
+
+# A desk login refreshes the Keychain item and leaves the file store as it was,
+# so an ssh session reads an older sign-in. The item's modification date is
+# metadata, which an ssh session can read.
+claude_keychain_newer_than() {
+  local mdat keychain file
+  mdat=$(security find-generic-password -a "${USER:-$(id -un)}" -s 'Claude Code-credentials' 2>/dev/null </dev/null \
+    | sed -n 's/.*"mdat"<timedate>=[^"]*"\([0-9]\{14\}\)Z.*/\1/p' | head -1)
+  [[ -n "$mdat" ]] || return 1
+  keychain=$(date -j -u -f %Y%m%d%H%M%S "$mdat" +%s 2>/dev/null \
+    || date -u -d "${mdat:0:8} ${mdat:8:2}:${mdat:10:2}:${mdat:12:2}" +%s 2>/dev/null) || return 1
+  # GNU stat reads -f as "file system", so its form is tried first.
+  file=$(stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null) || return 1
+  [[ "$keychain" =~ ^[0-9]+$ && "$file" =~ ^[0-9]+$ ]] && ((keychain > file))
 }
 
 # Apple Container is verified by postflight_macos_containers, which also knows
@@ -1314,7 +1353,7 @@ stage_postflight() {
 
   postflight_configs
   postflight_ssh_agent
-  postflight_agent_skills
+  postflight_agent_browser
   postflight_packages
   postflight_apparmor_attachments
   postflight_apparmor_edge

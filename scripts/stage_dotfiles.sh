@@ -240,18 +240,26 @@ zshrc_semantically_compliant() {
   return 1
 }
 
-merge_claude_settings() {
+# A status line script is often the user's own at the path Claude documents;
+# one that is not a shipped version is kept rather than reported as a conflict.
+keep_user_statusline() { CONFIG_MERGE_ACTION=kept; }
+
+# Claude Code and Antigravity settings: shipped keys are added where the file
+# lacks them, values the file already holds are kept, and permissions.deny
+# becomes the union of both lists.
+merge_settings_json() {
   local src="$1" dst="$2" mode="$3" tmp
   command -v jq >/dev/null 2>&1 || return 1
   jq empty "$src" >/dev/null 2>&1 || return 1
   jq empty "$dst" >/dev/null 2>&1 || return 1
-  tmp=$(mktemp "${TMPDIR:-/tmp}/claude-settings.XXXXXX") || return 1
+  tmp=$(mktemp "${TMPDIR:-/tmp}/agent-settings.XXXXXX") || return 1
   if ! jq -s '
       .[0] as $old | .[1] as $new |
-      $old |
-      .permissions = (($old.permissions // {}) + {
-        deny: ((($old.permissions.deny // []) + ($new.permissions.deny // [])) | unique)
-      })
+      # The inner merge keeps existing values; the outer one keeps their order.
+      ($old * ($new * $old)) |
+      if ($old.permissions.deny // $new.permissions.deny) == null then . else
+        .permissions.deny = ((($old.permissions.deny // []) + ($new.permissions.deny // [])) | unique)
+      end
     ' "$dst" "$src" > "$tmp"; then
     rm -f "$tmp"
     return 1
@@ -594,24 +602,29 @@ remove_legacy_tmux_config() {
   info "removed managed tmux config: $dst"
 }
 
-# Converge bundled skills into native directories, following existing store links.
-install_agent_skill() {
-  local repo="$1" skill="$2"
-  shift 2
-  local src_root="$repo/dotfiles/agents/skills/$skill"
-  local agent_dir file relative mode
-  if [[ ! -d "$src_root" ]]; then
-    warn "agent skill source does not exist: $src_root"
-    return 1
-  fi
-  for agent_dir in "$(agent_home claude-code)/skills" "$(agent_home codex)/skills" "$@"; do
-    while IFS= read -r -d '' file; do
-      relative=${file#"$src_root/"}
-      mode=0644
-      [[ -x "$file" ]] && mode=0755
-      install_regular_file "$file" "$agent_dir/$skill/$relative" \
-        "dotfiles/agents/skills/$skill/$relative" "$mode"
-    done < <(find "$src_root" -type f -print0)
+# The bundled skills reach agents through manifests/skills.tsv and the shared
+# store. Earlier runs copied them into each agent's own directory: a copy whose
+# every file is a version this repository shipped is removed, and anything
+# else is preserved. A directory linked to the store is the store itself.
+retire_bundled_skill_copies() {
+  local store="${AGENTS_STORE:-${AGENTS_HOME:-$HOME/.agents}/skills}" skill dir copy file known
+  for skill in workspace-tools apple-container-amd64; do
+    for dir in "$(agent_home claude-code)/skills" "$(agent_home codex)/skills" \
+        "${XDG_CONFIG_HOME:-$HOME/.config}/opencode/skills" "$(agent_home github-copilot)/skills"; do
+      copy="$dir/$skill"
+      [[ -d "$copy" && ! -L "$copy" && ! "$copy" -ef "$store/$skill" ]] || continue
+      known=1
+      while IFS= read -r -d '' file; do
+        config_file_is_known "dotfiles/agents/skills/$skill/${file#"$copy/"}" "$file" \
+          || { known=""; break; }
+      done < <(find "$copy" -type f -print0)
+      if [[ -n "$known" ]]; then
+        rm -rf -- "$copy" || return 1
+        info "removed the copied $skill skill from $dir; the shared skill store provides it"
+      else
+        warn "preserving $copy: it differs from every version this repository shipped"
+      fi
+    done
   done
 }
 
@@ -781,10 +794,12 @@ stage_git_config() {
 }
 
 stage_dotfiles() {
-  local repo claude_home codex_home opencode_config
+  local repo claude_home claude_overlay codex_home copilot_home antigravity_home opencode_config
   repo=$(repo_dir)
   claude_home=$(claude_config_home)
   codex_home=$(agent_home codex)
+  copilot_home=$(agent_home github-copilot)
+  antigravity_home=$(agent_home antigravity)
   opencode_config=$(opencode_config_path opencode.jsonc)
 
   remove_legacy_tmux_config
@@ -871,20 +886,38 @@ stage_dotfiles() {
     stage_container_config "$repo"
   fi
 
+  # Settings only one user wants, kept beside their manifest profiles. They
+  # start a new settings.json, so they outrank the shipped values there; after
+  # that, values already in the file are kept.
+  claude_overlay="$(agents_user_dir)/claude-settings.json"
+  if [[ -f "$claude_overlay" && ! -e "$claude_home/settings.json" ]] && jq empty "$claude_overlay" 2>/dev/null; then
+    config_atomic_replace "$claude_overlay" "$claude_home/settings.json" 0644 \
+      || warn "could not start $claude_home/settings.json from $claude_overlay"
+  fi
   install_repo_config "$repo" dotfiles/claude/settings.json \
-    "$claude_home/settings.json" 0644 merge_claude_settings
+    "$claude_home/settings.json" 0644 merge_settings_json
+  install_repo_config "$repo" dotfiles/claude/statusline.sh "$claude_home/statusline.sh" 0755 \
+    keep_user_statusline
+  if [[ -f "$claude_overlay" ]]; then
+    CONFIG_MERGE_ACTION=''
+    if merge_settings_json "$claude_overlay" "$claude_home/settings.json" 0644; then
+      [[ "$CONFIG_MERGE_ACTION" != merged ]] || info "merged your settings from $claude_overlay"
+    else
+      warn "could not merge $claude_overlay into $claude_home/settings.json"
+    fi
+  fi
   install_repo_config "$repo" dotfiles/codex/rules/default.rules \
     "$codex_home/rules/default.rules"
+  # Copilot takes user deny rules only from organization policy
+  # (`copilot help permissions`, 1.0.115), so a user hook applies them.
+  install_repo_config "$repo" dotfiles/copilot/hooks/workspace-setup-guardrails.json \
+    "$copilot_home/hooks/workspace-setup-guardrails.json"
+  install_repo_config "$repo" dotfiles/copilot/hooks/workspace-setup-guardrails.sh \
+    "$copilot_home/hooks/workspace-setup-guardrails.sh"
+  install_repo_config "$repo" dotfiles/gemini/antigravity-cli/settings.json \
+    "$antigravity_home/antigravity-cli/settings.json" 0644 merge_settings_json
 
-  install_agent_skill "$repo" workspace-tools \
-    "${XDG_CONFIG_HOME:-$HOME/.config}/opencode/skills" "$(agent_home github-copilot)/skills"
-
-  # The Apple Container skill is only correct where Apple Container is the
-  # runtime. A Linux host of this setup runs Docker Engine, and the skill
-  # explicitly instructs agents never to emit docker commands.
-  if [[ "$OS_KIND" == macos && -z "${SKIP_CONTAINER:-}" ]]; then
-    install_agent_skill "$repo" apple-container-amd64
-  fi
+  retire_bundled_skill_copies || return 1
 
   mkdir -p "$HOME/.ssh"
   chmod 0700 "$HOME/.ssh"

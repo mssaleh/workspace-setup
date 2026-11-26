@@ -52,12 +52,12 @@ plugins_converge() {
       claude_plugin install "$plugin@$marketplace" --scope user \
         || problem "could not install $plugin@$marketplace"
     fi
-  done < <(manifest_rows "$MANIFEST_DIR/plugins.tsv")
+  done < <(manifest_rows_of plugins)
 }
 
 plugins_report_undeclared() {
   local declared name
-  declared=$(manifest_rows "$MANIFEST_DIR/plugins.tsv" | awk -F'\t' '{print $4"@"$2}' | sort -u)
+  declared=$(manifest_rows_of plugins | awk -F'\t' '{print $4"@"$2}' | sort -u)
   while IFS= read -r name; do
     [[ -n "$name" ]] || continue
     grep -qxF "$name" <<< "$declared" || info "claude: plugin '$name' installed but not declared (left alone)"

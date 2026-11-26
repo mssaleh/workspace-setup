@@ -44,6 +44,7 @@ PACKAGES_BREW=(
   himalaya ncdu smartmontools pkgconf
   anomalyco/tap/opencode-v2
   ttscoff/thelab/apex
+  agent-browser
 )
 
 PACKAGES_BREW_CASK=(
@@ -56,9 +57,10 @@ PACKAGES_BREW_CASK=(
 PACKAGES_BREW_CLI_CASK=(azure-cli openai/tools/openai anthropics/tap/ant)
 BREW_CLI_COMMANDS=(opencode openai ant az)
 
-MACOS_DIRECT_APPS=(visual-studio-code libreoffice maccy)
+MACOS_DIRECT_APPS=(visual-studio-code libreoffice maccy google-chrome)
 MACOS_APP_ARTIFACTS=(
   "visual-studio-code:/Applications/Visual Studio Code.app"
+  "google-chrome:/Applications/Google Chrome.app"
   "libreoffice:/Applications/LibreOffice.app"
   "chatgpt:/Applications/ChatGPT.app"
   "claude:/Applications/Claude.app"
@@ -71,6 +73,8 @@ LIBREOFFICE_DOWNLOAD_BASE=https://download.documentfoundation.org/libreoffice/st
 CHATGPT_MACOS_DOWNLOAD_URL=https://persistent.oaistatic.com/codex-app-prod/Codex.dmg
 CLAUDE_MACOS_RELEASES_URL=https://downloads.claude.ai/releases/darwin/universal/RELEASES.json
 MACCY_MACOS_DOWNLOAD_URL=https://github.com/p0deje/Maccy/releases/latest/download/Maccy.app.zip
+# Google's universal disk image; Chrome then updates itself.
+GOOGLE_CHROME_MACOS_DOWNLOAD_URL=https://dl.google.com/chrome/mac/universal/stable/GGRO/googlechrome.dmg
 GOOGLE_CLOUD_MACOS_DOWNLOAD_BASE=https://dl.google.com/dl/cloudsdk/channels/rapid/downloads
 GOOGLE_CLOUD_MACOS_COMMANDS=(gcloud bq gsutil git-credential-gcloud.sh docker-credential-gcloud)
 
@@ -169,7 +173,9 @@ UV_TOOLS_MACOS=(ruff)
 UV_TOOLS_LINUX=(azure-cli)
 
 NPM_TOOLS_COMMON=(npm cf)
-NPM_TOOLS_LINUX=(bun)
+# agent-browser installs its platform binary as an optional dependency, so npm's
+# blocked install scripts do not affect it (0.45). macOS uses its formula.
+NPM_TOOLS_LINUX=(bun agent-browser)
 NPM_REGISTRY_URL=https://registry.npmjs.org
 AWS_CLI_INSTALL_URL=https://awscli.amazonaws.com/v2/install.sh
 CLAUDE_INSTALL_URL=https://claude.ai/install.sh
@@ -235,7 +241,7 @@ KITTY_TERMINFO_SOURCE_URL=https://raw.githubusercontent.com/kovidgoyal/kitty/mas
 # Documentation/inventory for non-default-repository providers. These names
 # are intentionally not fed to brew or apt.
 PROVIDERS_COMMON_UPSTREAM=(rustup uv-standalone kitty gddy agy aws-cli claude codex copilot)
-PROVIDERS_MACOS_UPSTREAM=(apple-container-signed-pkg rosetta google-cloud-cli visual-studio-code libreoffice maccy chatgpt claude-desktop)
+PROVIDERS_MACOS_UPSTREAM=(apple-container-signed-pkg rosetta google-cloud-cli visual-studio-code libreoffice maccy google-chrome chatgpt claude-desktop)
 # yq and cosign are packaged by the distribution, but not as the same software
 # macOS gets: Ubuntu's `yq` is kislyuk's jq wrapper rather than the mikefarah
 # program, and its `cosign` is a major behind. Both come from the upstream
@@ -245,7 +251,7 @@ PROVIDERS_LINUX_UPSTREAM=(zmx ruff himalaya yq cosign git-credential-manager ape
 # behind to use, taken from the vendor's own signed archive instead.
 PROVIDERS_LINUX_OFFICIAL_REPO=(
   kubectl helm docker-engine docker-compose-v2 claude-desktop nodejs
-  cmake gh chatgpt code google-cloud-cli azure-cli yazi
+  cmake gh chatgpt google-chrome-stable code google-cloud-cli azure-cli yazi
 )
 
 # Equivalent application packages: apt package, store, application id.
@@ -320,6 +326,9 @@ VSCODE_APT_URI=https://packages.microsoft.com/repos/code
 VSCODE_KEY_URL=https://packages.microsoft.com/keys/microsoft.asc
 VSCODE_KEYRING=/usr/share/keyrings/microsoft-archive-keyring.asc
 VSCODE_KEY_FINGERPRINT=BC528686B50D79E339D3721CEB3E94ADBE1229CF
+# The code package's maintainer script rewrites this file on every update, with
+# its own keyring and only the host architecture (code 1.148 postinst).
+VSCODE_SOURCES=/etc/apt/sources.list.d/vscode.sources
 
 # Node.js. NodeSource publish a setup_<major>.x script meant to be piped into
 # `sudo bash`; it is not used here because it rewrites the keyring and the
@@ -386,3 +395,12 @@ CODEX_APP_DEB_URL_BASE=https://persistent.oaistatic.com/codex-app-prod/linux/deb
 CODEX_APP_REPO_URI=https://persistent.oaistatic.com/codex-app-prod/linux/deb
 CODEX_APP_KEYRING=/usr/share/keyrings/chatgpt-archive-keyring.gpg
 CODEX_APP_KEY_FINGERPRINT=3BFA0E4AE8B8CC16A2D9BA684A3B4A566C4660E4
+
+# Google Chrome, for the browser tools agents use. Like the Codex app, Google's
+# package installs the keyring and writes its own source
+# (/etc/apt/sources.list.d/google-chrome.sources), so the published package is
+# fetched only while no source points at Google's archive. The prefix matches
+# the current chrome-stable/deb path and the older chrome/deb one.
+GOOGLE_CHROME_PACKAGE=google-chrome-stable
+GOOGLE_CHROME_DEB_URL_BASE=https://dl.google.com/linux/direct
+GOOGLE_CHROME_REPO_URI=https://dl.google.com/linux/chrome

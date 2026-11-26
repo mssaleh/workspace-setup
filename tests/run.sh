@@ -50,6 +50,7 @@ agent_tests=(
   agents/test_parsers.sh
   agents/test_skills_pass.sh
   agents/test_mcp_pass.sh
+  agents/test_instructions_pass.sh
   agents/test_idempotence.sh
   agents/test_cli.sh
   agents/test_dirty_host.sh

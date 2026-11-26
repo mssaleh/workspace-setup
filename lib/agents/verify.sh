@@ -12,23 +12,25 @@ verify_dry_run_notice() {
 }
 
 verify_store() {
-  local row source name missing unwanted broken invalid outside declared locked stray="" absent_sources=""
+  local row source name missing unwanted broken invalid unmanaged outside declared locked stray="" absent_sources=""
   declared=$(skills_declared_names) || { problem "store: cannot read skill declarations"; return 1; }
   locked=$(lock_skill_names) || { problem "store: cannot read skill lock at $AGENTS_LOCK"; return 1; }
   missing=$(comm -23 <(printf '%s\n' "$declared") <(store_skill_names))
   unwanted=$(comm -13 <(printf '%s\n' "$declared") <(printf '%s\n' "$locked"))
   invalid=$(comm -12 <(store_invalid_names) <(printf '%s\n' "$declared"))
+  unmanaged=$(skills_unmanaged | cut -f2 | sort -u | comm -12 - <(printf '%s\n' "$declared"))
 
   while IFS= read -r row; do
-    [[ "$(manifest_field "$row" 2)" == '*' ]] || continue
+    [[ "$(manifest_field "$row" 3)" == whole ]] || continue
     source=$(manifest_field "$row" 1)
-    if [[ -z "$(lock_source_skill_names "$source")" ]] && ! planned "skills-source:$source"; then
-      problem "store: no installed skills recorded for $source"
+    if ! whole_source_fetched "$source" && ! planned "skills-source:$source"; then
+      problem "store: whole source $source has not been fetched"
       absent_sources="$absent_sources $source"
     fi
-  done < <(manifest_rows "$MANIFEST_DIR/skills.tsv")
+  done < <(manifest_rows_of skills)
 
   problem_list "store: declared skills missing" "$(unplanned "$missing" 'skill:')"
+  problem_list "store: declared skills the skills lock does not record" "$(unplanned "$unmanaged" 'adopt:')"
   if [[ -n "${PRUNE_SKILLS:-}" ]]; then
     problem_list "store: undeclared skills present" \
       "$(unplanned "$(comm -12 <(printf '%s\n' "$unwanted") <(store_all_names))" 'unskill:')"
@@ -60,7 +62,7 @@ verify_store() {
   done
   [[ -z "$stray" ]] || info "store: other files, left alone: $(oneline "$stray")"
 
-  broken="$missing$unwanted$invalid$absent_sources"
+  broken="$missing$unwanted$invalid$unmanaged$absent_sources"
   [[ -z "$broken" ]] \
     && ok "store has the declared skills"
   return 0
@@ -129,14 +131,44 @@ verify_mirrors() {
     fi
   done
 
-  # OpenCode reads the store itself; the check is that it is on the path it globs.
+  # OpenCode and Antigravity read the store themselves; the check is that it is
+  # on the path they glob.
   if [[ "$AGENTS_STORE" == "$HOME/.agents/skills" || "$AGENTS_STORE" -ef "$HOME/.agents/skills" ]] \
     || planned 'skills-path:store'; then
     ok "opencode: reads $AGENTS_STORE directly, no mirror required"
+    verify_antigravity_store
   else
     problem "opencode: globs ~/.agents/skills, but the store is $AGENTS_STORE"
+    if agent_available antigravity; then problem "antigravity: reads ~/.agents/skills, but the store is $AGENTS_STORE"; fi
   fi
   return 0
+}
+
+# agy 1.5.16 added discovery of ~/.agents/skills (its changelog); earlier
+# releases read only ~/.gemini/config/skills.
+verify_antigravity_store() {
+  local version
+  agent_available antigravity || return 0
+  version=$(agy --version < /dev/null 2>/dev/null \
+    | awk '{ for (i = 1; i <= NF; i++) if ($i ~ /^v?[0-9]+[.][0-9]+/) { sub(/^v/, "", $i); print $i; exit } }')
+  if version_at_least "$version" 1.5.16; then
+    ok "antigravity: reads $AGENTS_STORE directly, no mirror required"
+  else
+    problem "antigravity: agy ${version:-of unknown version} predates ~/.agents/skills discovery (1.5.16); update it with: agy update"
+  fi
+}
+
+# Dotted numeric versions; an empty version is never new enough.
+version_at_least() {
+  awk -v have="$1" -v want="$2" 'BEGIN {
+    if (have == "") exit 1
+    n = split(have, h, "."); m = split(want, w, ".")
+    for (i = 1; i <= (n > m ? n : m); i++) {
+      if (h[i] + 0 > w[i] + 0) exit 0
+      if (h[i] + 0 < w[i] + 0) exit 1
+    }
+    exit 0
+  }'
 }
 
 # Presence of the name proves nothing: a server that kept its name while its URL
@@ -149,7 +181,8 @@ verify_mcp() {
     name=$(manifest_field "$row" 1)
     transport=$(manifest_field "$row" 2)
     target=$(manifest_field "$row" 3)
-    agents=$(manifest_field "$row" 4)
+    agents=$(mcp_row_agents "$transport" "$(manifest_field "$row" 4)")
+    [[ -n "$agents" ]] || continue
 
     state=$(mcp_row_state "$name" "$transport" "$target" "$agents")
     missing=${state%%|*}; state=${state#*|}
@@ -163,7 +196,7 @@ verify_mcp() {
     [[ -n "$missing" ]] && problem "mcp: '$name' absent from $missing"
     [[ -n "$wrong" ]]   && problem "mcp: '$name' in $wrong points elsewhere ($detail)"
     [[ -z "$unfixed" ]] && ok "mcp: '$name' resolves to $target for installed targets in $agents"
-  done < <(manifest_rows "$MANIFEST_DIR/mcp.tsv")
+  done < <(manifest_rows_of mcp)
   return 0
 }
 
@@ -193,6 +226,6 @@ verify_plugins() {
     elif ! planned "plugin:$plugin@$marketplace"; then
       problem "plugin: $plugin@$marketplace declared but not installed"
     fi
-  done < <(manifest_rows "$MANIFEST_DIR/plugins.tsv")
+  done < <(manifest_rows_of plugins)
   return 0
 }

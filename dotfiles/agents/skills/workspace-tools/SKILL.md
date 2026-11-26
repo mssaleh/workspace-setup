@@ -1,8 +1,9 @@
 ---
 name: workspace-tools
-description: Available CLI and TUI tools include bat, bun, cf, chafa, delta, eza, fd, fzf, gh, jq, lazygit, markitdown, ncdu, pandoc, rclone, rg, rsync, rtk, ruff, shellcheck, uv, yazi, yq, zmx, zoxide
+description: Available CLI and TUI tools include agent-browser, bat, bun, cf, chafa, delta, eza, fd, fzf, gh, jq, lazygit, markitdown, ncdu, pandoc, rclone, rg, rsync, rtk, ruff, shellcheck, uv, yazi, yq, zmx, zoxide
 ---
 
+- `agent-browser` – drive a browser and read the page · Example: `agent-browser open localhost:3000 && agent-browser snapshot -i`
 - `bat` – read highlighted lines · Example: `bat --paging=never --line-range :80 README.md`
 - `bun` – run JavaScript tests · Example: `bun test`
 - `cf` – discover Cloudflare CLI operations · Example: `cf cli search 'list workers scripts'`

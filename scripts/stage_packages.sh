@@ -705,11 +705,15 @@ register_third_party_apt_repos() {
   fi
 
   # --- Visual Studio Code — packages.microsoft.com/repos/code. ---
+  # A source the code package wrote is kept, so setup and the package do not
+  # take turns rewriting the same file.
   if [[ -z "${SKIP_VSCODE:-}" ]] \
      && { apt_gui_app_wanted code '' || apt_repo_is_configured "$VSCODE_APT_URI"; }; then
-    if apt_trust_repo_key 'Visual Studio Code' "$VSCODE_KEY_URL" \
+    if vscode_source_trusted; then
+      ok "Visual Studio Code's apt source is signed by Microsoft's key"
+    elif apt_trust_repo_key 'Visual Studio Code' "$VSCODE_KEY_URL" \
         "$VSCODE_KEYRING" "$VSCODE_KEY_FINGERPRINT"; then
-      source_changed=$(apt_write_repo_sources /etc/apt/sources.list.d/vscode.sources \
+      source_changed=$(apt_write_repo_sources "$VSCODE_SOURCES" \
         "$VSCODE_APT_URI" stable main 'amd64 arm64' "$VSCODE_KEYRING") || return 1
       if [[ -n "$source_changed" ]]; then
         info "added the Visual Studio Code apt repo (packages.microsoft.com)"
@@ -938,6 +942,48 @@ install_codex_app() {
   return "$rc"
 }
 
+# The VS Code source names Microsoft's archive and its Signed-By keyring holds
+# only Microsoft's key, whichever of setup or the code package wrote it.
+vscode_source_trusted() {
+  local keyring
+  [[ -f "$VSCODE_SOURCES" ]] && grep -qxF "URIs: $VSCODE_APT_URI" "$VSCODE_SOURCES" || return 1
+  keyring=$(sed -n 's/^Signed-By:[[:space:]]*//p' "$VSCODE_SOURCES" | head -1)
+  [[ -n "$keyring" ]] && apt_keyring_is_trusted "$keyring" "$VSCODE_KEY_FINGERPRINT"
+}
+
+# install_google_chrome <dpkg-architecture>
+# Installs from Google's repository when a source already points at it, and
+# otherwise installs the package Google publishes, which registers that source.
+install_google_chrome() {
+  local arch="$1" tmp deb rc=0
+  if apt_repo_is_configured "$GOOGLE_CHROME_REPO_URI"; then
+    apt_install_candidate "$GOOGLE_CHROME_PACKAGE" 'Google Chrome' "$GOOGLE_CHROME_REPO_URI"
+    return
+  fi
+  if apt_package_installed "$GOOGLE_CHROME_PACKAGE"; then
+    warn "Google Chrome is installed; no apt source points at $GOOGLE_CHROME_REPO_URI for updates"
+    return 0
+  fi
+  tmp=$(mktemp -d) || return 1
+  deb="$tmp/google-chrome-stable_current_${arch}.deb"
+  info "downloading Google Chrome from Google (this registers their apt repo)…"
+  if ! curl -fsSL "$GOOGLE_CHROME_DEB_URL_BASE/google-chrome-stable_current_${arch}.deb" -o "$deb"; then
+    warn "Google Chrome: could not download google-chrome-stable_current_${arch}.deb"
+    rm -rf "$tmp"
+    return 1
+  fi
+  if apt_report_removals install '' "$deb" && apt_install_packages "$deb"; then
+    sudo "${APT_ENV[@]}" "$PKGMGR" update || rc=1
+    apt_repo_is_configured "$GOOGLE_CHROME_REPO_URI" \
+      || { warn "Google Chrome: its package did not register $GOOGLE_CHROME_REPO_URI"; rc=1; }
+  else
+    warn "Google Chrome install failed"
+    rc=1
+  fi
+  rm -rf "$tmp"
+  return "$rc"
+}
+
 stage_packages() {
   local missing=()
   local pkg
@@ -1126,6 +1172,17 @@ stage_packages() {
       case "$codex_arch" in
         amd64|arm64) install_codex_app "$codex_arch" || return 1 ;;
         *) warn "Codex app: no packages published for architecture '${codex_arch:-unknown}' — skipping" ;;
+      esac
+    fi
+
+    # 6b. Google Chrome, which the browser MCP servers and agent-browser drive.
+    if [[ -n "${SKIP_CHROME:-}" ]]; then
+      info "skipping Google Chrome (SKIP_CHROME=1)"
+    else
+      local chrome_arch; chrome_arch=$(dpkg --print-architecture 2>/dev/null || true)
+      case "$chrome_arch" in
+        amd64|arm64) install_google_chrome "$chrome_arch" || return 1 ;;
+        *) warn "Google Chrome: no packages published for architecture '${chrome_arch:-unknown}' — skipping" ;;
       esac
     fi
 

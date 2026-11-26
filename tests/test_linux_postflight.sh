@@ -92,7 +92,7 @@ chmod +x "$TEST_TMP/system/cmake" "$TEST_TMP/system/ninja"
 # The architecture branch must answer too: the Claude Desktop and Codex app
 # checks consult it, and a stub that only understands `-s` would silently skip
 # those checks instead of exercising them.
-installed_packages='kubectl helm libreoffice claude-desktop chatgpt'
+installed_packages='kubectl helm libreoffice claude-desktop chatgpt google-chrome-stable'
 # The host's own Flatpaks would satisfy a GUI application these fixtures omit.
 # shellcheck disable=SC2329 # called by libreoffice_installed
 flatpak() { [[ "$1" != info ]] && command flatpak "$@"; }
@@ -169,7 +169,7 @@ POSTFLIGHT_PASSES=0
 POSTFLIGHT_FAILURES=0
 postflight_upstream_tools
 [[ "$POSTFLIGHT_FAILURES" == 0 ]]
-[[ "$POSTFLIGHT_PASSES" == 18 ]]
+[[ "$POSTFLIGHT_PASSES" == 19 ]]
 [[ ! -e "$TEST_TMP/standalone-delta-ran" ]]
 rm "$HOME/.local/bin/delta"
 
@@ -182,13 +182,13 @@ for python_release in 3.15.0 3.14.11rc1; do
 done
 printf '#!/bin/sh\nprintf "Python %s.10\\n"\n' "$PYTHON_MINOR" > "$TEST_TMP/system/python3"
 
-installed_packages='kubectl helm claude-desktop chatgpt'
+installed_packages='kubectl helm claude-desktop chatgpt google-chrome-stable'
 versioned_lo=1
 POSTFLIGHT_PASSES=0
 POSTFLIGHT_FAILURES=0
 postflight_upstream_tools >/dev/null
-[[ "$POSTFLIGHT_FAILURES" == 0 && "$POSTFLIGHT_PASSES" == 18 ]]
-installed_packages='kubectl helm libreoffice claude-desktop chatgpt'
+[[ "$POSTFLIGHT_FAILURES" == 0 && "$POSTFLIGHT_PASSES" == 19 ]]
+installed_packages='kubectl helm libreoffice claude-desktop chatgpt google-chrome-stable'
 versioned_lo=0
 
 # A user already in the docker group can verify the engine without sudo.
@@ -215,7 +215,7 @@ versioned_lo=0
 # than fail it — a headless host is a supported configuration.
 POSTFLIGHT_PASSES=0
 POSTFLIGHT_FAILURES=0
-SKIP_LIBREOFFICE=1 SKIP_CLAUDE_DESKTOP=1 SKIP_CODEX_APP=1 postflight_upstream_tools
+SKIP_LIBREOFFICE=1 SKIP_CLAUDE_DESKTOP=1 SKIP_CODEX_APP=1 SKIP_CHROME=1 postflight_upstream_tools
 [[ "$POSTFLIGHT_FAILURES" == 0 ]]
 [[ "$POSTFLIGHT_PASSES" == 15 ]]
 
@@ -224,8 +224,8 @@ installed_packages='kubectl helm'
 POSTFLIGHT_PASSES=0
 POSTFLIGHT_FAILURES=0
 postflight_upstream_tools
-[[ "$POSTFLIGHT_FAILURES" == 3 ]]
-installed_packages='kubectl helm libreoffice claude-desktop chatgpt'
+[[ "$POSTFLIGHT_FAILURES" == 4 ]]
+installed_packages='kubectl helm libreoffice claude-desktop chatgpt google-chrome-stable'
 
 # ── Node.js must be NodeSource's, and nothing else may be able to supply it ──
 # A distribution nodejs still installable at a non-negative priority is the

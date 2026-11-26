@@ -111,6 +111,11 @@ for command_name in "${BREW_CLI_COMMANDS[@]}"; do
   rm "$HOME/.local/bin/$command_name"
   ln -s "$BREW_PREFIX/bin/$command_name" "$HOME/.local/bin/$command_name"
 done
+# agent-browser's formula, reporting a Chrome it can drive.
+printf '%s\n' '#!/bin/sh' \
+  'case "$1" in doctor) printf "{\"checks\":[{\"id\":\"chrome.installed\",\"status\":\"pass\"}]}\n" ;; *) printf "agent-browser 1.0.0\n" ;; esac' \
+  > "$BREW_PREFIX/bin/agent-browser"
+chmod +x "$BREW_PREFIX/bin/agent-browser"
 printf '#!/bin/sh\nprintf "v%s.0.0\\n"\n' "$NODE_MAJOR" > "$BREW_PREFIX/opt/node@${NODE_MAJOR}/bin/node"
 chmod +x "$BREW_PREFIX/opt/node@${NODE_MAJOR}/bin/node"
 printf '#!/bin/sh\nprintf "Python %s.10\\n"\n' "$PYTHON_MINOR" > "$BREW_PREFIX/opt/python@$PYTHON_MINOR/bin/python$PYTHON_MINOR"

@@ -93,12 +93,20 @@ stage_macos_apps >/dev/null
 grep -Fxq 'app:visual-studio-code' "$calls"
 grep -Fxq 'app:maccy' "$calls"
 grep -Fxq 'app:libreoffice' "$calls"
+grep -Fxq 'app:google-chrome' "$calls"
 grep -Fxq 'vscode-links' "$calls"
 if grep -Fq 'font-jetbrains-mono-nerd-font' "$calls"; then
   fail_test 'application stage still owns the Nerd Font cask'
 fi
 if grep -Eq 'app:(chatgpt|claude)$' "$calls"; then
   fail_test 'optional desktop agents were installed without an explicit request'
+fi
+
+# Chrome has its own skip control, like the other default applications.
+: > "$calls"
+SKIP_CHROME=1 stage_macos_apps >/dev/null
+if grep -Fxq 'app:google-chrome' "$calls"; then
+  fail_test 'SKIP_CHROME=1 still installed Google Chrome'
 fi
 
 # Explicit optional applications are exact and independently selectable.

@@ -8,15 +8,16 @@
 mcp_install() {
   local agent="$1" name="$2" transport="$3" target="$4"
   local encoded="${5:-}" argument
-  local command=()
+  local command=() words=()
   if [[ "$transport" == stdio ]]; then
     if [[ -n "$encoded" ]]; then
       while IFS= read -r -d '' argument; do command+=("$argument"); done \
         < <(command_arguments <<< "$encoded")
     else
-      case "$target" in
-        /*|~/*|./*|../*) command=("$target") ;;
-        *) command=(npx -y "$target") ;;
+      read -r -a words <<< "$target"
+      case "${words[0]}" in
+        /*|~/*|./*|../*) command=("${words[@]}") ;;
+        *) command=(npx -y "${words[@]}") ;;
       esac
     fi
   fi
@@ -67,8 +68,55 @@ mcp_install() {
       else
         run opencode mcp add "$name" ${scope[@]+"${scope[@]}"} --url "$target"
       fi ;;
+    antigravity)
+      # agy 1.5.17 `mcp add` adds or replaces a name and clears its disabled
+      # flag; flags precede the name and `--` precedes a command.
+      if [[ "$transport" == stdio ]]; then
+        run agy mcp add "$name" -- ${command[@]+"${command[@]}"} || return
+      else
+        run agy mcp add --type http "$name" "$target" || return
+      fi
+      run agy mcp enable "$name" ;;
     *) fail "no native MCP installer for $agent" ;;
   esac
+}
+
+# A stdio target is a package followed by its declared arguments.
+mcp_target_package() { printf '%s\n' "${1%% *}"; }
+mcp_target_args() { [[ "$1" == *' '* ]] && printf '%s\n' "${1#* }"; return 0; }
+
+# The arguments an entry passes after its package, space-joined, from the
+# tab-separated command agent_mcp_command prints. npx options and the package
+# are skipped; a directly installed binary is followed by its arguments.
+mcp_command_args() {
+  printf '%s\n' "$1" | awk -F'\t' '{
+    i = 2
+    if ($1 ~ /(^|\/)npx(\.cmd)?$/) {
+      while (i <= NF && $i ~ /^-/ && $i != "--") i++
+      if ($i == "--") i++
+      i++
+    }
+    out = ""
+    for (; i <= NF; i++) out = out (out == "" ? "" : " ") $i
+    print out
+  }'
+}
+
+# The agents a row names, comma-separated. `*` is every supported agent
+# installed here that has a client for the row's transport.
+mcp_row_agents() {
+  local transport="$1" agents="$2" agent out=""
+  if [[ "$agents" != '*' ]]; then printf '%s\n' "$agents"; return; fi
+  for agent in $MCP_AGENTS; do
+    if [[ "$transport" == sse && ( "$agent" == codex || "$agent" == antigravity ) ]]; then continue; fi
+    agent_available "$agent" || continue
+    out="${out:+$out,}$agent"
+  done
+  printf '%s\n' "$out"
+}
+
+mcp_optional_absent() {
+  [[ "$1" == github-copilot || "$1" == antigravity ]] && ! agent_available "$1"
 }
 
 # Every remote transport is a URL entry; only stdio names a command.
@@ -108,7 +156,7 @@ mcp_stdio_matches() {
 
 # A URL is compared whole: every character of it is the address.
 mcp_target_matches() {
-  if [[ "$1" == stdio ]]; then mcp_stdio_matches "$2" "$3"; else [[ "$2" == "$3" ]]; fi
+  if [[ "$1" == stdio ]]; then mcp_stdio_matches "$(mcp_target_package "$2")" "$3"; else [[ "$2" == "$3" ]]; fi
 }
 
 # "<missing agents>|<wrong agents>|<what the wrong ones point at>". Strings, not
@@ -116,11 +164,12 @@ mcp_target_matches() {
 # host leaves all three empty.
 mcp_row_state() {
   local name="$1" transport="$2" target="$3" agents="$4"
-  local want_kind got kind rest actual on agent missing="" wrong="" detail=""
+  local want_kind got kind rest actual on agent missing="" wrong="" detail="" want_args="" args
   want_kind=$(mcp_expected_kind "$transport")
+  [[ "$transport" != stdio ]] || want_args=$(mcp_target_args "$target")
   while IFS= read -r agent; do
     [[ -n "$agent" ]] || continue
-    if [[ "$agent" == github-copilot ]] && ! copilot_available; then continue; fi
+    if mcp_optional_absent "$agent"; then continue; fi
     got=$(agent_mcp_target "$agent" "$name")
     if [[ -z "$got" ]]; then
       missing="${missing:+$missing,}$agent"; continue
@@ -130,6 +179,13 @@ mcp_row_state() {
     # Switched off is configured and not running, so no more satisfied than wrong.
     if [[ "$kind" != "$want_kind" ]] || ! mcp_target_matches "$transport" "$target" "$actual"; then
       wrong="${wrong:+$wrong,}$agent"; detail="${detail:+$detail; }$agent → $kind:$actual"
+      continue
+    fi
+    # Declared arguments are part of the target; undeclared ones are the user's.
+    args=""
+    [[ -z "$want_args" ]] || args=$(mcp_command_args "$(agent_mcp_command "$agent" "$name")")
+    if [[ "$args" != "$want_args" ]]; then
+      wrong="${wrong:+$wrong,}$agent"; detail="${detail:+$detail; }$agent → arguments '${args}'"
     elif [[ "$on" == false ]]; then
       wrong="${wrong:+$wrong,}$agent"; detail="${detail:+$detail; }$agent → disabled"
     fi
@@ -141,7 +197,8 @@ mcp_row_state() {
 # that lack it get that rather than the manifest spelling. Disagreement falls back.
 mcp_host_target() {
   local name="$1" transport="$2" target="$3" agents="$4" agent got actual candidate seen=""
-  if [[ "$transport" == stdio ]]; then
+  # Declared arguments are written as declared, never copied from another agent.
+  if [[ "$transport" == stdio && -z "$(mcp_target_args "$target")" ]]; then
     while IFS= read -r agent; do
       [[ -n "$agent" ]] || continue
       got=$(agent_mcp_target "$agent" "$name")
@@ -166,7 +223,8 @@ mcp_converge() {
     name=$(manifest_field "$row" 1)
     transport=$(manifest_field "$row" 2)
     target=$(manifest_field "$row" 3)
-    agents=$(manifest_field "$row" 4)
+    agents=$(mcp_row_agents "$transport" "$(manifest_field "$row" 4)")
+    [[ -n "$agents" ]] || { info "$name: no installed agent takes this row"; continue; }
 
     state=$(mcp_row_state "$name" "$transport" "$target" "$agents")
     missing=${state%%|*}; state=${state#*|}
@@ -198,7 +256,7 @@ mcp_converge() {
       agent_mcp_table > /dev/null \
         || { problem "mcp: cannot read configuration after native writes"; return 1; }
     fi
-  done < <(manifest_rows "$MANIFEST_DIR/mcp.tsv")
+  done < <(manifest_rows_of mcp)
 }
 
 mcp_report_disabled_here() {
@@ -251,19 +309,41 @@ mcp_duplicates() {
       fi
       printf '%s\t%s\t%s\n' "$name" "$target" "$dup"
       break
-    done < <(manifest_rows "$MANIFEST_DIR/mcp.tsv" | awk -F'\t' -v agent="$agent" -v kind="$kind" '
-      index("," $4 ",", "," agent ",") && (($2 == "stdio") == (kind == "stdio")) {
-        print $1 "\t" $3
-      }')
+    done < <(mcp_rows_for "$agent" "$kind")
   done < <(comm -13 <(manifest_mcp_names) <(agent_mcp_names "$agent"))
   return 0
+}
+
+# "name<TAB>target" for each declared row of this kind that names the agent;
+# a stdio target is its package without the declared arguments.
+mcp_rows_for() {
+  local agent="$1" kind="$2" row transport agents
+  while IFS= read -r row; do
+    transport=$(manifest_field "$row" 2)
+    if [[ "$transport" == stdio ]]; then
+      [[ "$kind" == stdio ]] || continue
+    else
+      [[ "$kind" != stdio ]] || continue
+    fi
+    agents=$(mcp_row_agents "$transport" "$(manifest_field "$row" 4)")
+    [[ ",$agents," == *",$agent,"* ]] || continue
+    printf '%s\t%s\n' "$(manifest_field "$row" 1)" "$(mcp_target_package "$(manifest_field "$row" 3)")"
+  done < <(manifest_rows_of mcp)
+}
+
+# Agents whose configuration the undeclared and duplicate reports read.
+mcp_report_agents() {
+  local agent
+  for agent in $MCP_AGENTS; do
+    mcp_optional_absent "$agent" || printf '%s\n' "$agent"
+  done
 }
 
 # Opt-in: remove an undeclared name for a declared endpoint.
 mcp_prune_duplicates() {
   [[ -n "${PRUNE_DUPLICATE_MCP:-}" ]] || return 0
   local agent name target dup wrote=""
-  for agent in claude-code codex opencode github-copilot; do
+  for agent in $(mcp_report_agents); do
     while IFS=$'\t' read -r name target dup; do
       [[ -n "$name" ]] || continue
       if [[ "$agent" == opencode ]]; then
@@ -275,6 +355,7 @@ mcp_prune_duplicates() {
         claude-code) run claude mcp remove --scope user "$name" ;;
         codex) run codex mcp remove "$name" ;;
         github-copilot) run copilot mcp remove "$name" ;;
+        antigravity) run agy mcp remove "$name" ;;
       esac || problem "mcp: native removal failed for '$name' in $agent"
       [[ -n "${DRY_RUN:-}" ]] || wrote=1
     done < <(mcp_duplicates "$agent")
@@ -289,7 +370,7 @@ mcp_prune_duplicates() {
 # Undeclared servers can belong to users or desktop integrations.
 mcp_report_undeclared() {
   local agent name extra dups duplicates removal
-  for agent in claude-code codex opencode github-copilot; do
+  for agent in $(mcp_report_agents); do
     removal="--prune-duplicate-mcp removes it"
     [[ "$agent" != opencode ]] || removal="OpenCode has no native MCP remove command"
     duplicates=$(mcp_duplicates "$agent")
@@ -316,8 +397,8 @@ mcp_report_variants() {
   while IFS= read -r row; do
     transport=$(manifest_field "$row" 2); [[ "$transport" == stdio ]] || continue
     name=$(manifest_field "$row" 1)
-    target=$(manifest_field "$row" 3)
-    agents=$(manifest_field "$row" 4)
+    target=$(mcp_target_package "$(manifest_field "$row" 3)")
+    agents=$(mcp_row_agents "$transport" "$(manifest_field "$row" 4)")
     seen=""; split=""; where=""; held=""; started=""
     while IFS= read -r agent; do
       [[ -n "$agent" ]] || continue
@@ -336,6 +417,6 @@ mcp_report_variants() {
     elif [[ -n "$seen" && "$started" != "$target" ]]; then
       info "'$name' runs $started in $held — the package $target names, started another way"
     fi
-  done < <(manifest_rows "$MANIFEST_DIR/mcp.tsv")
+  done < <(manifest_rows_of mcp)
   return 0
 }

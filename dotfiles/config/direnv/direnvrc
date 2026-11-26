@@ -48,25 +48,3 @@ use_stm32() {
 
     log_status "use_stm32: ${root##*/}"
 }
-
-# use_zephyr [workspace]
-#
-# Activates a west workspace's Python environment and points the Zephyr build at
-# the SDK. Defaults to the directory containing the .envrc.
-use_zephyr() {
-    local workspace="${1:-$PWD}" sdk
-
-    if [[ ! -d "$workspace/.west" ]]; then
-        log_error "use_zephyr: $workspace is not a west workspace (no .west/)"
-        return 1
-    fi
-    export ZEPHYR_BASE="$workspace/zephyr"
-
-    [[ -d "$workspace/.venv" ]] && source "$workspace/.venv/bin/activate"
-
-    sdk=$(find "$HOME" -maxdepth 1 -type d -name 'zephyr-sdk-*' 2>/dev/null \
-        | sort -V | tail -n 1)
-    [[ -n "$sdk" ]] && export ZEPHYR_SDK_INSTALL_DIR="$sdk"
-
-    log_status "use_zephyr: ${workspace##*/}${sdk:+ (sdk ${sdk##*-})}"
-}

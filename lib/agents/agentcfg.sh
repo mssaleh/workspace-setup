@@ -23,6 +23,7 @@ if [[ "$CLAUDE_HOME" != "$(claude_config_home)" ]]; then
 fi
 CODEX_HOME=$(agent_home codex)
 COPILOT_HOME=$(agent_home github-copilot)
+ANTIGRAVITY_MCP_CONFIG="$(agent_home antigravity)/config/mcp_config.json"
 
 # OpenCode 1.18 named adds prefer .json and create it when neither file exists.
 OPENCODE_CONFIG=${OPENCODE_CONFIG:-$(opencode_config_path)}
@@ -47,6 +48,36 @@ opencode_has_global_scope() {
 copilot_available() {
   command -v copilot >/dev/null 2>&1 \
     && copilot mcp add --help < /dev/null >/dev/null 2>&1
+}
+
+# Copilot and Antigravity are optional; the other agents are dependencies.
+agent_probe() {
+  case "$1" in
+    claude-code) command -v claude >/dev/null 2>&1 ;;
+    codex) command -v codex >/dev/null 2>&1 ;;
+    opencode) command -v opencode >/dev/null 2>&1 ;;
+    github-copilot) copilot_available ;;
+    antigravity) command -v agy >/dev/null 2>&1 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Probed once per run, after PATH is final: Copilot's probe starts its CLI,
+# and the passes ask from many command substitutions.
+AGENTS_DETECTED=""
+AGENTS_INSTALLED=""
+agents_detect() {
+  local agent
+  AGENTS_INSTALLED=""
+  for agent in $MCP_AGENTS; do
+    if agent_probe "$agent"; then AGENTS_INSTALLED="$AGENTS_INSTALLED $agent"; fi
+  done
+  AGENTS_DETECTED=1
+}
+
+agent_available() {
+  [[ -n "$AGENTS_DETECTED" ]] || agents_detect
+  [[ " $AGENTS_INSTALLED " == *" $1 "* ]]
 }
 
 # Brace depth, not indentation: a reformatted or minified file is the same
@@ -98,7 +129,8 @@ json_mcp_block() {
       if (want == "codex" && depth == 1 && key[depth] == "name") { name = v; return }
       if (depth != blockdepth + 1 && !(want == "codex" && depth == 2 && key[1] == "transport")) return
       if (inarr) { arg[++na] = v; return }
-      if (key[depth] == "url") url = v
+      # agy 1.5.17 writes serverUrl; its documentation also accepts url.
+      if (key[depth] == "url" || key[depth] == "serverUrl") url = v
       else if (key[depth] == "command") cmd = v
       else if (key[depth] == "enabled") enabled = v
       else if (key[depth] == "disabled") enabled = (v == "true" ? "false" : "true")
@@ -167,17 +199,26 @@ opencode_mcp_table() {
   fi
 }
 
+# `agy mcp list` has no JSON form (1.5.17), so its configuration file is read,
+# as Claude's is. agy writes enabled state there as "disabled".
+antigravity_mcp_table() {
+  json_mcp_block "$ANTIGRAVITY_MCP_CONFIG" mcpServers full
+}
+
 # Cached: the passes ask about the same servers repeatedly.
 agent_mcp_table() {
   if [[ -z "$MCP_TABLE_LOADED" ]]; then
     MCP_TABLE_CACHE=$(
       json_mcp_block "$CLAUDE_CONFIG" mcpServers full | sed $'s/^/claude-code\t/' || exit
       codex_mcp_table | sed $'s/^/codex\t/' || exit
-      if copilot_available; then
+      if agent_available github-copilot; then
         (cd / && copilot mcp list --json < /dev/null) \
           | json_mcp_block - mcpServers full | sed $'s/^/github-copilot\t/' || exit
       fi
       opencode_mcp_table | sed $'s/^/opencode\t/' || exit
+      if agent_available antigravity; then
+        antigravity_mcp_table | sed $'s/^/antigravity\t/' || exit
+      fi
     )
     local status=$?
     if ((status != 0)); then MCP_TABLE_CACHE=""; return "$status"; fi
@@ -279,6 +320,8 @@ agent_skills_dir() {
     claude-code) printf '%s\n' "$CLAUDE_HOME/skills" ;;
     codex)       printf '%s\n' "$CODEX_HOME/skills" ;;
     github-copilot) printf '%s\n' "$COPILOT_HOME/skills" ;;
+    opencode)    printf '%s\n' "${XDG_CONFIG_HOME:-$HOME/.config}/opencode/skills" ;;
+    antigravity) printf '%s\n' "$(agent_home antigravity)/config/skills" ;;
     *)           return 1 ;;
   esac
 }

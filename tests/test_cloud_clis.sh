@@ -119,14 +119,14 @@ install_cloud_clis >/dev/null
 grep -Fxq 'openai openai_{version}_linux_amd64.tar.gz openai' "$scratch/archives"
 grep -Fxq 'ant ant_{version}_linux_amd64.tar.gz ant' "$scratch/archives"
 [[ "$HOME/.local/bin/aws" -ef "$HOME/.local/share/aws-cli/v2/current/bin/aws" ]]
-[[ "$(cat "$CLI_TEST_LOG")" == $'gddy\naws\nnpm\ncf\nbun' ]]
+[[ "$(cat "$CLI_TEST_LOG")" == $'gddy\naws\nnpm\ncf\nbun\nagent-browser' ]]
 [[ "$("$HOME/.npm/packages/bin/npm" --version)" == 12.2.3 ]]
 [[ "$("$HOME/.npm/packages/bin/npx" --version)" == 12.2.3 ]]
 
 # Existing declared npm tools advance through npm's native updater.
 : > "$CLI_TEST_LOG"
 install_cloud_clis >/dev/null
-[[ "$(cat "$CLI_TEST_LOG")" == $'aws\ncf-update\nbun-update' ]]
+[[ "$(cat "$CLI_TEST_LOG")" == $'aws\ncf-update\nbun-update\nagent-browser-update' ]]
 [[ "$("$HOME/.npm/packages/bin/cf" --version)" == 'cf 2.0.0' ]]
 fixture_npm_update_failure=1
 if install_cloud_clis >/dev/null 2>&1; then exit 1; fi

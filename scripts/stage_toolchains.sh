@@ -101,6 +101,27 @@ stage_toolchains() {
   install_coding_agents || return 1
 }
 
+# agent-browser drives an installed Google Chrome and otherwise needs Chrome for
+# Testing from `agent-browser install` (0.45). It runs as its own stage after
+# the applications, so a workstation's Chrome is found first. --with-deps is
+# not used: it runs an apt transaction of its own. The browser is optional, so a
+# failed download is reported here and by postflight without stopping setup.
+agent_browser_ensure_browser() {
+  local tool status
+  if [[ "$OS_KIND" == macos ]]; then tool="$BREW_PREFIX/bin/agent-browser"
+  else tool="$HOME/.npm/packages/bin/agent-browser"; fi
+  [[ -x "$tool" ]] || { warn "agent-browser is missing at $tool"; return 1; }
+  status=$("$tool" doctor --offline --quick --json </dev/null 2>/dev/null \
+    | jq -r '.checks[]? | select(.id == "chrome.installed") | .status' 2>/dev/null)
+  if [[ "$status" == pass ]]; then
+    ok "agent-browser finds a Chrome to drive"
+    return 0
+  fi
+  info "downloading Chrome for Testing for agent-browser…"
+  "$tool" install </dev/null || warn "agent-browser could not download Chrome for Testing; run: agent-browser install"
+  return 0
+}
+
 install_linux_git_credential_manager() (
   local label=git-credential-manager parent="$HOME/.local/share" arch repo tag version actual tmp
   local bundle="$parent/gcm-core"

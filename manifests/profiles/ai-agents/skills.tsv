@@ -1,0 +1,9 @@
+# AI agent frameworks, retrieval, voice and chat UI.
+pydantic/skills	*	whole
+run-llama/llamaparse-agent-skills	*	whole
+CopilotKit/CopilotKit	*	whole
+temporalio/skill-temporal-developer	*	whole
+qdrant/skills/meta/qdrant-advisor	*	whole
+livekit/agent-skills	*	whole
+typesafe-ai/skills	*	whole
+assistant-ui/skills	*	whole

@@ -68,6 +68,7 @@ fixture_arch=arm64
 [[ "$(macos_app_download_url libreoffice)" == */26.8.2/mac/aarch64/LibreOffice_26.8.2_MacOS_aarch64.dmg ]]
 [[ "$(macos_app_download_url claude)" == https://downloads.claude.ai/releases/darwin/universal/4.0.1/Claude.zip ]]
 [[ "$(macos_app_download_url maccy)" == https://github.com/p0deje/Maccy/releases/latest/download/Maccy.app.zip ]]
+[[ "$(macos_app_download_url google-chrome)" == https://dl.google.com/chrome/mac/universal/stable/GGRO/googlechrome.dmg ]]
 [[ "$(macos_app_download_url chatgpt)" == "$CHATGPT_MACOS_DOWNLOAD_URL" ]]
 fixture_arch=x86_64
 if macos_app_download_url chatgpt >/dev/null 2>&1; then exit 1; fi

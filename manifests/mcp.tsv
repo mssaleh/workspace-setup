@@ -5,14 +5,22 @@
 #   name       The server name in every agent's config. Set here, never on the
 #              command line: three `codex mcp add copilotkit …` calls with three
 #              different URLs left Codex holding only the last one.
-#   transport  stdio — target is an npm package run under `npx -y`.
-#              http / sse — target is a URL. Codex has no SSE client and POSTs
-#              to the URL regardless, so an `sse` row naming it is refused.
-#   agents     Native CLI targets. OpenCode reads the shared skill store but
-#              needs its own MCP configuration. GitHub Copilot CLI is optional.
+#   transport  stdio — target is an npm package run under `npx -y`, optionally
+#              followed by single-spaced arguments, which entries must match.
+#              http / sse — target is a URL. Codex and Antigravity have no SSE
+#              client, so an `sse` row naming them is refused.
+#   agents     claude-code, codex, opencode, github-copilot, antigravity, or *
+#              for every one of them installed on the host. Copilot and
+#              Antigravity are optional.
+#
+# This file is the core every host gets; profiles and the user's own rows add to it.
 
-next-devtools	stdio	next-devtools-mcp@latest	claude-code,codex,opencode,github-copilot
-temporal-docs	http	https://temporal.mcp.kapa.ai	claude-code,codex,opencode
-llamaindex-docs	http	https://developers.llamaindex.ai/mcp	claude-code,codex,opencode
-copilotkit	http	https://mcp.copilotkit.ai/mcp	claude-code,codex,opencode
-livekit-docs	http	https://docs.livekit.io/mcp/	claude-code,codex,opencode
+# Documentation for the cloud CLIs setup.sh installs. No sign-in.
+aws-knowledge	http	https://knowledge-mcp.global.api.aws	*
+microsoft-learn	http	https://learn.microsoft.com/api/mcp	*
+cloudflare-docs	http	https://docs.mcp.cloudflare.com/mcp	*
+
+# Browser checks with console and network logs. Both start Chrome when used.
+# chrome-devtools-mcp sends usage statistics to Google unless told not to.
+chrome-devtools	stdio	chrome-devtools-mcp@latest --no-usage-statistics	*
+playwright	stdio	@playwright/mcp@latest	*

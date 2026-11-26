@@ -1,0 +1,6 @@
+# React, Next.js, shadcn/ui, web platform guidance and Cloudflare.
+vercel-labs/agent-skills	*	whole
+vercel/next.js	*	whole
+shadcn-ui/ui	*	whole
+GoogleChrome/modern-web-guidance	modern-web-guidance	select
+cloudflare/skills	*	whole

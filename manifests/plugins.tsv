@@ -3,6 +3,6 @@
 # agent	marketplace	marketplace_source	plugin
 #
 # The sync installs declared plugins and refreshes them on --update.
-# Additional installed plugins are preserved.
-
-claude-code	zephyr-ai	mssaleh/zephyr-ai	zephyr-ai
+# Additional installed plugins are preserved. Only claude-code is supported.
+#
+# The core declares none; profiles and the user's own rows add them.

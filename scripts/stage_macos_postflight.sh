@@ -103,6 +103,7 @@ postflight_macos_packages() {
   for pkg in "${apps[@]}"; do
     [[ "$pkg" == libreoffice && -n "${SKIP_LIBREOFFICE:-}" ]] && continue
     [[ "$pkg" == visual-studio-code && -n "${SKIP_VSCODE:-}" ]] && continue
+    [[ "$pkg" == google-chrome && -n "${SKIP_CHROME:-}" ]] && continue
     app_path=$(macos_app_path "$pkg") || { postflight_fail "unknown application: $pkg"; continue; }
     if [[ -d "$app_path/Contents/MacOS" ]] && codesign --verify --deep --strict "$app_path"; then
       postflight_pass "$pkg application is installed and its signature verifies"
@@ -411,7 +412,7 @@ stage_macos_postflight() {
 
   postflight_configs
   postflight_macos_ssh_agent
-  postflight_agent_skills
+  postflight_agent_browser
   postflight_macos_packages
   postflight_legacy_tmux
   postflight_durable_ssh

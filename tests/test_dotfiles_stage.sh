@@ -101,25 +101,58 @@ grep -Fq '# user preference' "$HOME/.bashrc"
 cp "$TEST_ROOT/dotfiles/bashrc" "$HOME/.bashrc"
 rm "$HOME/.local/bin/uv" "$HOME/.cargo/bin/rustup" "$HOME/.cargo/env"
 
-# Each agent discovers the toolbox skill in its native directory.
+# Bundled skills reach agents through the shared skill store. The copies
+# earlier runs put in each agent's directory are removed when they are a
+# shipped version and kept when the user edited them.
+[[ ! -e "$HOME/.claude/skills/workspace-tools" ]]
 for agent_home in "$HOME/.claude" "$HOME/.codex" "$HOME/.config/opencode" "$HOME/.copilot"; do
-  cmp "$TEST_ROOT/dotfiles/agents/skills/workspace-tools/SKILL.md" \
-    "$agent_home/skills/workspace-tools/SKILL.md"
+  mkdir -p "$agent_home/skills/workspace-tools"
+  cp "$TEST_ROOT/dotfiles/agents/skills/workspace-tools/SKILL.md" "$agent_home/skills/workspace-tools/SKILL.md"
 done
+printf '\nmy notes\n' >> "$HOME/.copilot/skills/workspace-tools/SKILL.md"
+stage_dotfiles >/dev/null
+for agent_home in "$HOME/.claude" "$HOME/.codex" "$HOME/.config/opencode"; do
+  [[ ! -e "$agent_home/skills/workspace-tools" ]]
+done
+grep -Fq 'my notes' "$HOME/.copilot/skills/workspace-tools/SKILL.md"
+rm -rf "$HOME/.copilot/skills/workspace-tools"
 
-# The Apple Container skill and its executable helper are macOS-only.
-if [[ "$OS_KIND" == macos ]]; then
-  for agent_home in "$HOME/.claude" "$HOME/.codex"; do
-    [[ -f "$agent_home/skills/apple-container-amd64/SKILL.md" ]]
-    grep -Fq 'name: apple-container-amd64' "$agent_home/skills/apple-container-amd64/SKILL.md"
-    [[ -x "$agent_home/skills/apple-container-amd64/scripts/optimize-builder.sh" ]]
-  done
-else
-  [[ ! -e "$HOME/.claude/skills/apple-container-amd64" ]]
-  [[ ! -e "$HOME/.codex/skills/apple-container-amd64" ]]
-fi
-postflight_agent_skills
-[[ "$POSTFLIGHT_FAILURES" == 0 ]]
+# Claude gets the shipped status line, and a user's own settings beside their
+# profiles join the settings without replacing what is there.
+[[ -x "$HOME/.claude/statusline.sh" ]]
+cmp "$TEST_ROOT/dotfiles/claude/statusline.sh" "$HOME/.claude/statusline.sh"
+# A status line the user wrote is kept without counting as a conflict.
+printf '#!/bin/sh\necho mine\n' > "$HOME/.claude/statusline.sh"
+CONFIG_CONFLICT_COUNT=0
+stage_dotfiles >/dev/null
+[[ "$CONFIG_CONFLICT_COUNT" == 0 && "$(cat "$HOME/.claude/statusline.sh")" == "$(printf '#!/bin/sh\necho mine')" ]]
+cp "$TEST_ROOT/dotfiles/claude/statusline.sh" "$HOME/.claude/statusline.sh"
+jq -e '.statusLine.command | contains("/statusline.sh")' "$HOME/.claude/settings.json" >/dev/null
+mkdir -p "$HOME/.config/workspace-setup/agents"
+printf '%s\n' '{"sandbox":{"network":{"allowedDomains":["*.example.com"]}},"theme":"light"}' \
+  > "$HOME/.config/workspace-setup/agents/claude-settings.json"
+stage_dotfiles >/dev/null
+jq -e '.sandbox.network.allowedDomains == ["*.example.com"] and .theme == "auto"' "$HOME/.claude/settings.json" >/dev/null
+# On a new settings.json the user's settings outrank the shipped ones.
+mv "$HOME/.claude/settings.json" "$TEST_TMP/settings.json"
+printf '%s\n' '{"model":"sonnet"}' > "$HOME/.config/workspace-setup/agents/claude-settings.json"
+stage_dotfiles >/dev/null
+jq -e '.model == "sonnet" and .effortLevel == "xhigh" and (.permissions.deny | index("Bash(pkill *)") != null)' \
+  "$HOME/.claude/settings.json" >/dev/null
+mv "$TEST_TMP/settings.json" "$HOME/.claude/settings.json"
+rm -r "$HOME/.config/workspace-setup"
+
+# Copilot takes the package-manager rules as a user hook, Antigravity as deny rules.
+guard="$HOME/.copilot/hooks/workspace-setup-guardrails.sh"
+jq -e '.hooks.preToolUse[0].matcher == "bash"' "$HOME/.copilot/hooks/workspace-setup-guardrails.json" >/dev/null
+jq -e '.permissions.deny | index("command(apt-get install)") != null' \
+  "$HOME/.gemini/antigravity-cli/settings.json" >/dev/null
+# Both documented input shapes: toolArgs as a JSON string, and Claude-style tool_input.
+[[ "$(printf '%s' '{"toolName":"bash","toolArgs":"{\"command\":\"cd app && brew install foo\"}"}' \
+  | sh "$guard" | jq -r .permissionDecision)" == deny ]]
+[[ "$(printf '%s' '{"tool_name":"bash","tool_input":{"command":"snap refresh foo"}}' \
+  | sh "$guard" | jq -r .permissionDecision)" == deny ]]
+[[ -z "$(printf '%s' '{"toolName":"bash","toolArgs":"{\"command\":\"brew list\"}"}' | sh "$guard")" ]]
 first_mutations=$((CONFIG_INSTALLED_COUNT + CONFIG_MIGRATED_COUNT + CONFIG_UPGRADED_COUNT + CONFIG_MERGED_COUNT))
 ((first_mutations > 0))
 
@@ -311,35 +344,25 @@ fi
     "$OPENCODE_CONFIG" >/dev/null
   configs_report=$(postflight_configs 2>&1)
   grep -Fq 'agent package-mutation guardrails are present' <<< "$configs_report"
-  if [[ "$OS_KIND" == macos ]]; then
-    postflight_agent_skills
-  fi
 ) || exit 1
 
-# A host that shares one skill store between agents through its own directory
-# links keeps that layout: the copies converge onto the shared file instead of
-# replacing the links or reporting a conflict. Skills ship on macOS only.
-# shellcheck disable=SC2031 # the block above ran in a subshell; OS_KIND is intact
-if [[ "$OS_KIND" != macos ]]; then
-  printf 'dotfiles stage tests: ok (linux; macOS-only zsh and skill assertions skipped)\n'
-  exit 0
-fi
+# The shared store, reached through a linked skill or a linked skills
+# directory, is never mistaken for a copy to retire.
 SHARED_HOME="$TEST_TMP/shared-home"
 HOME="$SHARED_HOME"
 export HOME
 shared_store="$SHARED_HOME/.agents/skills/apple-container-amd64"
-mkdir -p "$shared_store/scripts" "$SHARED_HOME/.claude/skills" "$SHARED_HOME/.codex/skills"
+mkdir -p "$shared_store/scripts" "$SHARED_HOME/.claude/skills" "$SHARED_HOME/.config/opencode"
 cp "$TEST_ROOT/dotfiles/agents/skills/apple-container-amd64/SKILL.md" "$shared_store/SKILL.md"
 cp "$TEST_ROOT/dotfiles/agents/skills/apple-container-amd64/scripts/optimize-builder.sh" \
   "$shared_store/scripts/optimize-builder.sh"
 ln -s "$shared_store" "$SHARED_HOME/.claude/skills/apple-container-amd64"
-ln -s "$shared_store" "$SHARED_HOME/.codex/skills/apple-container-amd64"
+mkdir -p "$SHARED_HOME/.codex"
+ln -s "$SHARED_HOME/.agents/skills" "$SHARED_HOME/.codex/skills"
 CONFIG_CONFLICT_COUNT=0
-stage_dotfiles
+stage_dotfiles >/dev/null
 [[ "$CONFIG_CONFLICT_COUNT" == 0 ]]
 [[ -L "$SHARED_HOME/.claude/skills/apple-container-amd64" ]]
-[[ -L "$SHARED_HOME/.codex/skills/apple-container-amd64" ]]
 [[ -x "$shared_store/scripts/optimize-builder.sh" ]]
-[[ "$(find "$SHARED_HOME" -name optimize-builder.sh -type f | wc -l | tr -d ' ')" == 1 ]]
 
 printf 'dotfiles stage tests: ok\n'

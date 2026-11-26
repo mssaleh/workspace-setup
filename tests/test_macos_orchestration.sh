@@ -9,7 +9,7 @@ fixture="$TEST_TMP/fixture"
 calls="$TEST_TMP/calls"
 mkdir -p "$fixture/lib" "$fixture/scripts" "$TEST_TMP/home"
 mkdir -p "$fixture/lib/agents"
-cp "$TEST_ROOT/lib/agents/log.sh" "$TEST_ROOT/lib/agents/manifest.sh" "$fixture/lib/agents/"
+cp "$TEST_ROOT/lib/agents/log.sh" "$TEST_ROOT/lib/agents/manifest.sh" "$TEST_ROOT/lib/agents/paths.sh" "$fixture/lib/agents/"
 cp -R "$TEST_ROOT/manifests" "$fixture/"
 
 fail_test() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
@@ -52,6 +52,7 @@ write_stage_stub stage_flatpak.sh stage_flatpak
 write_stage_stub stage_update.sh stage_update
 write_stage_stub stage_dotfiles.sh stage_dotfiles
 write_stage_stub stage_toolchains.sh stage_toolchains
+printf 'agent_browser_ensure_browser() { :; }\n' >> "$fixture/scripts/stage_toolchains.sh"
 write_stage_stub stage_ssh.sh stage_ssh
 write_stage_stub stage_fonts_terminal.sh stage_fonts_terminal
 write_stage_stub stage_terminal_profile.sh stage_terminal_profile
@@ -102,6 +103,7 @@ stage_macos_apps
 stage_macos_fonts
 stage_macos_kitty
 stage_macos_terminal_profile
+agent_browser_ensure_browser
 stage_command_providers
 stage_macos_postflight
 stage_reconcile_cli_providers

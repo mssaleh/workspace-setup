@@ -9,7 +9,7 @@ fixture="$TEST_TMP/fixture"
 calls="$TEST_TMP/calls"
 mkdir -p "$fixture/lib" "$fixture/scripts" "$TEST_TMP/home"
 mkdir -p "$fixture/lib/agents"
-cp "$TEST_ROOT/lib/agents/log.sh" "$TEST_ROOT/lib/agents/manifest.sh" "$fixture/lib/agents/"
+cp "$TEST_ROOT/lib/agents/log.sh" "$TEST_ROOT/lib/agents/manifest.sh" "$TEST_ROOT/lib/agents/paths.sh" "$fixture/lib/agents/"
 cp -R "$TEST_ROOT/manifests" "$fixture/"
 
 fail_test() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
@@ -53,6 +53,7 @@ printf 'stage_packages() { printf "%%s\\n" "${INSTALL_RECOMMENDS:-1}" > "$LINUX_
   > "$fixture/scripts/stage_packages.sh"
 printf 'stage_command_providers() { :; }\n' >> "$fixture/scripts/stage_packages.sh"
 printf 'stage_reconcile_cli_providers() { :; }\n' >> "$fixture/scripts/stage_packages.sh"
+printf 'agent_browser_ensure_browser() { :; }\n' >> "$fixture/scripts/stage_toolchains.sh"
 
 run_linux_setup() {
   : > "$calls"
@@ -73,6 +74,7 @@ stage_ssh
 stage_fonts_terminal
 stage_terminal_profile
 stage_apparmor
+agent_browser_ensure_browser
 stage_command_providers
 stage_postflight
 stage_reconcile_cli_providers
@@ -201,7 +203,7 @@ stage_macos_update
 for function_name in \
     postflight_configs \
     postflight_ssh_agent \
-    postflight_agent_skills \
+    postflight_agent_browser \
     postflight_packages \
     postflight_apparmor_attachments \
     postflight_apparmor_edge \
@@ -231,7 +233,7 @@ stage_postflight >/dev/null
 expected_postflight=$(cat <<'EXPECTED'
 postflight_configs
 postflight_ssh_agent
-postflight_agent_skills
+postflight_agent_browser
 postflight_packages
 postflight_apparmor_attachments
 postflight_apparmor_edge

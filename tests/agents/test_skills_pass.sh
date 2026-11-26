@@ -75,6 +75,9 @@ out=$(skills_mirror 2>&1)
 assert_contains "mirror replaces the shadowing copy" "$out" "replacing the copied alpha with a link"
 assert_link "alpha is a link into the store again" "$CLAUDE_HOME/skills/alpha"
 assert_absent "the stale copy is gone" "$(cat "$CLAUDE_HOME/skills/alpha/SKILL.md")" "stale copy"
+assert_contains "a copy that differs from the store is kept" \
+  "$(cat "$AGENTS_HOME"/superseded/*/claude-code/alpha/SKILL.md)" "stale copy"
+rm -rf "$AGENTS_HOME/superseded"
 
 # --- an undeclared local directory is somebody's own skill ---
 mkdir -p "$CLAUDE_HOME/skills/homegrown"
@@ -143,7 +146,7 @@ export SKILLS_STUB_PROVIDES="$SKILLS_STUB_PROVIDES
 acme/new-pack=newcomer"
 printf 'acme/new-pack\t*\twhole\n' >> "$MANIFEST_DIR/skills.tsv"
 out=$(verify_store 2>&1)
-assert_contains "verification catches an uninstalled collection" "$out" "no installed skills recorded for acme/new-pack"
+assert_contains "verification catches an uninstalled collection" "$out" "whole source acme/new-pack has not been fetched"
 out=$(DRY_RUN=1 "$REPO_DIR/setup.sh" agents --only skills 2>&1)
 assert_contains "a collection dry run plans the source" "$out" "acme/new-pack: fetching all skills"
 assert_missing "a collection dry run creates no payload" "$AGENTS_STORE/newcomer"
@@ -154,6 +157,19 @@ out=$(UPDATE_SKILLS=1 skills_install 2>&1)
 assert_eq "updating a collection discovers new skills" "$([[ -f "$AGENTS_STORE/third/SKILL.md" ]] && echo yes)" yes
 assert_eq "a source subfolder matches its lock path" "$(lock_source_skill_names acme/solo/deep)" gamma
 assert_eq "a different subfolder does not match" "$(lock_source_skill_names acme/solo/other)" ""
+
+# --- a whole row is fetched although a select row of its source came first ---
+export SKILLS_STUB_PROVIDES="$SKILLS_STUB_PROVIDES
+acme/both=picked,rest"
+printf 'acme/both\tpicked\tselect\n' >> "$MANIFEST_DIR/skills.tsv"
+skills_install >/dev/null 2>&1
+printf 'acme/both\t*\twhole\n' >> "$MANIFEST_DIR/skills.tsv"
+out=$(verify_store 2>&1)
+assert_contains "verification sees the whole source unfetched" "$out" "whole source acme/both has not been fetched"
+out=$(skills_install 2>&1)
+assert_contains "the whole source is fetched" "$out" "acme/both: fetching all skills"
+assert_eq "its other skill is installed" "$([[ -f "$AGENTS_STORE/rest/SKILL.md" ]] && echo yes)" yes
+assert_absent "a second run fetches nothing from it" "$(skills_install 2>&1)" "acme/both"
 
 export SKILLS_STUB_PROVIDES="$SKILLS_STUB_PROVIDES
 shadcn/ui=shadcn"
@@ -184,5 +200,53 @@ DRY_RUN=1
 plan 'unskill:MixedCase'
 assert_absent "a planned removal excludes the sanitized mirror" "$(mirror_set "$(lock_skill_names)")" mixedcase
 DRY_RUN=''
+PRUNE_SKILLS=''
+
+# --- adoption: declared skills in the store that the lock does not record ---
+# skills 1.9 replaces such a directory, so the previous copy is saved and kept
+# only when it differs from what the fetch installed.
+mkdir -p "$AGENTS_STORE/handcopy" "$AGENTS_STORE/edited"
+printf -- '---\nname: handcopy\n---\n' > "$AGENTS_STORE/handcopy/SKILL.md"
+printf -- '---\nname: edited\n---\nlocal notes\n' > "$AGENTS_STORE/edited/SKILL.md"
+printf 'acme/hand\thandcopy,edited\tselect\n' >> "$MANIFEST_DIR/skills.tsv"
+out=$(verify_store 2>&1)
+assert_contains "verify names declared skills outside the lock" "$out" \
+  "declared skills the skills lock does not record: edited handcopy"
+out=$(DRY_RUN=1; skills_install 2>&1)
+assert_contains "a dry run plans the adoption" "$out" "adopting the unmanaged edited handcopy"
+assert_missing "a dry run saves nothing" "$AGENTS_HOME/superseded"
+out=$(skills_install 2>&1)
+assert_eq "the lock records the adopted skills" "$(lock_skill_names | grep -cxE 'edited|handcopy')" "2"
+assert_contains "an identical copy is not kept" "$out" "adopted handcopy: the managed copy matches the previous one"
+assert_contains "a different copy is kept" "$out" "adopted edited; the previous copy differs and is kept at"
+kept=$(find "$AGENTS_HOME/superseded" -type d -name edited)
+assert_eq "the kept copy holds the local text" "$(sed -n 4p "$kept/SKILL.md")" "local notes"
+assert_eq "only the different copy is kept" "$(find "$AGENTS_HOME/superseded" -mindepth 2 -maxdepth 2 | wc -l | tr -d ' ')" "1"
+out=$(verify_store 2>&1)
+assert_absent "adopted skills verify" "$out" "the skills lock does not record"
+
+# --- a copy in a mirror is planned for replacement while its skill is still to be fetched ---
+printf 'acme/later\tlater\tselect\n' >> "$MANIFEST_DIR/skills.tsv"
+mkdir -p "$CLAUDE_HOME/skills/later"; printf -- '---\nname: later\n---\n' > "$CLAUDE_HOME/skills/later/SKILL.md"
+out=$(DRY_RUN=1; { skills_install; skills_mirror; verify_mirrors; } 2>&1)
+assert_contains "the dry run plans replacing the copy" "$out" "claude-code: replacing the copied later with a link into the store"
+assert_absent "and verification counts it as planned" "$out" "resolving to something other than the store"
+skills_install >/dev/null 2>&1; skills_mirror >/dev/null 2>&1
+assert_eq "the real run links it" "$([[ -L "$CLAUDE_HOME/skills/later" && "$CLAUDE_HOME/skills/later" -ef "$AGENTS_STORE/later" ]] && echo yes)" yes
+
+# --- copies beside the store are reported for agents that also read it ---
+mkdir -p "$XDG_CONFIG_HOME/opencode/skills/alpha" "$HOME/.gemini/config/skills"
+printf -- '---\nname: alpha\n---\n' > "$XDG_CONFIG_HOME/opencode/skills/alpha/SKILL.md"
+ln -s "$AGENTS_STORE/delta" "$HOME/.gemini/config/skills/delta"
+out=$(skills_report_shadowing 2>&1)
+assert_contains "a separate copy beside the store is reported" "$out" \
+  "opencode: $XDG_CONFIG_HOME/opencode/skills has its own copies of store skills, which it also loads: alpha"
+assert_absent "a link into the store is not a copy" "$out" "antigravity"
+
+# --- Antigravity reads the store itself from agy 1.5.16 ---
+out=$(verify_mirrors 2>&1)
+assert_contains "agy reads the store directly" "$out" "antigravity: reads $AGENTS_STORE directly"
+out=$(export AGY_STUB_VERSION=1.5.15; verify_mirrors 2>&1)
+assert_contains "an agy without store discovery is a problem" "$out" "agy 1.5.15 predates ~/.agents/skills discovery"
 
 test_summary
