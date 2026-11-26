@@ -1196,11 +1196,14 @@ postflight_headless_credentials() {
   # Claude Code prefers its file store when present and falls back to the
   # Keychain otherwise. A login performed at the desk writes only the Keychain.
   if [[ -x "$HOME/.local/bin/claude" ]]; then
-    local credentials_file credentials_argument credential_status=0
+    local credentials_file credentials_argument remedy credential_status=0
     credentials_file="$(claude_config_home)/.credentials.json"
     printf -v credentials_argument '%q' "$credentials_file"
+    # Writes only after a successful read: a plain redirect empties the file
+    # first, and an ssh session cannot read the item.
+    remedy="in a terminal on the Mac itself, not over ssh, run: (umask 077; c=\$(security find-generic-password -a \"\$USER\" -s 'Claude Code-credentials' -w) && printf '%s\\n' \"\$c\" > $credentials_argument)"
     if [[ -s "$credentials_file" ]] && claude_keychain_newer_than "$credentials_file"; then
-      postflight_fail "Claude Code's file credentials predate its Keychain login, so ssh sessions use an expired sign-in; from a desktop terminal run: security find-generic-password -a \"\$USER\" -s 'Claude Code-credentials' -w > $credentials_argument"
+      postflight_fail "Claude Code's file credentials predate its Keychain login, so ssh sessions use an expired sign-in; $remedy"
     elif [[ -s "$credentials_file" ]]; then
       postflight_pass "Claude Code credentials are in its file store"
     else
@@ -1211,7 +1214,7 @@ postflight_headless_credentials() {
       # https://github.com/apple-oss-distributions/Security/blob/main/SecurityTool/macOS/keychain_find.c
       case "$credential_status" in
         0)
-          postflight_fail "Claude Code credentials are Keychain-only — unusable over ssh; from a desktop terminal run: touch $credentials_argument && chmod 600 $credentials_argument && security find-generic-password -a \"\$USER\" -s 'Claude Code-credentials' -w > $credentials_argument"
+          postflight_fail "Claude Code credentials are Keychain-only — unusable over ssh; $remedy"
           ;;
         44) info "Claude Code login is unconfirmed; authenticate and verify its file credentials before remote use" ;;
         *) postflight_fail "cannot inspect Claude Code credential storage (security status $credential_status)" ;;
