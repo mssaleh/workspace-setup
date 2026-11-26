@@ -151,10 +151,9 @@ export NPM_PACKAGES NODE_PATH
 # already on PATH. Appended: ~/.local/bin holds the verified link to the binary.
 _path_append "$HOME/.opencode/bin"
 
-_path_dedupe
 export PATH BREW_PREFIX
 unset _brew_bin
-unset -f _find_brew_bin _path_prepend _path_append _path_dedupe
+unset -f _find_brew_bin _path_prepend _path_append
 
 # Locale safety net: ensure a UTF-8-capable LANG is set.
 # macOS: region "en_AE" has no POSIX locale, so several contexts (Terminal.app,
@@ -186,6 +185,11 @@ for _env_file in "$HOME/.config/shell/env.d"/*.sh; do
   fi
 done
 unset _env_file
+# After the snippets: a shell started from the desktop inherits a PATH they
+# already extended, so one that prepends unconditionally would repeat its entry.
+_path_dedupe
+export PATH
+unset -f _path_dedupe
 
 # Non-interactive shells stop here (scp, `ssh host cmd`, scripts, …).
 case $- in *i*) ;; *) return ;; esac

@@ -177,16 +177,7 @@ profile_cli_paths_converge() {
 
   mode=$(config_file_mode "$dst") || return 1
   candidate=$(mktemp "${TMPDIR:-/tmp}/workspace-setup-profile.XXXXXX") || return 1
-  if cat "$dst" > "$candidate" && cat >> "$candidate" <<'PROFILE'
-
-# Select the workspace CLI providers after profile PATH changes.
-_profile_workspace_path="$HOME/.config/shell/env.d/99-workspace-setup-path.sh"
-if [ -f "$_profile_workspace_path" ] && [ ! -L "$_profile_workspace_path" ] && [ -r "$_profile_workspace_path" ]; then
-  . "$_profile_workspace_path"
-fi
-unset _profile_workspace_path
-PROFILE
-  then
+  if cat "$dst" > "$candidate" && config_profile_cli_paths_block >> "$candidate"; then
     if conflicts=$(shell_cli_provider_conflicts /bin/sh "$startup" "$candidate") && [[ -z "$conflicts" ]] \
         && config_atomic_replace "$candidate" "$dst" "$mode"; then
       rm -f "$candidate"
@@ -647,7 +638,7 @@ stage_git_config() {
   [[ ${GIT_NAME+x} ]] && name_was_set=1
   [[ ${GIT_EMAIL+x} ]] && email_was_set=1
 
-  gh_bin=$(command -v gh 2>/dev/null || printf '%s' /usr/bin/gh)
+  gh_bin=$(command -v gh 2>/dev/null || true)
   git_name="${GIT_NAME:-$(git config --global user.name 2>/dev/null || true)}"
   git_email="${GIT_EMAIL:-$(git config --global user.email 2>/dev/null || true)}"
   git_name="${git_name:-Your Name}"
@@ -684,10 +675,6 @@ stage_git_config() {
     git config -f "$tmp" merge.conflictStyle zdiff3
     git config -f "$tmp" diff.colorMoved default
     git config -f "$tmp" init.defaultBranch main
-    git config -f "$tmp" --add credential.https://github.com.helper ''
-    git config -f "$tmp" --add credential.https://github.com.helper "!$gh_bin auth git-credential"
-    git config -f "$tmp" --add credential.https://gist.github.com.helper ''
-    git config -f "$tmp" --add credential.https://gist.github.com.helper "!$gh_bin auth git-credential"
     git config -f "$tmp" url."git@github.com:".pushInsteadOf https://github.com/
     git config -f "$tmp" url."git@gist.github.com:".pushInsteadOf https://gist.github.com/
     install_regular_file "$tmp" "$dst" generated/gitconfig 0644
@@ -734,37 +721,59 @@ stage_git_config() {
   git_config_set_default "$dst" url."git@gist.github.com:".pushInsteadOf https://gist.github.com/
 
   # Git Credential Manager handles the HTTPS remotes gh does not: Azure DevOps,
-  # GitLab, Bitbucket. It is set globally, then cleared again for GitHub below.
-  if [[ "$OS_KIND" == linux ]] && command -v git-credential-manager >/dev/null 2>&1; then
-    local existing_helper
-    existing_helper=$(git config -f "$dst" --get credential.helper 2>/dev/null || true)
-    if [[ -n "$existing_helper" && "$existing_helper" != git-credential-manager ]]; then
+  # GitLab, Bitbucket. Its own `configure` resets the global helper list and
+  # adds itself by absolute path. Earlier versions of this setup wrote the bare
+  # name, which git runs as the nonexistent `git credential-git-credential-manager`.
+  local gcm="$HOME/.local/bin/git-credential-manager" helper other_helper=''
+  if [[ "$OS_KIND" == linux && -x "$gcm" ]]; then
+    if git config -f "$dst" --unset-all credential.helper '^git-credential-manager$'; then
+      GIT_CONFIG_CHANGED=1
+    fi
+    while IFS= read -r helper; do
+      [[ -z "$helper" || "$helper" -ef "$gcm" ]] || other_helper=$helper
+    done < <(git config -f "$dst" --get-all credential.helper 2>/dev/null || true)
+    if [[ -n "$other_helper" ]]; then
       # Somebody chose this. Leave it and say so, rather than redirecting their
       # credentials to a different store behind their back.
-      warn "keeping the configured credential.helper '$existing_helper'; git-credential-manager is installed but not wired up"
+      warn "keeping the configured credential.helper '$other_helper'; git-credential-manager is installed but not wired up"
     else
-      git_config_set_default "$dst" credential.helper git-credential-manager
+      if [[ "$(git config -f "$dst" --get-all credential.helper 2>/dev/null || true)" \
+          != "$(printf '\n%s' "$gcm")" ]]; then
+        if ! GIT_CONFIG_GLOBAL="$dst" "$gcm" configure </dev/null >/dev/null; then
+          warn "git-credential-manager configure failed"
+          return 1
+        fi
+        GIT_CONFIG_CHANGED=1
+      fi
       git_config_set_default "$dst" credential.credentialStore "${GCM_CREDENTIAL_STORE:-secretservice}"
     fi
   fi
 
-  local credential_key helper
-  for credential_key in \
-    credential.https://github.com.helper \
-    credential.https://gist.github.com.helper; do
-    helper="!$gh_bin auth git-credential"
-    # git accumulates helpers rather than replacing them, so a global helper
-    # would also be consulted for GitHub. An empty value resets the list, which
-    # keeps gh the only helper asked about these hosts.
-    if ! git config -f "$dst" --get-all "$credential_key" 2>/dev/null | grep -Fxq ""; then
-      git config -f "$dst" --add "$credential_key" ""
+  # gh's own setup replaces every helper for github.com and gist.github.com
+  # with an empty reset, which keeps the global helper away from them, and
+  # itself. GH_PATH fixes the path it records: unset, it records the first
+  # PATH entry that resolves to it, which is the selection directory's link.
+  # GH_TELEMETRY=false keeps this call from reporting usage or creating gh's
+  # device-id state.
+  [[ ! -L "$gh_bin" || "${gh_bin%/*}" != "$HOME/.local/share/workspace-setup/bin" ]] \
+    || gh_bin=$(readlink "$gh_bin")
+  if [[ -x "$gh_bin" ]]; then
+    local host gh_needed=0
+    for host in github.com gist.github.com; do
+      [[ "$(git config -f "$dst" --get-all "credential.https://$host.helper" 2>/dev/null || true)" \
+        == "$(printf '\n!%s auth git-credential' "$gh_bin")" ]] || gh_needed=1
+    done
+    if ((gh_needed)); then
+      if ! GH_PATH="$gh_bin" GH_TELEMETRY=false GIT_CONFIG_GLOBAL="$dst" \
+          "$gh_bin" auth setup-git --hostname github.com --force </dev/null; then
+        warn "gh auth setup-git failed"
+        return 1
+      fi
       GIT_CONFIG_CHANGED=1
     fi
-    if ! git config -f "$dst" --get-all "$credential_key" 2>/dev/null | grep -Fxq "$helper"; then
-      git config -f "$dst" --add "$credential_key" "$helper"
-      GIT_CONFIG_CHANGED=1
-    fi
-  done
+  else
+    info "gh is not installed; Git has no credential helper for GitHub"
+  fi
   if (( GIT_CONFIG_CHANGED )); then
     CONFIG_MERGED_COUNT=$((CONFIG_MERGED_COUNT + 1))
     info "merged missing baseline settings into ~/.gitconfig"

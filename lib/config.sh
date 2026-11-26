@@ -75,21 +75,22 @@ config_hash_is_known() {
     '$1 == key && $2 == hash { found = 1 } END { exit !found }' "$inventory"
 }
 
-# A shipped version picks up two additions that do not make it user content:
-# the env.d loader shell_env_loader_converge inserts, and the lines opencode's
-# installer appends. Each is undone, alone and in either order, before the
-# shipped hashes are consulted.
+# A shipped version picks up additions that do not make it user content: the
+# appended blocks config_strip_appended removes, and the env.d loader
+# shell_env_loader_converge inserts. The appended blocks are removed first,
+# then the loader as well, because a shipped file may end with its own loader.
 config_file_is_known() {
   local key="$1" file="$2" tmp hash variant
   hash=$(config_sha256 "$file" 2>/dev/null) || return 1
   [[ -n "$hash" ]] || return 1
   config_hash_is_known "$key" "$hash" && return 0
   tmp=$(mktemp -d "${TMPDIR:-/tmp}/config-known.XXXXXX") || return 1
-  config_strip_opencode_path "$file" > "$tmp/a"
-  config_strip_env_loader "$file" > "$tmp/l"
+  if ! config_strip_appended "$file" > "$tmp/a"; then
+    rm -rf -- "$tmp"
+    return 1
+  fi
   config_strip_env_loader "$tmp/a" > "$tmp/al"
-  config_strip_opencode_path "$tmp/l" > "$tmp/la"
-  for variant in a l al la; do
+  for variant in a al; do
     cmp -s "$file" "$tmp/$variant" && continue
     hash=$(config_sha256 "$tmp/$variant" 2>/dev/null) || continue
     if [[ -n "$hash" ]] && config_hash_is_known "$key" "$hash"; then
@@ -101,17 +102,54 @@ config_file_is_known() {
   return 1
 }
 
-# `opencode upgrade` reruns opencode's installer, which appends an empty line,
-# "# opencode" and "export PATH=$HOME/.opencode/bin:$PATH" to a shell startup
-# file. The shipped files already put that directory on PATH.
-config_strip_opencode_path() {
-  awk -v path_line="export PATH=$HOME/.opencode/bin:\$PATH" '
+# The block profile_cli_paths_converge appends to an edited ~/.profile whose own
+# PATH changes outrank the selected command providers.
+config_profile_cli_paths_block() {
+  cat <<'PROFILE'
+
+# Select the workspace CLI providers after profile PATH changes.
+_profile_workspace_path="$HOME/.config/shell/env.d/99-workspace-setup-path.sh"
+if [ -f "$_profile_workspace_path" ] && [ ! -L "$_profile_workspace_path" ] && [ -r "$_profile_workspace_path" ]; then
+  . "$_profile_workspace_path"
+fi
+unset _profile_workspace_path
+PROFILE
+}
+
+# Blocks appended to a shell startup file that add nothing the shipped files
+# lack, removed wherever they sit:
+# - `opencode upgrade` reruns opencode's installer, which appends an empty line,
+#   "# opencode" and an export of ~/.opencode/bin.
+# - `agy install` (agy 1.5.17) appends two empty lines, its marker and an export
+#   of ~/.local/bin to every bash and zsh startup file, even when that
+#   directory is already on PATH.
+# - profile_cli_paths_converge's block, which the shipped ~/.profile does not
+#   need because its env.d loader reads the same file.
+config_strip_appended() {
+  local block status=0
+  block=$(mktemp "${TMPDIR:-/tmp}/config-block.XXXXXX") || return 1
+  config_profile_cli_paths_block > "$block"
+  awk -v home="$HOME" -v blockfile="$block" '
+    BEGIN { while ((getline l < blockfile) > 0) block[++blocklen] = l }
     { line[NR] = $0 }
     END {
       n = NR
-      if (n >= 3 && line[n] == path_line && line[n - 1] == "# opencode" && line[n - 2] == "") n -= 3
-      for (i = 1; i <= n; i++) print line[i]
-    }' "$1"
+      for (i = 1; i <= n; i++) {
+        if (line[i] == "" && line[i + 1] == "# opencode" \
+            && line[i + 2] == "export PATH=" home "/.opencode/bin:$PATH")
+          drop[i] = drop[i + 1] = drop[i + 2] = 1
+        if (line[i] == "# Added by Antigravity CLI installer" \
+            && line[i + 1] == "export PATH=\"" home "/.local/bin:$PATH\"") {
+          drop[i] = drop[i + 1] = 1
+          for (j = i - 1; j >= 1 && j >= i - 2 && line[j] == ""; j--) drop[j] = 1
+        }
+        for (k = 1; k <= blocklen && i + k - 1 <= n && line[i + k - 1] == block[k]; k++) ;
+        if (k > blocklen) for (k = 0; k < blocklen; k++) drop[i + k] = 1
+      }
+      for (i = 1; i <= n; i++) if (!drop[i]) print line[i]
+    }' "$1" || status=$?
+  rm -f "$block"
+  return "$status"
 }
 
 # The inverse of shell_env_loader_converge: its loader block and the blank line

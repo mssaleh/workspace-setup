@@ -230,4 +230,20 @@ if install_cloud_clis >/dev/null 2>&1; then exit 1; fi
 CLI_TEST_GDDY_INCOMPATIBLE=0
 install_cloud_clis >/dev/null
 [[ "$("$HOME/.local/bin/gddy" --version)" == 'gddy 1.0.0' ]]
+
+# The Linux installer's layout: versioned releases and a `current` link. Only
+# the release `current` names survives.
+aws_root="$HOME/.local/share/aws-cli/v2"
+rm -rf "$aws_root"
+mkdir -p "$aws_root/2.0.0/bin" "$aws_root/1.9.0/bin"
+printf '#!/bin/sh\nprintf "aws-cli/2.0.0\\n"\n' > "$aws_root/2.0.0/bin/aws"
+printf '#!/bin/sh\nexit 0\n' > "$aws_root/2.0.0/bin/aws_completer"
+chmod +x "$aws_root/2.0.0/bin/aws" "$aws_root/2.0.0/bin/aws_completer"
+ln -s "$aws_root/2.0.0" "$aws_root/current"
+for tool in aws aws_completer; do
+  ln -sfn "$aws_root/current/bin/$tool" "$HOME/.local/bin/$tool"
+done
+install_cloud_clis >/dev/null
+[[ ! -e "$aws_root/1.9.0" && "$aws_root/current" -ef "$aws_root/2.0.0" ]]
+[[ "$("$HOME/.local/bin/aws" --version)" == aws-cli/2.0.0 ]]
 printf 'cloud CLI tests: ok\n'

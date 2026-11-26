@@ -25,6 +25,14 @@ shell variable and not an environment variable. Export it:
     # ~/.config/shell/env.d/40-huggingface.sh
     export HF_TOKEN=hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
+A snippet may also put a directory on PATH:
+
+    # ~/.config/shell/env.d/50-cuda.sh
+    export PATH="/usr/local/cuda/bin:$PATH"
+
+A shell started from the desktop has read the snippets once already, so the
+shells keep only the first occurrence of each PATH entry after loading them.
+
 One ordinary file per service, numbered to fix the order in which they load.
 Symlinks and other filesystem objects are preserved but never sourced; setup
 reports them as configuration conflicts. Revoking a credential locally is `rm`

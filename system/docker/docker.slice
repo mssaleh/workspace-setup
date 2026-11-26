@@ -1,0 +1,23 @@
+# /etc/systemd/system/docker.slice — a memory ceiling for everything the daemon
+# runs once daemon.json sets "cgroup-parent": "docker.slice": containers, kind
+# nodes, and the RUN steps of `docker build`, because the embedded BuildKit
+# takes the same parent (moby daemon/command/daemon_unix.go, newCgroupParent).
+#
+# Without it containers run in system.slice with no memory limit, and
+# systemd-oomd watches only user@.service. A large build can then hold the host
+# in reclaim until oomd kills something in the desktop session instead.
+#
+# Percentages are of physical RAM (systemd.resource-control(5)). The other 28%
+# is for the desktop session, editors and agents. Builds that slow down here
+# show a growing `high` count in /sys/fs/cgroup/docker.slice/memory.events;
+# raise both values then. The pressure limit is oomd's default, 60%.
+#
+# The name has no dash because a dash in a slice name means nesting.
+
+[Unit]
+Description=Docker containers and builds
+
+[Slice]
+MemoryHigh=65%
+MemoryMax=72%
+ManagedOOMMemoryPressure=kill

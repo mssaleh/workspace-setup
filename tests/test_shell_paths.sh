@@ -44,6 +44,28 @@ if [[ -d /usr/local/bin ]]; then
   [[ "$count" == 1 ]]
 fi
 
+# A shell started from the desktop inherits a PATH that has been through the
+# env.d snippets once; one that prepends unconditionally still appears once.
+mkdir -p "$TEST_TMP/home/.config/shell/env.d" "$TEST_TMP/home/opt-tool"
+# shellcheck disable=SC2016 # $PATH belongs to the snippet
+printf 'export PATH="%s/opt-tool:$PATH"\n' "$TEST_TMP/home" \
+  > "$TEST_TMP/home/.config/shell/env.d/50-tool.sh"
+for startup in bash:.bashrc sh:.profile; do
+  shell_args=(/bin/sh -c)
+  [[ "${startup%%:*}" != bash ]] || shell_args=(/bin/bash --noprofile --norc -c)
+  # shellcheck disable=SC2016 # expansions belong to the clean child shell
+  inherited=$(env -i HOME="$TEST_TMP/home" USER=test PATH="$clean_path" \
+    "${shell_args[@]}" '. "$HOME/$1" >/dev/null; printf "%s" "$PATH"' sh "${startup#*:}")
+  # shellcheck disable=SC2016 # expansions belong to the clean child shell
+  inherited=$(env -i HOME="$TEST_TMP/home" USER=test PATH="$inherited" \
+    "${shell_args[@]}" '. "$HOME/$1" >/dev/null; printf "%s" "$PATH"' sh "${startup#*:}")
+  count=$(awk -F: -v wanted="$TEST_TMP/home/opt-tool" \
+    '{ n=0; for (i=1; i<=NF; i++) if ($i == wanted) n++; print n }' <<< "$inherited")
+  [[ "$count" == 1 ]] \
+    || { printf 'FAIL: %s repeats an env.d PATH entry %s times\n' "${startup#*:}" "$count" >&2; exit 1; }
+done
+rm -r "$TEST_TMP/home/.config/shell/env.d/50-tool.sh" "$TEST_TMP/home/opt-tool"
+
 if [[ "$(uname -s)" == Darwin ]]; then
   # shellcheck disable=SC2016 # expansions belong to the clean child shell
   output=$(env -i HOME="$TEST_TMP/home" USER=test PATH="$clean_path" \

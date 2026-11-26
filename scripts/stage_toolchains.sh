@@ -324,6 +324,15 @@ install_cloud_clis() {
   rm -rf "$tmp"
   ((status == 0)) || return 1
   "$HOME/.local/bin/aws" --version || return 1
+  # The Linux installer leaves every superseded release (about 280 MB each)
+  # beside the one `current` links to.
+  local aws_release aws_current="$HOME/.local/share/aws-cli/v2/current"
+  for aws_release in "$HOME/.local/share/aws-cli/v2/"[0-9]*.[0-9]*.[0-9]*; do
+    [[ -d "$aws_release" && ! -L "$aws_release" && -d "$aws_current" ]] || continue
+    [[ ! "$aws_release" -ef "$aws_current" ]] || continue
+    rm -rf -- "$aws_release" || return 1
+    info "removed superseded AWS CLI ${aws_release##*/}"
+  done
   install_managed_npm_tools
 }
 

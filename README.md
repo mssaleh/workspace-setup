@@ -190,6 +190,7 @@ rather than guessed at.
 | Byte-identical | No-op |
 | Old link into a `workspace-setup` checkout, including a broken `/tmp` link | Replace it with a regular file |
 | Exact hash of a previously shipped file | Atomically upgrade it |
+| A previously shipped shell file plus only `PATH` blocks that installers or this setup appended: opencode's and `agy install`'s exports, the `env.d` loader, the `~/.profile` provider block | Atomically upgrade it; the shipped file already sets that `PATH` |
 | Byte-identical to the distribution's `/etc/skel` copy | Atomically upgrade it — a fresh Linux account's `~/.bashrc` and `~/.profile` are what `adduser` copied, not user content |
 | Parseable supported format with unrelated user values | Merge only the required keys |
 | Semantically compliant custom shell file | Preserve it |
@@ -263,6 +264,7 @@ curl -fsSL https://raw.githubusercontent.com/mssaleh/workspace-setup/main/setup.
 
 - **Does not install databases at user level.** No Postgres, MySQL, Redis, etc. via `brew services`. Dev databases belong in containers with mounted volumes. The script installs `container`/`container-compose` (macOS) or Docker Engine + Compose v2 (Linux), but does not configure database instances.
 - **Does not authenticate with GitHub.** Run `gh auth login` manually after.
+- **Does not attach Ubuntu Pro.** Much of the Linux toolbox comes from Ubuntu's universe component, whose security updates Canonical publishes through Pro's esm-apps. `pro security-status --esm-apps` lists the installed packages it covers; attach with `sudo pro attach`, free for personal use on up to five machines.
 - **Does not install Docker on macOS.** macOS uses Apple's native `container` CLI (Virtualization.framework micro-VMs + Rosetta, no daemon). On Linux, the official Docker Engine is installed natively — it's the standard runtime there.
 - **Does not put a secret on the machine.** Setup manages the PATH snippet in `~/.config/shell/env.d/` and enforces private permissions. Credential snippets belong to you. Postflight syntax-checks them without printing their contents.
 - **Does not push SSH keys anywhere.** The public key stays at `~/.ssh/id_ed25519.pub`; add it to GitHub manually or via `gh auth login`.
@@ -350,12 +352,20 @@ more RAM than swap and brings the OOM killer forward on one without, which is a
 judgement about a host rather than a development default. Add
 `vm.swappiness = 10` to the installed file if yours is the former.
 
-### Unbounded container logs — `system/docker/`
+### Unbounded container logs and memory — `system/docker/`
 
 The default `json-file` driver has no size limit, so one chatty container fills
-the disk. This file is a **merge target, not a drop-in replacement**: it carries
-the `runtimes.nvidia` block that `nvidia-ctk` writes, so compare it against what
-is already there before copying, and keep any local additions.
+the disk. `daemon.json` is a **merge target, not a drop-in replacement**: it
+carries the `runtimes.nvidia` block that `nvidia-ctk` writes, so compare it
+against what is already there before copying, and keep any local additions.
+
+Containers otherwise also run in `system.slice` with no memory limit, while
+systemd-oomd watches only user sessions. A large `docker build` or a few kind
+clusters can then hold the host in reclaim until oomd kills part of the desktop
+session. `"cgroup-parent": "docker.slice"` puts containers, kind nodes and the
+`RUN` steps of `docker build` under `docker.slice`, which throttles them at 65%
+of RAM, caps them at 72%, and lets oomd kill inside the slice under sustained
+memory pressure.
 
 Restarting the daemon stops every running container, so check first.
 
@@ -364,6 +374,8 @@ docker ps -q | wc -l                                     # expect 0
 diff -u /etc/docker/daemon.json system/docker/daemon.json || true   # exits 1 when they differ
 dockerd --validate --config-file system/docker/daemon.json
 sudo cp -a /etc/docker/daemon.json "/etc/docker/daemon.json.bak-$(date +%Y%m%d)"
+sudo install -m 0644 system/docker/docker.slice /etc/systemd/system/docker.slice
+sudo systemctl daemon-reload
 sudo install -m 0644 system/docker/daemon.json /etc/docker/daemon.json
 sudo systemctl restart docker
 ```
@@ -372,8 +384,11 @@ Verify against real objects rather than the config file — a setting that parse
 is not necessarily a setting that applies:
 
 ```bash
-docker run --rm -d --name logcheck --entrypoint sleep alpine 5 >/dev/null
+docker run --rm -d --name logcheck --entrypoint sleep alpine 30 >/dev/null
 docker inspect logcheck --format '{{.HostConfig.LogConfig.Config}}'   # max-file:3 max-size:10m
+cat "/proc/$(docker inspect logcheck --format '{{.State.Pid}}')/cgroup"  # 0::/docker.slice/docker-<id>.scope
+systemctl show docker.slice -p MemoryHigh,MemoryMax       # 65% and 72% of RAM, in bytes
+oomctl | grep docker.slice                                # listed while a container runs
 docker network create pool-check >/dev/null
 docker network inspect pool-check --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}'  # 10.201.x
 docker network rm pool-check >/dev/null
@@ -385,6 +400,66 @@ The readback matters because `dockerd --validate` accepts unknown keys —
 are `reservedSpace`, `maxUsedSpace` and `minFreeSpace`; `keepStorage` is the
 pre-Docker-28 name for `reservedSpace`, still accepted but gone from
 `buildx prune`.
+
+### kind clusters change host kernel settings
+
+kind nodes are privileged containers, and these settings are not namespaced, so
+a node's writes land on the host and stay after the cluster is deleted:
+
+- The kubelet sets `kernel.panic=10`, `kernel.panic_on_oops=1` and
+  `vm.overcommit_memory=1` (`setupKernelTunables` in Kubernetes'
+  `pkg/kubelet/cm/container_manager_linux.go`). These are its requirements:
+  with `protectKernelDefaults: true` it refuses to start instead.
+- The node's systemd applies the image's own
+  `/usr/lib/sysctl.d/10-coredump-debian.conf`, which sets
+  `kernel.core_pattern=core`. That replaces apport's or systemd-coredump's
+  pipe, and the host's crashes stop producing reports.
+
+Mask that file in every node of a cluster definition. systemd treats a
+character device in a configuration directory as `/dev/null`, so the node skips
+it:
+
+```yaml
+nodes:
+- role: control-plane
+  extraMounts:
+  - hostPath: /dev/null
+    containerPath: /usr/lib/sysctl.d/10-coredump-debian.conf
+    readOnly: true
+```
+
+`kind create cluster` without `--config` cannot carry the mount; pass the
+definition on stdin with `--config -`. After a cluster starts,
+`sysctl kernel.core_pattern` still begins with `|`.
+
+### Networking in the initramfs — `system/dracut.conf.d/`
+
+Only for a host that has the `ubuntu-server` metapackage, which hard-depends on
+`cloud-initramfs-dyn-netconf` and `cloud-initramfs-copymods`. Ubuntu 26.04
+builds the initramfs with dracut, which includes a module that has no `check()`
+in every image. `dyn-netconf` then brings systemd-networkd into the initramfs:
+each boot takes a DHCP lease before the root filesystem mounts and leaves a
+match-all `/run/systemd/network/zzzz-dracut-default.network` behind. Omitting
+the two modules removes networkd as well, whose own module is included only on
+request. A root filesystem on iSCSI or NFS needs that early network.
+
+That leftover file can be the only network configuration a host has. Check that
+nothing after boot relies on it before installing:
+
+```bash
+dpkg-query -W cloud-initramfs-dyn-netconf cloud-initramfs-copymods
+systemctl is-active systemd-networkd     # inactive: NetworkManager owns the links
+networkctl status --all --no-pager | grep 'Network File'   # if active: none may name zzzz-dracut-default.network
+sudo install -m 0644 system/dracut.conf.d/90-no-initrd-network.conf /etc/dracut.conf.d/
+sudo update-initramfs -u -k all
+```
+
+Verify in the image and, after a reboot, in the boot log:
+
+```bash
+sudo lsinitrd -m "/boot/initrd.img-$(uname -r)" | grep -E 'dyn-netconf|copymods|systemd-networkd'   # no output
+journalctl -b -o short-monotonic | grep -m1 systemd-networkd   # nothing before switch-root
+```
 
 ### Desktop and remote SSH agents
 
@@ -937,14 +1012,14 @@ The script detects the OS and adapts:
 | RTK (`rtk`) | [RTK's Homebrew formula](https://www.rtk-ai.app/docs/getting-started/installation/) | Verified publisher Debian package installed by apt |
 | Yazi (`yazi`, `ya`) | Homebrew | [Yazi's stable apt repository](https://yazi-rs.github.io/docs/installation/#debian-and-ubuntu) |
 | GoDaddy CLI (`gddy`) | [Official installer](https://developer.godaddy.com/en/docs/api-users/cli/set-up), with checksum verification and execution checked before placement in `~/.local/bin` | same; compares installed and published releases on each run |
-| Git credential helper | Git's Keychain helper | Verified [Git Credential Manager](https://github.com/git-ecosystem/git-credential-manager/releases/latest) archives on x86-64 and arm64, with user-local launchers |
+| Git credential helper | Git's Keychain helper; `gh auth setup-git` for GitHub | Verified [Git Credential Manager](https://github.com/git-ecosystem/git-credential-manager/releases/latest) archives on x86-64 and arm64, with user-local launchers, registered by its own `configure`; `gh auth setup-git` for GitHub |
 | OpenAI API CLI (`openai`) | Official [Homebrew cask `openai/tools/openai`](https://developers.openai.com/api/docs/libraries/openai-cli) | Official release to `~/.local/bin`, verified against its published digest |
 | Claude Code (`claude`) | [Native installer](https://code.claude.com/docs/en/setup) with the `stable` channel; `claude install stable` on reruns | same |
 | Codex CLI (`codex`) | [OpenAI's installer](https://learn.chatgpt.com/docs/codex/cli) selects `latest`, with state under `CODEX_HOME` and shell setup isolated from user profiles | same |
 | GitHub Copilot CLI (`copilot`) | [GitHub's installer](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli) to `~/.local/bin`; compares published releases on reruns | same |
 | OpenCode CLI (`opencode`) | Vendor-maintained [`anomalyco/tap/opencode-v2`](https://opencode.ai/v2/docs/) formula | V2 native installer to `~/.opencode/bin`, exposed through `~/.local/bin/opencode`; native V1 installations migrate through the V2 installer |
 | Anthropic API CLI (`ant`) | Official [Homebrew cask `anthropics/tap/ant`](https://platform.claude.com/docs/en/cli-sdks-libraries/cli/quickstart) | Official release to `~/.local/bin`, verified against its published digest |
-| Antigravity CLI (`agy`) | [Google's installer](https://antigravity.google/cli/install.sh) to `~/.local/bin`; temporary home preserves profiles and aliases; `agy update` checks current releases on reruns | same |
+| Antigravity CLI (`agy`) | [Google's installer](https://antigravity.google/cli/install.sh) to `~/.local/bin`; temporary home preserves profiles and aliases; `agy update` checks current releases on reruns; the `PATH` block a manual `agy install` appends is recognized as installer output | same |
 | Apex Markdown (`apex`) | Homebrew `ttscoff/thelab/apex` | [Official release](https://github.com/ApexMarkdown/apex) to `~/.local/bin`, checksum verified, with installed and published versions compared on each run |
 | Tools not in default apt repo (helm, kubectl, himalaya, ruff) | Homebrew formulae; Ruff uses [Astral's documented uv tool installation](https://docs.astral.sh/ruff/installation/) | official apt repo (helm, kubectl) / official installer (himalaya) / GitHub release → `~/.local/bin` (ruff). Each run compares installed and published versions and upgrades stale artifacts |
 | `yq` and `cosign` | Homebrew `yq` (mikefarah) and `cosign` | Verified upstream releases in `~/.local/bin`. Ubuntu's `yq` is kislyuk's jq wrapper and upstream `cosign` supplies the selected current release. Setup selects the upstream executables and preserves any installed distribution copies |
@@ -1152,7 +1227,9 @@ workspace-setup/
 ├── system/                         # reviewed /etc files, installed by hand
 │   ├── profile.d/                  # undo STM32CubeCLT's PATH prepend
 │   ├── sysctl.d/                   # inotify watch/instance limits, templated on RAM
-│   ├── docker/daemon.json          # log rotation + builder GC (merge target)
+│   ├── docker/daemon.json          # log rotation + builder GC + cgroup parent (merge target)
+│   ├── docker/docker.slice         # memory ceiling for containers, kind nodes and builds
+│   ├── dracut.conf.d/              # keep networking out of the initramfs on ubuntu-server hosts
 │   └── sshd/                       # opt-in terminal-only Ubuntu SSH hardening (10- so it wins)
 └── README.md
 ```

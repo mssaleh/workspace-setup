@@ -218,6 +218,26 @@ git config -f "$HOME/.gitconfig" 'url.git@github.com:.pushInsteadOf' 'https://gi
 stage_dotfiles
 [[ "$(git config -f "$HOME/.gitconfig" --get 'url.git@github.com:.pushInsteadOf')" == 'https://github.com/mssaleh/' ]]
 
+# gh writes GitHub's helper itself, naming its provider path. The same gh
+# reached through the command-selection link is a second spelling, which
+# converges into that one entry instead of accumulating beside it.
+if gh_provider=$(command -v gh 2>/dev/null); then
+  selection="$HOME/.local/share/workspace-setup/bin"
+  mkdir -p "$selection"
+  ln -s "$gh_provider" "$selection/gh"
+  for host in github.com gist.github.com; do
+    git config -f "$HOME/.gitconfig" --add "credential.https://$host.helper" "!$selection/gh auth git-credential"
+  done
+  PATH="$selection:$PATH" stage_git_config "$REPO_DIR" >/dev/null
+  for host in github.com gist.github.com; do
+    [[ "$(git config -f "$HOME/.gitconfig" --get-all "credential.https://$host.helper")" \
+      == "$(printf '\n!%s auth git-credential' "$gh_provider")" ]]
+  done
+  rm -r "$selection"
+else
+  printf 'SKIP: GitHub credential helper (gh is not installed)\n'
+fi
+
 # ── Linux is bash-only ─────────────────────────────────────────────────────
 # Checked by running the Linux path rather than by reading the guards, and run
 # on every host — a Mac has to be able to catch a change that would ship zsh to

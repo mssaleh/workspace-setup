@@ -98,3 +98,23 @@ for _profile_env_file in "$HOME/.config/shell/env.d"/*.sh; do
   fi
 done
 unset _profile_env_file
+
+# After the snippets, keep the first occurrence of each PATH entry: a login
+# shell started from the desktop inherits a PATH they already extended.
+_profile_path=
+_profile_old_ifs=$IFS
+_profile_had_noglob=
+case $- in *f*) _profile_had_noglob=1 ;; *) set -f ;; esac
+IFS=:
+# shellcheck disable=SC2086 # colon-delimited iteration is intentional
+for _profile_entry in ${PATH:-}; do
+  case ":$_profile_path:" in
+    *":$_profile_entry:"*) ;;
+    *) [ -z "$_profile_entry" ] || _profile_path="${_profile_path}${_profile_path:+:}${_profile_entry}" ;;
+  esac
+done
+IFS=$_profile_old_ifs
+[ -n "$_profile_had_noglob" ] || set +f
+PATH=$_profile_path
+export PATH
+unset _profile_path _profile_old_ifs _profile_had_noglob _profile_entry

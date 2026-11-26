@@ -101,6 +101,34 @@ install_regular_file "$src" "$dst" fixture
 [[ "$CONFIG_LAST_ACTION" == conflict ]]
 ((CONFIG_CONFLICT_COUNT == before_conflicts + 1))
 
+# So do `agy install`'s export and the provider block profile_cli_paths_converge
+# appends after it, in any order and position.
+# shellcheck disable=SC2016 # $PATH is the literal text the installers write
+agy_export=$(printf '\n\n# Added by Antigravity CLI installer\nexport PATH="%s/.local/bin:$PATH"' "$HOME")
+# shellcheck disable=SC2016
+opencode_export=$(printf '\n# opencode\nexport PATH=%s/.opencode/bin:$PATH' "$HOME")
+{ printf 'historical\n%s\n' "$agy_export"; config_profile_cli_paths_block; } > "$dst"
+install_regular_file "$src" "$dst" fixture
+assert_regular_equal "$src" "$dst"
+[[ "$CONFIG_LAST_ACTION" == upgraded ]]
+printf 'historical\n%s\n%s\n' "$opencode_export" "$agy_export" > "$dst"
+install_regular_file "$src" "$dst" fixture
+assert_regular_equal "$src" "$dst"
+[[ "$CONFIG_LAST_ACTION" == upgraded ]]
+# An export of another directory is not that installer's default, and an edit
+# beside the export is the user's.
+# shellcheck disable=SC2016
+printf 'historical\n\n\n# Added by Antigravity CLI installer\nexport PATH="/opt/agy:$PATH"\n' > "$dst"
+before_conflicts=$CONFIG_CONFLICT_COUNT
+install_regular_file "$src" "$dst" fixture
+[[ "$CONFIG_LAST_ACTION" == conflict ]]
+((CONFIG_CONFLICT_COUNT == before_conflicts + 1))
+printf 'historical\nalias mine=true\n%s\n' "$agy_export" > "$dst"
+before_conflicts=$CONFIG_CONFLICT_COUNT
+install_regular_file "$src" "$dst" fixture
+[[ "$CONFIG_LAST_ACTION" == conflict ]]
+((CONFIG_CONFLICT_COUNT == before_conflicts + 1))
+
 # So does the env.d loader this setup inserts into an older shipped version,
 # together with opencode's appendix. An edit beside them is still the user's.
 # shellcheck disable=SC2016 # the gate and $PATH are literal file content
