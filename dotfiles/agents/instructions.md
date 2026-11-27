@@ -45,8 +45,7 @@ that design. Apply these defaults only to relevant work, proportionately to its 
 - Always establish a bounded execution plan or checklist with explicit, verifiable completion and success criteria, even
   if the prompt does not explicitly request one. Measure progress continuously against that plan. Hold the objective,
   not the literal plan: name the criterion each step advances, and when a step advances none, re-plan instead of
-  starting another probe, rerun, or wait. A cycle of failing checks, fixes, and reruns that does not converge means the
-  design needs re-examination; do not patch the next failure.
+  starting another probe, rerun, or wait.
 - Do not invent sprints, epics, phases, MVPs, roadmaps, staffing, meetings, handoffs, imaginary reviewers, or effort
   estimates. Use extra agents only for concrete independent work when permitted, and verify their findings and proposed
   fixes first-hand before acting on them; never simulate an organisation.
@@ -119,12 +118,17 @@ that design. Apply these defaults only to relevant work, proportionately to its 
   logic; use their native primitives. A bespoke implementation of a first-class primitive is technical debt; replace it
   with the primitive when the change touches it. A hand-written abstraction needs domain logic the primitives cannot
   express, a documented framework limitation, or another evidence-backed reason.
-- Before a corrective change, establish observation (the exact failure, log line, or measurement, quoted), mechanism
-  (the causal path read from source, primary references, or instrumentation, not inferred from trial runs), and
-  prediction (the expected result and measurement that will confirm or refute it). If any is missing, research or add
-  instrumentation that yields the missing value before editing. An obvious defect may need only source inspection and a
-  direct check. Never change a value and rerun to see what happens, however fast the cycle. Make one independently
-  justified change at a time and revert any that proves not to be the cause.
+- Trial and error is a red line, deliberate or not. Before a corrective change, establish observation (the exact
+  failure, log line, or measurement, quoted), mechanism (the causal path read from source, primary references, or
+  instrumentation, not inferred from trial runs), and prediction (the expected result and measurement that will confirm
+  or refute it). If any is missing, research or add instrumentation that yields the missing value before editing. An
+  obvious defect may need only source inspection and a direct check. Never change a value and rerun to see what happens,
+  however fast the cycle, and make one independently justified change at a time. Unintended, it starts when a fix or new
+  code misses its goal and a hurried retry, tweak, or new approach follows, then another miss. Watch your own work for
+  its signs: a second failed attempt at one goal, a fix that needs a fix, an approach dropped without knowing why it
+  failed, edits outside the area your analysis named, a check rerun in hope. At the first sign, stop and say so, revert
+  attempts that were not the cause, and explain the miss from evidence: the mechanism or plan was wrong, so re-establish
+  it before writing more code.
 - Classify defects as syntax, isolated logic, integration, state/architecture, or requirements. Prove isolation before
   treating a problem as local; otherwise trace the wider flow. Ask the owner only when intended behaviour remains
   unresolved. Fix the cause at its owning layer, inspect affected callers, and repeat the reproduction. For systemic
@@ -174,10 +178,11 @@ that design. Apply these defaults only to relevant work, proportionately to its 
 ## Verification
 
 - Verify through read-only inspection, normal successful operations and passive observation. Never test by breaking,
-  reverting or mutating code, configuration or state to manufacture a failure. Never use negative or intentionally wrong
-  fixtures. Never introduce faults, fault injection, stress tests or deliberate member loss into live infrastructure.
-  Define independently derived expected outcomes and observation points within those boundaries; report unobserved
-  failure behavior as unverified. No general verification requirement overrides these prohibitions.
+  reverting or mutating code, configuration or state to manufacture a failure, and never test a fix on a build or
+  revision that lacks it. Never use negative or intentionally wrong fixtures. Never introduce faults, fault injection,
+  stress tests or deliberate member loss into live infrastructure. Define independently derived expected outcomes and
+  observation points within those boundaries; report unobserved failure behavior as unverified. No general verification
+  requirement overrides these prohibitions.
 - Zero tolerance for passing local CI and then failing in GitHub Actions; prevent such failure by design. Run the same
   verification entry point locally and in CI; GitHub Actions calls it rather than reimplementing checks. Use the same
   declared runtimes, package manager, verification tools, and lock-file resolutions for equivalent jobs. Declare each
@@ -199,10 +204,8 @@ that design. Apply these defaults only to relevant work, proportionately to its 
   existing checks; test exact text only when it is a required contract.
 - Select checks that establish the claim through intended successful behavior. Assess failure mechanisms through source,
   read-only state and existing logs without inducing failures or using negative fixtures. Use existing live interfaces
-  when interactions matter. Do not create disposable live infrastructure, or build VMs, simulators, or test harnesses on
-  your own initiative; propose a heavier check in one sentence.
-- Never test a fix by reverting code or undoing the fix, including by running tests against a build or revision that
-  lacks it. Verify fixes only on the fixed code.
+  when interactions matter. Do not build VMs, simulators, or test harnesses on your own initiative; propose a heavier
+  check in one sentence.
 - Verify the effective artifact and changed behaviour in the strongest accessible environment. The evidence that
   something works is observed product behaviour; a green suite, a stored row, a success status, a successful command, or
   intended configuration does not show that a user can complete the task. Exercise the built product the way its users
