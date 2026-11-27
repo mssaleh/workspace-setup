@@ -20,6 +20,8 @@
 #                   ~/.config/workspace-setup/agents/profiles
 #   AGENTS_HOME   shared skill store root      (default ~/.agents)
 #   AGENTS_INSTRUCTIONS  instructions linked into every agent (default ~/.agents/AGENTS.md)
+#   CONFIG_ADOPT  AGENTS.md makes the shipped instructions the shared file, keeping
+#                 each previous text as <file>.superseded.<time>
 #   CLAUDE_HOME   Claude Code state            (default $CLAUDE_CONFIG_DIR or ~/.claude)
 #   CODEX_HOME    Codex state                  (default ~/.codex)
 #   SKILLS_CLI_VERSION   select the skills CLI release (default latest)
@@ -53,6 +55,10 @@ MANIFEST_DIR=${MANIFEST_DIR:-$REPO_DIR/manifests}
 . "$REPO_DIR/lib/agents/plugins.sh"
 # shellcheck source=lib/agents/verify.sh
 . "$REPO_DIR/lib/agents/verify.sh"
+# Known shipped versions and CONFIG_ADOPT, for the shipped instructions.
+# shellcheck source=lib/config.sh
+. "$REPO_DIR/lib/config.sh"
+KNOWN_CONFIG_HASHES_FILE=${KNOWN_CONFIG_HASHES_FILE:-$REPO_DIR/lib/known-config-hashes.tsv}
 # shellcheck source=lib/agents/instructions.sh
 . "$REPO_DIR/lib/agents/instructions.sh"
 

@@ -148,7 +148,7 @@ platform package is unavailable.
 | Shared skills and their lock file | `npx skills`, from the skills manifests |
 | MCP configuration | native agent commands, from the MCP manifests |
 | Claude plugins and marketplaces | `claude plugin`, from the plugin manifests |
-| User-level agent instructions | links to one file you own, by default `~/.agents/AGENTS.md` |
+| User-level agent instructions | links to one shared file, by default `~/.agents/AGENTS.md`; agent synchronization starts it from `dotfiles/agents/instructions.md` when no agent has instructions |
 
 Vendor apt entries use deb822 `.sources` files. Matching legacy `.list`
 entries migrate with inactive `.list.bak` backups; existing backups are
@@ -252,7 +252,7 @@ All optional:
 | `SSH_KEY_PASSPHRASE` | (unset) | Linux uses an interactive passphrase by default; set `none` for a disposable host |
 | `INSTALL_RECOMMENDS` | `1` | Linux only: `0` installs the toolbox's apt packages without their recommendations; what setup needs from them is declared in `PACKAGES_APT` |
 | `UPDATE_SYSTEM` | (unset) | `1` applies the documented Linux full-upgrade/autoremove path; never used on macOS |
-| `CONFIG_ADOPT` | (unset) | `all` or a colon-separated path/basename list authorizes backup-first adoption of preserved configuration conflicts and of shell files reported as kept |
+| `CONFIG_ADOPT` | (unset) | `all` or a colon-separated path/basename list authorizes backup-first adoption of preserved configuration conflicts and of shell files reported as kept. `AGENTS.md` (named explicitly, not through `all`) makes the shipped instructions the shared file for every agent; see [Instructions](#instructions) |
 | `REPO_ARCHIVE_URL` | GitHub `main` archive | Source archive used for the temporary `curl\|bash` payload |
 | `REPO_URL` | (unset) | Optional git repository override; requires `git` before bootstrap |
 | `FORCE_COLOR` | (unset) | Set to `1` to force colored output |
@@ -869,7 +869,7 @@ bash setup.sh agents --dry-run
 
 Each agent reads one user-level instruction file. Synchronization links every
 installed agent's file to `AGENTS_INSTRUCTIONS`, by default
-`~/.agents/AGENTS.md`. This repository ships no instructions; the file is yours.
+`~/.agents/AGENTS.md`, and never merges or overwrites text you wrote.
 
 | Agent | Path linked to the shared file |
 |---|---|
@@ -879,14 +879,40 @@ installed agent's file to `AGENTS_INSTRUCTIONS`, by default
 | GitHub Copilot CLI | `$COPILOT_HOME/copilot-instructions.md` ([`copilot help config`](https://docs.github.com/en/copilot/how-tos/copilot-cli)) |
 | Antigravity | `~/.gemini/config/AGENTS.md` |
 
-When the shared file does not exist and every agent that has an instruction
-file has the same text, that file moves to the shared path and the agents link
-to it. Agents with different texts keep them until you create the shared file.
-Once it exists, a file with the same text is replaced by a link and a file with
-different text is reported and left alone. Content is never merged. Codex's
-`AGENTS.override.md` and Antigravity's other global rule files
-(`~/.gemini/AGENTS.md`, `~/.gemini/GEMINI.md`, `~/.gemini/config/GEMINI.md`) are
-reported when they hold other text. Antigravity truncates a rule file at 24,000
+Each of these paths, and the shared file, is classified on its own: missing (or
+a link that leads nowhere), blank (empty or only whitespace), holding text, or
+unusable (a directory or unreadable file, which is never touched). A link counts
+as whatever file it ends at. Two files have the same text when they match after
+ignoring line endings, a byte-order mark, trailing whitespace, and trailing
+blank lines. A `CLAUDE.md` holding only `@~/.agents/AGENTS.md` imports the
+shared file and counts as reading it.
+
+First the shared file is settled:
+
+| The shared file | The agents' paths | Result |
+|---|---|---|
+| has text | any | It is shared. When it is a link to one agent's own file, that file moves to the shared path. |
+| has no text | no text anywhere | [`dotfiles/agents/instructions.md`](dotfiles/agents/instructions.md) is installed as the shared file |
+| has no text | one text, in one file or in same-text copies and links | That file moves to the shared path; when the text is reached only through links to one outside file, such as a dotfiles repository, the shared file links to it |
+| has no text | different texts | Nothing is shared or changed, and the files are listed in a warning |
+
+Then each agent's path is handled on its own. A missing or blank path, a link
+that leads nowhere or to a blank file, and a file or link with the same text
+become links to the shared file; a link's old target is left untouched. A path
+with different text is kept and reported, as a warning rather than a failure.
+
+The shipped file holds working rules for coding agents on Linux and macOS:
+precedence, judgment, prose, evidence, verification, boundaries, and resource
+use. While the shared file is an unedited shipped version, later runs upgrade
+it. `CONFIG_ADOPT=AGENTS.md` makes the shipped file the shared one and links
+every agent to it, keeping each previous text beside its file as
+`<file>.superseded.<time>`; `CONFIG_ADOPT=all` does not replace instructions.
+
+Agents also read files outside these paths, which are reported and left alone:
+Codex's `AGENTS.override.md`, which takes precedence; Antigravity's
+`~/.gemini/AGENTS.md`, `~/.gemini/GEMINI.md` and `~/.gemini/config/GEMINI.md`;
+and Copilot's `$COPILOT_HOME/instructions/*.instructions.md` and
+`COPILOT_CUSTOM_INSTRUCTIONS_DIRS`. Antigravity truncates a rule file at 24,000
 bytes, and Codex stops reading instructions after 32,768 bytes of global and
 project files together; a larger shared file is reported.
 
@@ -1333,6 +1359,7 @@ workspace-setup/
 │   ├── codex/rules/default.rules  # Starlark prefix_rule() denylist
 │   ├── copilot/hooks/             # preToolUse hook with the same denylist
 │   ├── gemini/antigravity-cli/settings.json # Antigravity command deny rules
+│   ├── agents/instructions.md     # starting instructions for users who have none
 │   ├── agents/skills/             # skills this repo publishes; manifests install them
 │   │   ├── apple-container-amd64/ # SKILL.md + scripts/optimize-builder.sh
 │   │   └── workspace-tools/       # CLI and TUI quick reference

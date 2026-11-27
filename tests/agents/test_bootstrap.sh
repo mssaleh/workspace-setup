@@ -16,6 +16,7 @@ cp "$REPO_DIR/setup.sh" "$src/"
 cp -R "$REPO_DIR/lib" "$REPO_DIR/manifests" "$src/"
 cp "$REPO_DIR/scripts/sync_agents.sh" "$src/scripts/"
 cp "$REPO_DIR/scripts/stage_agents.sh" "$src/scripts/"
+mkdir -p "$src/dotfiles/agents"; cp "$REPO_DIR/dotfiles/agents/instructions.md" "$src/dotfiles/agents/"
 tar -czf "$root/payload.tar.gz" -C "$(dirname "$src")" workspace-setup
 export REPO_ARCHIVE_URL="file://$root/payload.tar.gz"
 

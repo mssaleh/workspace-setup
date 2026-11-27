@@ -78,9 +78,12 @@ copy; refresh only with `agents --update`. Prune only with the requested pruning
 option. Retain all entries from declared whole sources and preserve skills
 outside the lock. Verify that each mirror resolves to its own payload.
 
-Link each installed agent's user-level instruction file to the one shared file.
-Adopt an existing file only when every agent has the same text; never merge or
-overwrite different text. The repository ships no instruction content.
+Link each installed agent's user-level instruction file to the one shared file,
+classifying and handling each path on its own as the README's Instructions
+section describes. Install `dotfiles/agents/instructions.md` only when no path
+holds text, adopt a single text, and never merge or overwrite different text
+without `CONFIG_ADOPT=AGENTS.md`. Keep the shipped file under Antigravity's
+24,000-byte rule-file limit.
 
 ## Host changes
 

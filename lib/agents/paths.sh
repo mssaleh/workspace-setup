@@ -33,6 +33,13 @@ agents_user_dir() {
   printf '%s\n' "${XDG_CONFIG_HOME:-$HOME/.config}/workspace-setup/agents"
 }
 
+# The one instruction file every agent links to.
+agents_instructions_path() {
+  local path="${AGENTS_INSTRUCTIONS:-${AGENTS_HOME:-$HOME/.agents}/AGENTS.md}"
+  case "$path" in /*) ;; *) path="$PWD/$path" ;; esac
+  printf '%s\n' "$path"
+}
+
 # The user-level instruction file each agent loads, as "agent<TAB>path".
 # Copilot: `copilot help config` (1.0.115). Antigravity also loads
 # ~/.gemini/{AGENTS,GEMINI}.md and config/GEMINI.md (agy 1.2.15 changelog).

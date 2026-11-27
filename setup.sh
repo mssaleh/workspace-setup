@@ -49,6 +49,8 @@
 #                shipped version. Either `all` or a colon-separated list of
 #                paths or basenames. The existing content is copied to
 #                <path>.superseded.<timestamp> first, never discarded.
+#                Naming AGENTS.md (not through `all`) also makes the shipped
+#                agent instructions the shared file for every agent.
 #   UPDATE_SYSTEM — set to 1 to also apply system updates (Linux only): apt
 #                full-upgrade, autoremove, snap, flatpak, uv. Off by default
 #                because full-upgrade may remove packages.
@@ -84,7 +86,7 @@ Usage: bash setup.sh [host | agents [OPTIONS]]
 
   (no command)  Provision the host, verify it, then synchronize coding agents.
   host          Provision and verify the host only.
-  agents        Synchronize skills, MCP servers, and plugins without provisioning.
+  agents        Synchronize instructions, skills, MCP servers, and plugins without provisioning.
   --help        Show this help without changing the host.
 
 Set PRESERVE_CLI_DUPLICATES=1 to keep existing alternate CLI installations.

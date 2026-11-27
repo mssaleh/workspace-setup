@@ -182,17 +182,29 @@ native_readback() {
   sync_agents --only verify
 }
 
-# One real instruction file is adopted and every agent links to it; Copilot's
-# own listing must name it as a personal source.
-instructions_readback() {
+instructions_all_linked() {
   local path
-  printf '# integration rules\n' > "$CODEX_HOME/AGENTS.md"
-  sync_agents --only instructions
-  [[ "$(cat "$HOME/.agents/AGENTS.md")" == '# integration rules' ]]
   for path in "$CLAUDE_CONFIG_DIR/CLAUDE.md" "$CODEX_HOME/AGENTS.md" "$XDG_CONFIG_HOME/opencode/AGENTS.md" \
       "$COPILOT_HOME/copilot-instructions.md" "$HOME/.gemini/config/AGENTS.md"; do
     [[ "$path" -ef "$HOME/.agents/AGENTS.md" ]] || die "Not linked to the shared instructions: $path"
   done
+}
+
+# The streamed install found no instructions, so every agent links to the
+# shipped file. Then one agent's own text replaces it: that file is adopted.
+# Copilot's own listing must name the link as a personal source.
+instructions_readback() {
+  local path
+  cmp /repo/dotfiles/agents/instructions.md "$HOME/.agents/AGENTS.md"
+  instructions_all_linked
+  for path in "$HOME/.agents/AGENTS.md" "$CLAUDE_CONFIG_DIR/CLAUDE.md" "$CODEX_HOME/AGENTS.md" \
+      "$XDG_CONFIG_HOME/opencode/AGENTS.md" "$COPILOT_HOME/copilot-instructions.md" "$HOME/.gemini/config/AGENTS.md"; do
+    rm -f "$path"
+  done
+  printf '# integration rules\n' > "$CODEX_HOME/AGENTS.md"
+  sync_agents --only instructions
+  [[ "$(cat "$HOME/.agents/AGENTS.md")" == '# integration rules' ]]
+  instructions_all_linked
   (cd "$(mktemp -d)" && copilot instruction list --json < /dev/null) > "$results/copilot-instructions.json"
   grep -qF "\"sourcePath\": \"$COPILOT_HOME/copilot-instructions.md\"" "$results/copilot-instructions.json" \
     || grep -qF "\"sourcePath\":\"$COPILOT_HOME/copilot-instructions.md\"" "$results/copilot-instructions.json"

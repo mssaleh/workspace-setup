@@ -52,10 +52,10 @@ mkdir -p "$source_dir/lib/agents" "$source_dir/manifests" "$source_dir/tests/int
   "$source_dir/tests/agents" "$source_dir/scripts" \
   "$source_dir/dotfiles/claude" "$source_dir/dotfiles/codex/rules" \
   "$source_dir/dotfiles/config/opencode" "$source_dir/dotfiles/gemini/antigravity-cli" \
-  "$result_dir/build-context" || exit
+  "$source_dir/dotfiles/agents" "$result_dir/build-context" || exit
 cp "$repo/setup.sh" "$repo/README.md" "$source_dir/" || exit
 cp "$repo/lib/log.sh" "$repo/lib/os.sh" "$repo/lib/manifest.sh" \
-  "$repo/lib/upstream.sh" "$source_dir/lib/" || exit
+  "$repo/lib/upstream.sh" "$repo/lib/config.sh" "$repo/lib/known-config-hashes.tsv" "$source_dir/lib/" || exit
 cp "$repo/lib/agents/"*.sh "$source_dir/lib/agents/" || exit
 cp "$repo/scripts/sync_agents.sh" "$repo/scripts/stage_agents.sh" \
   "$repo/scripts/stage_toolchains.sh" "$repo/scripts/stage_completions.sh" \
@@ -64,6 +64,7 @@ cp "$repo/dotfiles/claude/settings.json" "$source_dir/dotfiles/claude/" || exit
 cp "$repo/dotfiles/codex/rules/default.rules" "$source_dir/dotfiles/codex/rules/" || exit
 cp "$repo/dotfiles/config/opencode/opencode.jsonc" "$source_dir/dotfiles/config/opencode/" || exit
 cp "$repo/dotfiles/gemini/antigravity-cli/settings.json" "$source_dir/dotfiles/gemini/antigravity-cli/" || exit
+cp "$repo/dotfiles/agents/instructions.md" "$source_dir/dotfiles/agents/" || exit
 cp -R "$repo/manifests/." "$source_dir/manifests/" || exit
 cp "$repo/tests/run.sh" "$source_dir/tests/" || exit
 cp "$repo/tests/agents/"*.sh "$source_dir/tests/agents/" || exit
