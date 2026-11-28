@@ -28,8 +28,8 @@
 # draws the same line: a key the user has never set reads empty and still
 # carries the distribution's default, so it is ours to set; a key they have set
 # is a preference, matched as a no-op or preserved and reported. This stage
-# therefore never overwrites a deliberate choice, and re-running it writes
-# nothing.
+# therefore never overwrites a deliberate choice unless CONFIG_ADOPT names the
+# key's dconf path or basename, and re-running it writes nothing.
 # shellcheck shell=bash
 
 PTYXIS_ROOT_SCHEMA=org.gnome.Ptyxis
@@ -64,9 +64,12 @@ gsettings_converge() {
       TERMINAL_PROFILE_UNCHANGED_COUNT=$((TERMINAL_PROFILE_UNCHANGED_COUNT + 1))
       return 0
     fi
-    TERMINAL_PROFILE_PRESERVED_COUNT=$((TERMINAL_PROFILE_PRESERVED_COUNT + 1))
-    warn "preserving terminal setting chosen by the user: $key = $existing"
-    return 0
+    if ! config_adopt_requested "${key_path}${key}"; then
+      TERMINAL_PROFILE_PRESERVED_COUNT=$((TERMINAL_PROFILE_PRESERVED_COUNT + 1))
+      warn "preserving terminal setting chosen by the user: $key = $existing"
+      return 0
+    fi
+    info "replacing terminal setting chosen by the user: $key = $existing (CONFIG_ADOPT)"
   fi
 
   if gsettings set "$schema" "$key" "$set_value" 2>/dev/null; then

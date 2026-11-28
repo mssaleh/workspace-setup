@@ -148,6 +148,14 @@ GENERATED_COMPLETION_CONFLICTS=0
 stage_completions >/dev/null 2>&1
 [[ "$(cat "$HOME/.local/share/zsh/site-functions/_codex")" == '# user completion' ]]
 [[ "$GENERATED_COMPLETION_CONFLICTS" == 1 ]]
+# CONFIG_ADOPT replaces it with the generated file and keeps a copy that zsh,
+# which loads every `_*` file on fpath, does not load.
+GENERATED_COMPLETION_CONFLICTS=0
+CONFIG_ADOPT=all stage_completions >/dev/null 2>&1
+completion_is_setup_owned "$HOME/.local/share/zsh/site-functions/_codex"
+[[ "$(cat "$HOME/.local/share/zsh/site-functions/._codex".superseded.*)" == '# user completion' ]]
+[[ "$GENERATED_COMPLETION_CONFLICTS" == 0 ]]
+rm "$HOME/.local/share/zsh/site-functions/._codex".superseded.*
 
 # Restore the generated file, then exercise the same registration checks the
 # real postflight uses rather than checking file presence alone.

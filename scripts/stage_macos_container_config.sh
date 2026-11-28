@@ -5,13 +5,23 @@
 #
 # The shipped baseline carries no cpus/memory, so the merge asks only for the
 # keys that are policy: a host tuned by the apple-container-amd64 optimizer
-# keeps its resource values, and a custom registry is left alone.
+# keeps its resource values, and a custom registry is left alone unless
+# CONFIG_ADOPT names the file, which gives the shipped keys their values.
 # shellcheck disable=SC2034 # callbacks communicate through shared stage globals
 
 merge_container_config() {
-  local _src="$1" dst="$2" mode="$3" tmp
+  local src="$1" dst="$2" mode="$3" tmp status=0
   grep -Eq '^\[build\][[:space:]]*$' "$dst" || return 1
   grep -Eq '^[[:space:]]*rosetta[[:space:]]*=' "$dst" || return 1
+
+  if config_adopt_requested "$dst"; then
+    tmp=$(mktemp "${TMPDIR:-/tmp}/container-config-merge.XXXXXX") || return 1
+    if ! config_apply_keys "$src" "$dst" > "$tmp" || ! config_merge_commit "$tmp" "$dst" "$mode"; then
+      status=1
+    fi
+    rm -f "$tmp"
+    return "$status"
+  fi
 
   if grep -Eq '^\[registry\][[:space:]]*$' "$dst"; then
     # A complete custom registry is user policy and remains untouched.

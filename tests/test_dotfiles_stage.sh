@@ -131,8 +131,22 @@ jq -e '.statusLine.command | contains("/statusline.sh")' "$HOME/.claude/settings
 mkdir -p "$HOME/.config/workspace-setup/agents"
 printf '%s\n' '{"sandbox":{"network":{"allowedDomains":["*.example.com"]}},"theme":"light"}' \
   > "$HOME/.config/workspace-setup/agents/claude-settings.json"
+# The settings.json here is still a shipped version, so the user's settings
+# outrank its values; a value written into settings.json outranks both.
 stage_dotfiles >/dev/null
-jq -e '.sandbox.network.allowedDomains == ["*.example.com"] and .theme == "auto"' "$HOME/.claude/settings.json" >/dev/null
+jq -e '.sandbox.network.allowedDomains == ["*.example.com"] and .theme == "light"' "$HOME/.claude/settings.json" >/dev/null
+jq '.theme = "dark"' "$HOME/.claude/settings.json" > "$TEST_TMP/settings.json" && mv "$TEST_TMP/settings.json" "$HOME/.claude/settings.json"
+stage_dotfiles >/dev/null
+jq -e '.theme == "dark"' "$HOME/.claude/settings.json" >/dev/null
+# CONFIG_ADOPT gives the user's settings, then the shipped ones, precedence
+# again, and a second run writes nothing.
+CONFIG_ADOPT=all stage_dotfiles >/dev/null
+jq -e '.theme == "light" and .model == "opus"' "$HOME/.claude/settings.json" >/dev/null
+cp "$HOME/.claude/settings.json" "$TEST_TMP/settings.adopted"
+CONFIG_ADOPT=all stage_dotfiles >/dev/null
+cmp -s "$TEST_TMP/settings.adopted" "$HOME/.claude/settings.json"
+[[ "$(find "$HOME/.claude" -maxdepth 1 -name 'settings.json.superseded.*' | wc -l | tr -d ' ')" == 1 ]]
+find "$HOME" -name '*.superseded.*' -prune -exec rm -rf {} +
 # On a new settings.json the user's settings outrank the shipped ones.
 mv "$HOME/.claude/settings.json" "$TEST_TMP/settings.json"
 printf '%s\n' '{"model":"sonnet"}' > "$HOME/.config/workspace-setup/agents/claude-settings.json"
@@ -250,6 +264,12 @@ git config -f "$HOME/.gitconfig" --unset-all 'url.git@github.com:.pushInsteadOf'
 git config -f "$HOME/.gitconfig" 'url.git@github.com:.pushInsteadOf' 'https://github.com/mssaleh/'
 stage_dotfiles
 [[ "$(git config -f "$HOME/.gitconfig" --get 'url.git@github.com:.pushInsteadOf')" == 'https://github.com/mssaleh/' ]]
+# CONFIG_ADOPT gives it setup's value, also when the key holds several values.
+git config -f "$HOME/.gitconfig" --add 'url.git@github.com:.pushInsteadOf' 'https://github.com/other/'
+CONFIG_ADOPT=all stage_dotfiles >/dev/null
+[[ "$(git config -f "$HOME/.gitconfig" --get-all 'url.git@github.com:.pushInsteadOf')" == 'https://github.com/' ]]
+git config -f "$HOME/.gitconfig".superseded.* --get-all 'url.git@github.com:.pushInsteadOf' | grep -Fxq 'https://github.com/other/'
+find "$HOME" -name '*.superseded.*' -prune -exec rm -rf {} +
 
 # gh writes GitHub's helper itself, naming its provider path. The same gh
 # reached through the command-selection link is a second spelling, which

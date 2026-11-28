@@ -77,6 +77,12 @@ install_regular_file "$src" "$dst" fixture
 [[ -L "$dst" ]]
 [[ "$(readlink "$dst")" == "$unrelated_tree/example" ]]
 ((CONFIG_CONFLICT_COUNT == before_conflicts + 1))
+# CONFIG_ADOPT replaces the link with the shipped file; its target is untouched.
+CONFIG_ADOPT=all install_regular_file "$src" "$dst" fixture >/dev/null 2>&1
+assert_regular_equal "$src" "$dst"
+[[ "$(cat "$dst".superseded.*)" == 'unrelated symlink content' ]]
+[[ "$(<"$unrelated_tree/example")" == 'unrelated symlink content' ]]
+rm -f "$dst".superseded.*
 
 # An exact historical version upgrades without a machine-side receipt.
 rm -f "$dst"
@@ -374,6 +380,52 @@ printf 'registry=https://npm.example.com/' > "$npmrc_dst"
 install_regular_file "$npmrc_src" "$npmrc_dst" generated/npmrc 0644 merge_npmrc
 grep -Fxq 'registry=https://npm.example.com/' "$npmrc_dst"
 grep -Fxq "prefix=$NPM_PACKAGES" "$npmrc_dst"
+
+# CONFIG_ADOPT makes the shipped configuration win: the keys setup sets take its
+# values, every other key stays, the previous file is kept, and a rerun writes
+# nothing.
+adopt_settled() {
+  local file="$1" hash
+  hash=$(config_sha256 "$file")
+  CONFIG_ADOPT=all install_regular_file "$2" "$file" "$3" "$4" "$5" >/dev/null 2>&1
+  [[ "$CONFIG_LAST_ACTION" == unchanged && "$(config_sha256 "$file")" == "$hash" ]]
+  [[ "$(find "$(dirname "$file")" -name "$(basename "$file").superseded.*" | wc -l | tr -d ' ')" == 1 ]]
+}
+
+printf '%s\n' '{"theme":"custom","mine":1,"permissions":{"deny":["Bash(custom *)"]}}' > "$claude_dst"
+CONFIG_ADOPT=all install_regular_file "$claude_src" "$claude_dst" claude-fixture 0644 merge_settings_json >/dev/null 2>&1
+[[ "$CONFIG_LAST_ACTION" == merged ]]
+jq -e '.theme == "auto" and .mine == 1 and .model == "opus"
+  and (.permissions.deny | index("Bash(custom *)")) and (.permissions.deny | index("Bash(brew install *)"))' \
+  "$claude_dst" >/dev/null
+jq -e '.theme == "custom"' "$claude_dst".superseded.* >/dev/null
+adopt_settled "$claude_dst" "$claude_src" claude-fixture 0644 merge_settings_json
+
+printf '%s\n' 'Host mini' '    User someone' '    HashKnownHosts no' \
+  '' 'Host *' '    ControlMaster no' '    SetEnv TERM=xterm-kitty LANG=C.UTF-8' > "$ssh_dst"
+CONFIG_ADOPT=all install_regular_file "$ssh_src" "$ssh_dst" dotfiles/ssh/config 0600 merge_ssh_config >/dev/null 2>&1
+[[ "$CONFIG_LAST_ACTION" == merged ]]
+ssh -G -F "$ssh_dst" localhost 2>/dev/null > "$TEST_TMP/ssh-adopt-effective"
+grep -Fxq 'controlmaster auto' "$TEST_TMP/ssh-adopt-effective"
+grep -Fxq 'hashknownhosts yes' "$TEST_TMP/ssh-adopt-effective"
+grep -Fxq 'connecttimeout 10' "$TEST_TMP/ssh-adopt-effective"
+grep -Fxq 'setenv TERM=xterm-256color' "$TEST_TMP/ssh-adopt-effective"
+grep -Fxq 'setenv LANG=C.UTF-8' "$TEST_TMP/ssh-adopt-effective"
+# The host block keeps its own choice.
+[[ "$(ssh -G -F "$ssh_dst" mini 2>/dev/null | awk '$1 == "hashknownhosts" { print $2 }')" == no ]]
+[[ "$(grep -c 'ControlMaster' "$ssh_dst")" == 1 ]]
+adopt_settled "$ssh_dst" "$ssh_src" dotfiles/ssh/config 0600 merge_ssh_config
+
+printf '%s\n' 'prefix=/opt/npm-global' 'registry=https://npm.example.com/' 'fund=true' > "$npmrc_dst"
+CONFIG_ADOPT=all install_regular_file "$npmrc_src" "$npmrc_dst" generated/npmrc 0644 merge_npmrc >/dev/null 2>&1
+[[ "$(<"$npmrc_dst")" == "$(printf 'prefix=%s\nregistry=https://npm.example.com/\nfund=false\ncache=%s\naudit=false\nengine-strict=true' "$NPM_PACKAGES" "$NPM_CACHE")" ]]
+adopt_settled "$npmrc_dst" "$npmrc_src" generated/npmrc 0644 merge_npmrc
+
+container_src="$TEST_ROOT/dotfiles/config/container/config.toml"
+printf '%s\n' '[build]' 'cpus = 3' 'rosetta = false' '' '[registry]' 'domain = "registry.example.com"' > "$container_dst"
+CONFIG_ADOPT=all install_regular_file "$container_src" "$container_dst" container-fixture 0644 merge_container_config >/dev/null 2>&1
+[[ "$(<"$container_dst")" == "$(printf '%s\n' '[build]' 'cpus = 3' 'rosetta = true' '' '[registry]' 'domain = "docker.io"')" ]]
+adopt_settled "$container_dst" "$container_src" container-fixture 0644 merge_container_config
 
 # Every directly installed source must record its current hash so the next
 # release can distinguish this version from a user edit without a host receipt.

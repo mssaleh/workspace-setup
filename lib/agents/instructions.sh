@@ -15,9 +15,9 @@
 #   no text, different agent texts     -> nothing is shared; all left alone
 # Step 2 links each installed agent's path to it, unless the path holds a
 # different text, which is kept and reported. Text is never merged, and an
-# unedited earlier shipped version follows the shipped file. Only CONFIG_ADOPT
-# naming AGENTS.md installs the shipped file over existing text, keeping each
-# previous text beside itself as <file>.superseded.<time>.
+# unedited earlier shipped version follows the shipped file. Only CONFIG_ADOPT,
+# set to all or naming AGENTS.md, installs the shipped file over existing text,
+# keeping each previous text beside itself as <file>.superseded.<time>.
 # shellcheck shell=bash
 
 AGENTS_INSTRUCTIONS=$(agents_instructions_path)
@@ -132,9 +132,9 @@ instructions_agent_file() {
   return 1
 }
 
-# CONFIG_ADOPT naming AGENTS.md or the shared path; `all` keeps instructions.
+# CONFIG_ADOPT set to all or naming AGENTS.md or the shared path.
 instructions_adopt_requested() {
-  [[ "${CONFIG_ADOPT:-}" != all ]] && config_adopt_requested "$AGENTS_INSTRUCTIONS"
+  config_adopt_requested "$AGENTS_INSTRUCTIONS"
 }
 
 instructions_keep_copy() {

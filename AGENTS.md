@@ -41,7 +41,8 @@ Host providers belong in `lib/manifest.sh`; agent sources and targets belong in
 sets belong in `manifests/profiles/`, and personal rows in the user's
 `~/.config/workspace-setup/agents/`, including Claude settings only one user wants
 (`claude-settings.json`). Shipped agent settings add missing keys and keep the
-values a user already chose. Agent locations belong in `lib/agents/paths.sh`.
+values a user already chose; `CONFIG_ADOPT` reverses that for every file and
+setting it names, backup first. Agent locations belong in `lib/agents/paths.sh`.
 Keep configuration ordinary and independent of the disposable payload.
 
 Prefer apt packages and Homebrew formulae or casks that package the intended
@@ -82,8 +83,8 @@ Link each installed agent's user-level instruction file to the one shared file,
 classifying and handling each path on its own as the README's Instructions
 section describes. Install `dotfiles/agents/instructions.md` only when no path
 holds text, adopt a single text, and never merge or overwrite different text
-without `CONFIG_ADOPT=AGENTS.md`. Keep the shipped file under Antigravity's
-24,000-byte rule-file limit.
+without `CONFIG_ADOPT` set to `all` or `AGENTS.md`. Keep the shipped file under
+Antigravity's 24,000-byte rule-file limit.
 
 ## Host changes
 

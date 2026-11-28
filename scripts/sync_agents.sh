@@ -20,8 +20,8 @@
 #                   ~/.config/workspace-setup/agents/profiles
 #   AGENTS_HOME   shared skill store root      (default ~/.agents)
 #   AGENTS_INSTRUCTIONS  instructions linked into every agent (default ~/.agents/AGENTS.md)
-#   CONFIG_ADOPT  AGENTS.md makes the shipped instructions the shared file, keeping
-#                 each previous text as <file>.superseded.<time>
+#   CONFIG_ADOPT  all or AGENTS.md makes the shipped instructions the shared file,
+#                 keeping each previous text as <file>.superseded.<time>
 #   CLAUDE_HOME   Claude Code state            (default $CLAUDE_CONFIG_DIR or ~/.claude)
 #   CODEX_HOME    Codex state                  (default ~/.codex)
 #   SKILLS_CLI_VERSION   select the skills CLI release (default latest)

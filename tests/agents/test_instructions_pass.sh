@@ -123,8 +123,6 @@ assert_missing "9. no shared file appears" "$shared"
 out=$(verify_instructions 2>&1)
 assert_contains "9. verification warns" "$out" "agents keep different instructions"
 assert_absent "9. without failing" "$out" "✗"
-out=$(CONFIG_ADOPT=all instructions_converge 2>&1)
-assert_missing "9. CONFIG_ADOPT=all leaves instructions alone" "$shared"
 
 # The opt-in installs the shipped file and keeps every previous text.
 out=$(CONFIG_ADOPT=AGENTS.md instructions_converge 2>&1)
@@ -133,6 +131,13 @@ assert_eq "10. every agent links to it" "$(all_linked && echo yes)" yes
 assert_eq "10. Claude's text is kept" "$(cat "$claude".superseded.*)" a
 assert_eq "10. Codex's text is kept" "$(cat "$codex".superseded.*)" b
 assert_eq "10. a link's target is untouched" "$(cat "$outside/other.md")" "# other"
+
+# CONFIG_ADOPT=all includes the instructions.
+reset
+printf 'a\n' > "$claude"; printf 'b\n' > "$codex"
+CONFIG_ADOPT=all instructions_converge >/dev/null 2>&1
+assert_eq "10a. all shares the shipped file" "$(is_shipped "$shared")" shipped
+assert_eq "10a. every agent links to it" "$(all_linked && echo yes)" yes
 
 # An unedited earlier shipped version follows the shipped file; edited text does not.
 reset

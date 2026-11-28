@@ -378,6 +378,8 @@ done
   OS_KIND=linux
   # shellcheck disable=SC1091
   . "$TEST_ROOT/lib/log.sh"
+  # shellcheck disable=SC1091
+  . "$TEST_ROOT/lib/config.sh"
   # shellcheck disable=SC1090
   . "$stage_profile"
 
@@ -411,6 +413,12 @@ done
   gsettings_converge schema /path/ akey avalue "'avalue'" >/dev/null 2>&1
   [[ "$TERMINAL_PROFILE_PRESERVED_COUNT" == 1 && "$TERMINAL_PROFILE_SET_COUNT" == 0 ]] \
     || fail_test 'stage overwrote a terminal setting the user had chosen'
+
+  # ...unless CONFIG_ADOPT asks for setup's values.
+  TERMINAL_PROFILE_SET_COUNT=0 TERMINAL_PROFILE_UNCHANGED_COUNT=0 TERMINAL_PROFILE_PRESERVED_COUNT=0
+  CONFIG_ADOPT=all gsettings_converge schema /path/ akey avalue "'avalue'" >/dev/null 2>&1
+  [[ "$TERMINAL_PROFILE_SET_COUNT" == 1 && "$TERMINAL_PROFILE_PRESERVED_COUNT" == 0 ]] \
+    || fail_test 'CONFIG_ADOPT=all did not replace a terminal setting the user had chosen'
 ) || exit 1
 
 printf 'terminal UX tests: ok\n'

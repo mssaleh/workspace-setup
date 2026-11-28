@@ -143,6 +143,10 @@ completion_install_generated() {
 
   if [[ -e "$dst" || -L "$dst" ]]; then
     if [[ ! -f "$dst" || -L "$dst" ]] || ! completion_is_setup_owned "$dst"; then
+      if config_adopt_requested "$dst" && config_adopt_shipped "$prepared" "$dst"; then
+        rm -rf "$tmp_dir"
+        return 0
+      fi
       GENERATED_COMPLETION_CONFLICTS=$((GENERATED_COMPLETION_CONFLICTS + 1))
       warn "preserving user-owned completion: $dst"
       rm -rf "$tmp_dir"

@@ -25,6 +25,9 @@ bash setup.sh host
 bash setup.sh agents --dry-run
 bash setup.sh agents
 bash setup.sh agents --update
+
+# Make this repository's configuration replace what the machine has, keeping backups:
+curl -fsSL https://raw.githubusercontent.com/mssaleh/workspace-setup/main/setup.sh | CONFIG_ADOPT=all bash
 ```
 
 The default run completes host verification before synchronizing agents. An
@@ -98,7 +101,7 @@ matching `OS_KIND=linux` guard.
 | Terminal integration | Installs Kitty but selects no system default terminal and never changes the login shell. An import that does not land is reported by postflight, never by ending a run that has already converged the host | `CONFIGURE_APPLE_TERMINAL=1` permits a local profile import; `SET_APPLE_TERMINAL_DEFAULT=1` permits changing Terminal.app's own default |
 | Apple Container | Apple's signed package updates the CLI while stopped; Rosetta is installed when needed. Fresh configs preserve Apple resource defaults, existing resource keys are retained, and services remain stopped | `CONTAINER_START=1` starts services; stop workloads before rerunning setup to apply a deferred Container update |
 | Remote/security/power | Reports Remote Login, ACL, keys, FileVault, firewall, and power policy; identifies Full Disk Access as a separate manual decision | Changes remain manual in System Settings or an explicitly reviewed administrator workflow |
-| Existing user files | Unknown files and unrelated symlinks are preserved and reported; generated completions replace only marked files | `CONFIG_ADOPT=...` is the existing, backup-first configuration adoption mechanism |
+| Existing user files | Unknown files and unrelated symlinks are preserved and reported; generated completions replace only marked files | `CONFIG_ADOPT=all` or a list of files makes the shipped configuration win, backup first |
 
 Homebrew stores completions beneath its prefix and does not link completions
 from external commands automatically; the completion stage automates the
@@ -199,6 +202,30 @@ rather than guessed at.
 | Semantically compliant custom shell file | Preserve it |
 | Ambiguous user-owned file or unrelated symlink | Preserve it, report a conflict, and fail postflight rather than overwrite |
 
+### Making the repository's configuration win
+
+`CONFIG_ADOPT=all` reverses the rule above for everything setup configures:
+the repository's version replaces yours. A colon-separated list of paths or
+basenames, such as `CONFIG_ADOPT=settings.json:.bashrc`, limits it to those.
+Each file it changes is first copied to `<path>.superseded.<timestamp>` (with a
+leading dot for zsh's `_*` function files, so zsh does not load the copy), and a
+rerun with nothing left to change writes nothing.
+
+| What setup configures | With `CONFIG_ADOPT` |
+|---|---|
+| Files it ships whole: shell startup files, kitty, bat, yazi, direnv, uv, gh, Codex rules, Copilot hooks, Claude's status line, generated completions, including edited copies and symlinks to other files | Replaced by the shipped file; a symlink's target is left untouched |
+| Claude and Antigravity `settings.json` | The shipped keys take the shipped values, your own `claude-settings.json` still outranks them, other keys stay, and the deny lists are combined |
+| `~/.ssh/config` | The shipped `Host *` directives replace the same directives before any `Host` or `Match` line and in `Host *` blocks, and `SetEnv TERM` takes the shipped value there; per-host blocks stay |
+| `~/.npmrc` and Apple Container's `config.toml` | The keys setup writes take its values; registries, tokens, and resource limits stay |
+| `~/.gitconfig` | The baseline settings take setup's values, and on Linux Git Credential Manager replaces another credential helper |
+| Ptyxis settings | Setup's values replace the ones you set |
+| Agent instructions and old bundled-skill copies | The shipped instructions become the shared file ([Instructions](#instructions)); edited skill copies move to `~/.agents/superseded/` |
+
+It does not delete what setup does not declare: skills, MCP servers, and
+plugins outside the manifests stay unless you pass the pruning options, and
+applications, packages, and executables from other providers keep the rules in
+this section.
+
 ### What the vendor archives write that dpkg does not own
 
 Registering a vendor archive means running that vendor's maintainer scripts,
@@ -252,7 +279,7 @@ All optional:
 | `SSH_KEY_PASSPHRASE` | (unset) | Linux uses an interactive passphrase by default; set `none` for a disposable host |
 | `INSTALL_RECOMMENDS` | `1` | Linux only: `0` installs the toolbox's apt packages without their recommendations; what setup needs from them is declared in `PACKAGES_APT` |
 | `UPDATE_SYSTEM` | (unset) | `1` applies the documented Linux full-upgrade/autoremove path; never used on macOS |
-| `CONFIG_ADOPT` | (unset) | `all` or a colon-separated path/basename list authorizes backup-first adoption of preserved configuration conflicts and of shell files reported as kept. `AGENTS.md` (named explicitly, not through `all`) makes the shipped instructions the shared file for every agent; see [Instructions](#instructions) |
+| `CONFIG_ADOPT` | (unset) | `all` or a colon-separated path/basename list makes the repository's configuration win, backup first; see [Making the repository's configuration win](#making-the-repositorys-configuration-win) |
 | `REPO_ARCHIVE_URL` | GitHub `main` archive | Source archive used for the temporary `curl\|bash` payload |
 | `REPO_URL` | (unset) | Optional git repository override; requires `git` before bootstrap |
 | `FORCE_COLOR` | (unset) | Set to `1` to force colored output |
@@ -904,9 +931,9 @@ with different text is kept and reported, as a warning rather than a failure.
 The shipped file holds working rules for coding agents on Linux and macOS:
 precedence, judgment, prose, evidence, verification, boundaries, and resource
 use. While the shared file is an unedited shipped version, later runs upgrade
-it. `CONFIG_ADOPT=AGENTS.md` makes the shipped file the shared one and links
-every agent to it, keeping each previous text beside its file as
-`<file>.superseded.<time>`; `CONFIG_ADOPT=all` does not replace instructions.
+it. `CONFIG_ADOPT=AGENTS.md`, or `CONFIG_ADOPT=all`, makes the shipped file the
+shared one and links every agent to it, keeping each previous text beside its
+file as `<file>.superseded.<time>`.
 
 Agents also read files outside these paths, which are reported and left alone:
 Codex's `AGENTS.override.md`, which takes precedence; Antigravity's
@@ -1090,7 +1117,7 @@ to your profile's filesystem table.
 Host setup merges `dotfiles/claude/settings.json` into `$CLAUDE_CONFIG_DIR/settings.json`
 (default `~/.claude/settings.json`): settings the file lacks are added, values it
 already holds are kept, and the deny lists are combined. A later change you make
-in `/config` therefore survives reruns.
+in `/config` therefore survives reruns, unless you run with `CONFIG_ADOPT`.
 
 | Setting | Value |
 |---|---|
@@ -1110,9 +1137,9 @@ in `/config` therefore survives reruns.
 
 Settings only you want, such as an organization's sandbox domains or a hook
 with your paths, go in `~/.config/workspace-setup/agents/claude-settings.json`
-beside your profiles. When `settings.json` does not exist yet, that file starts
-it, so its values outrank the shipped ones; afterwards host setup merges it the
-same way, keeping values already in `settings.json`. A hook script can live in the same directory and be referenced as
+beside your profiles. Its values outrank the shipped ones, and host setup
+merges both the same way, keeping values already in `settings.json` unless you
+run with `CONFIG_ADOPT`. A hook script can live in the same directory and be referenced as
 `"$HOME"/.config/workspace-setup/agents/<script>`, because Claude Code runs hook
 commands with `sh -c`.
 

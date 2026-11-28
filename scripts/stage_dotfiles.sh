@@ -114,8 +114,12 @@ bash_path_probe() {
 # ~/.bash_profile is asked about env.d too: it is the only file an interactive
 # login bash reads, so one that sets PATH itself and never chains to ~/.bashrc
 # would leave those shells without the environment.
+#
+# Under CONFIG_ADOPT a startup file is replaced whole, so these callbacks report
+# it as kept, which routes it to adoption, without probing or repairing it.
 bash_path_semantically_compliant() {
   local src="$1" dst="$2" mode="$3"
+  config_adopt_requested "$dst" && { CONFIG_MERGE_ACTION=kept; return 0; }
   bash_path_probe "$dst" || return 1
   shell_env_loader_converge "$dst" "$(dirname "$src")/bashrc" "$mode" \
     bash_path_probe /bin/bash --noprofile --norc -c || return 1
@@ -193,6 +197,7 @@ profile_cli_paths_converge() {
 
 profile_path_semantically_compliant() {
   local src="$1" dst="$2" mode="$3"
+  config_adopt_requested "$dst" && { CONFIG_MERGE_ACTION=kept; return 0; }
   profile_path_probe "$dst" || return 1
   shell_env_loader_converge "$dst" "$src" "$mode" \
     profile_path_probe /bin/sh -c || return 1
@@ -214,6 +219,7 @@ zsh_path_probe() {
 
 zsh_path_semantically_compliant() {
   local src="$1" dst="$2" mode="$3"
+  config_adopt_requested "$dst" && { CONFIG_MERGE_ACTION=kept; return 0; }
   zsh_path_probe "$dst" || return 1
   # ~/.zshenv only: zsh reads it before ~/.zprofile and ~/.zshrc always.
   if [[ "$dst" == "$HOME/.zshenv" ]]; then
@@ -226,6 +232,7 @@ zsh_path_semantically_compliant() {
 
 zshrc_semantically_compliant() {
   local src="$1" dst="$2" mode="$3"
+  config_adopt_requested "$dst" && { CONFIG_MERGE_ACTION=kept; return 0; }
   if env -i HOME="$HOME" USER="${USER:-$(id -un)}" PATH=/usr/bin:/bin:/usr/sbin:/sbin \
       /bin/zsh -dfc '
         source "$HOME/.zshenv"
@@ -295,30 +302,34 @@ codex_allow_buildx_state() (
 # Claude Code and Antigravity settings: shipped keys are added where the file
 # lacks them, values the file already holds are kept, and permissions.deny
 # becomes the union of both lists.
-merge_settings_json() {
-  local src="$1" dst="$2" mode="$3" tmp
-  command -v jq >/dev/null 2>&1 || return 1
-  jq empty "$src" >/dev/null 2>&1 || return 1
-  jq empty "$dst" >/dev/null 2>&1 || return 1
-  tmp=$(mktemp "${TMPDIR:-/tmp}/agent-settings.XXXXXX") || return 1
-  if ! jq -s '
+# settings_json_merge <existing> <incoming> <incoming-wins> — print the two
+# settings objects merged in <existing>'s key order. Existing values win unless
+# <incoming-wins> is 1; the deny lists are combined either way.
+settings_json_merge() {
+  jq -s --argjson incoming_wins "$3" '
       .[0] as $old | .[1] as $new |
-      # The inner merge keeps existing values; the outer one keeps their order.
-      ($old * ($new * $old)) |
+      # ($new * $old) keeps existing values; merging it into $old keeps their order.
+      (if $incoming_wins == 1 then $old * $new else $old * ($new * $old) end) |
       if ($old.permissions.deny // $new.permissions.deny) == null then . else
         .permissions.deny = ((($old.permissions.deny // []) + ($new.permissions.deny // [])) | unique)
       end
-    ' "$dst" "$src" > "$tmp"; then
-    rm -f "$tmp"
-    return 1
-  fi
-  if cmp -s "$tmp" "$dst"; then
-    CONFIG_MERGE_ACTION=unchanged
-  else
-    config_atomic_replace "$tmp" "$dst" "$mode" || { rm -f "$tmp"; return 1; }
-    CONFIG_MERGE_ACTION=merged
+    ' "$1" "$2"
+}
+
+# Under CONFIG_ADOPT the shipped values replace the ones the file holds.
+merge_settings_json() {
+  local src="$1" dst="$2" mode="$3" tmp wins=0 status=0
+  command -v jq >/dev/null 2>&1 || return 1
+  jq empty "$src" >/dev/null 2>&1 || return 1
+  jq empty "$dst" >/dev/null 2>&1 || return 1
+  config_adopt_requested "$dst" && wins=1
+  tmp=$(mktemp "${TMPDIR:-/tmp}/agent-settings.XXXXXX") || return 1
+  if ! settings_json_merge "$dst" "$src" "$wins" > "$tmp" \
+      || ! config_merge_commit "$tmp" "$dst" "$mode"; then
+    status=1
   fi
   rm -f "$tmp"
+  return "$status"
 }
 
 merge_opencode_settings() {
@@ -360,7 +371,10 @@ merge_opencode_settings() {
 # not ours. The baseline adds host-key privacy, key rotation, and a portable
 # terminal type. Connection tuning and explicit TERM assignments are preserved.
 #
-# A directive already written, with any value, is a decision and is left alone.
+# A directive already written, with any value, is a decision and is left alone,
+# unless CONFIG_ADOPT names the file: then the shipped `Host *` directives
+# replace the same ones before any Host or Match line and in `Host *` blocks,
+# and host blocks stay.
 ssh_config_declares() {
   grep -Eiq "^[[:space:]]*$1([[:space:]]|=)" "$2"
 }
@@ -380,17 +394,54 @@ ssh_config_is_enabled() {
   [[ "$value" == yes || "$value" == true ]]
 }
 
+# ssh_config_adopt_defaults <shipped> <file> — rewrite <file> so the shipped
+# `Host *` directives, other than SetEnv, are the global ones. The block is
+# read from a file: BSD awk rejects a newline in a -v value.
+ssh_config_adopt_defaults() {
+  local src="$1" file="$2"
+  awk '
+      /^[[:space:]]*Host[[:space:]]+\*[[:space:]]*$/ { inside = 1; next }
+      tolower($1) == "host" || tolower($1) == "match" { inside = 0 }
+      inside && $0 !~ /^[[:space:]]*(#|$)/ && tolower($1) != "setenv" { print }
+    ' "$src" > "$file.block" || { rm -f "$file.block"; return 1; }
+  grep -Eq '^[[:space:]]*Host[[:space:]]+\*[[:space:]]*$' "$file" || printf '\nHost *\n' >> "$file"
+  awk -v blockfile="$file.block" '
+      BEGIN {
+        while ((getline line < blockfile) > 0) {
+          block = block line "\n"
+          k = line; sub(/^[[:space:]]+/, "", k); sub(/[[:space:]=].*/, "", k); shipped[tolower(k)] = 1
+        }
+        global = 1
+      }
+      {
+        k = $0; sub(/^[[:space:]]+/, "", k); sub(/[[:space:]=].*/, "", k); k = tolower(k)
+        if (k == "host" || k == "match") global = k == "host" && $2 == "*" && (NF == 2 || $3 ~ /^#/)
+        else if (global && (k in shipped)) next
+        print
+        if (!placed && $0 ~ /^[[:space:]]*Host[[:space:]]+\*[[:space:]]*$/) { printf "%s", block; placed = 1 }
+      }
+    ' "$file" > "$file.next" && mv -f "$file.next" "$file"
+  local status=$?
+  rm -f "$file.block"
+  return "$status"
+}
+
 merge_ssh_config() {
-  local src="$1" dst="$2" mode="$3" tmp keyword value terminal_env terminal_changed=0
+  local src="$1" dst="$2" mode="$3" tmp keyword value terminal_env adopt=0
   local -a added=()
+  config_adopt_requested "$dst" && adopt=1
 
   # An unparseable file is not something to merge into; postflight reports it.
   ssh_config_parses "$dst" || return 1
-  grep -Eq '^[[:space:]]*Host[[:space:]]+\*[[:space:]]*$' "$dst" || return 1
+  ((adopt)) || grep -Eq '^[[:space:]]*Host[[:space:]]+\*[[:space:]]*$' "$dst" || return 1
 
   tmp=$(mktemp "${TMPDIR:-/tmp}/ssh-config.XXXXXX") || return 1
   if ! cp "$dst" "$tmp"; then
     rm -f "$tmp"
+    return 1
+  fi
+  if ((adopt)) && ! ssh_config_adopt_defaults "$src" "$tmp"; then
+    rm -f "$tmp" "$tmp.next"
     return 1
   fi
 
@@ -424,15 +475,19 @@ BASELINE
   # SetEnv is a first-value-wins list. Extend existing lists and keep the
   # fallback last so host-specific environment settings retain precedence.
   if [[ -n "$terminal_env" ]]; then
-    if ! awk -v terminal_env="$terminal_env" '
+    if ! awk -v terminal_env="$terminal_env" -v adopt="$adopt" '
+        BEGIN { top = 1 }
         tolower($1) == "host" || tolower($1) == "match" {
           global = tolower($1) == "host" && $2 == "*" && (NF == 2 || $3 ~ /^#/)
+          top = 0
         }
         tolower($0) ~ /^[[:space:]]*setenv([[:space:]]|=)/ {
           if (global) has_global = 1
           if ($0 !~ /[[:space:]"=]TERM=/) {
             match($0, /^[[:space:]]*[^[:space:]=]+[[:space:]=]+/)
             $0 = substr($0, 1, RLENGTH) terminal_env " " substr($0, RLENGTH + 1)
+          } else if (adopt && (global || top) && match($0, /[[:space:]"=]TERM=[^[:space:]"]*/)) {
+            $0 = substr($0, 1, RSTART) terminal_env substr($0, RSTART + RLENGTH)
           }
         }
         { print }
@@ -441,11 +496,10 @@ BASELINE
       rm -f "$tmp" "$tmp.next"
       return 1
     fi
-    if ! cmp -s "$tmp" "$tmp.next"; then terminal_changed=1; fi
     mv -f "$tmp.next" "$tmp" || { rm -f "$tmp" "$tmp.next"; return 1; }
   fi
 
-  if ((${#added[@]} == 0 && terminal_changed == 0)); then
+  if cmp -s "$tmp" "$dst"; then
     rm -f "$tmp"
     CONFIG_MERGE_ACTION=unchanged
     return 0
@@ -464,12 +518,11 @@ BASELINE
     fi
   done
 
-  if ! config_atomic_replace "$tmp" "$dst" "$mode"; then
+  if ! config_merge_commit "$tmp" "$dst" "$mode"; then
     rm -f "$tmp"
     return 1
   fi
   rm -f "$tmp"
-  CONFIG_MERGE_ACTION=merged
 }
 
 # ~/.npmrc is npm's own config, not something this setup owns outright: a user
@@ -482,12 +535,23 @@ npmrc_has_key() {
 }
 
 merge_npmrc() {
-  local _src="$1" dst="$2" mode="$3" tmp changed=0 key
+  local src="$1" dst="$2" mode="$3" tmp changed=0 key
   tmp=$(mktemp "${TMPDIR:-/tmp}/npmrc.XXXXXX") || return 1
   cp "$dst" "$tmp" || { rm -f "$tmp"; return 1; }
   # npm tolerates a missing trailing newline; appending to a file without one
   # would otherwise splice the new key onto the last line.
   [[ -s "$tmp" ]] && [[ -n "$(tail -c1 "$tmp")" ]] && printf '\n' >> "$tmp"
+
+  # Under CONFIG_ADOPT the generated keys take the generated values.
+  if config_adopt_requested "$dst"; then
+    if ! config_apply_keys "$src" "$tmp" > "$tmp.next" || ! mv -f "$tmp.next" "$tmp" \
+        || ! config_merge_commit "$tmp" "$dst" "$mode"; then
+      rm -f "$tmp" "$tmp.next"
+      return 1
+    fi
+    rm -f "$tmp"
+    return 0
+  fi
   if ! npmrc_has_key prefix "$tmp"; then
     printf 'prefix=%s\n' "$NPM_PACKAGES" >> "$tmp"
     changed=1
@@ -653,9 +717,10 @@ remove_legacy_tmux_config() {
 # The bundled skills reach agents through manifests/skills.tsv and the shared
 # store. Earlier runs copied them into each agent's own directory: a copy whose
 # every file is a version this repository shipped is removed, and anything
-# else is preserved. A directory linked to the store is the store itself.
+# else is preserved, or moved to ~/.agents/superseded/ under CONFIG_ADOPT.
+# A directory linked to the store is the store itself.
 retire_bundled_skill_copies() {
-  local store="${AGENTS_STORE:-${AGENTS_HOME:-$HOME/.agents}/skills}" skill dir copy file known
+  local store="${AGENTS_STORE:-${AGENTS_HOME:-$HOME/.agents}/skills}" skill dir copy file known saved
   for skill in workspace-tools apple-container-amd64; do
     for dir in "$(agent_home claude-code)/skills" "$(agent_home codex)/skills" \
         "${XDG_CONFIG_HOME:-$HOME/.config}/opencode/skills" "$(agent_home github-copilot)/skills"; do
@@ -669,6 +734,10 @@ retire_bundled_skill_copies() {
       if [[ -n "$known" ]]; then
         rm -rf -- "$copy" || return 1
         info "removed the copied $skill skill from $dir; the shared skill store provides it"
+      elif config_adopt_requested "$copy"; then
+        saved="${AGENTS_HOME:-$HOME/.agents}/superseded/$(date -u +%Y%m%dT%H%M%SZ)/$(basename "${dir%/skills}")"
+        { mkdir -p "$saved" && mv -- "$copy" "$saved/$skill"; } || return 1
+        info "moved the edited $skill skill from $dir to $saved; the shared skill store provides it"
       else
         warn "preserving $copy: it differs from every version this repository shipped"
       fi
@@ -676,8 +745,13 @@ retire_bundled_skill_copies() {
   done
 }
 
+# Under CONFIG_ADOPT a default replaces the value the user set.
 git_config_set_default() {
   local dst="$1" key="$2" value="$3"
+  if config_adopt_requested "$dst"; then
+    git_config_set_value "$@"
+    return
+  fi
   if ! git config -f "$dst" --get "$key" >/dev/null 2>&1; then
     git config -f "$dst" "$key" "$value"
     GIT_CONFIG_CHANGED=1
@@ -686,15 +760,15 @@ git_config_set_default() {
 
 git_config_set_value() {
   local dst="$1" key="$2" value="$3" current
-  current=$(git config -f "$dst" --get "$key" 2>/dev/null || true)
+  current=$(git config -f "$dst" --get-all "$key" 2>/dev/null || true)
   if [[ "$current" != "$value" ]]; then
-    git config -f "$dst" "$key" "$value"
+    git config -f "$dst" --replace-all "$key" "$value"
     GIT_CONFIG_CHANGED=1
   fi
 }
 
 stage_git_config() {
-  local repo="$1" dst="$HOME/.gitconfig" gh_bin git_name git_email tmp
+  local repo="$1" dst="$HOME/.gitconfig" gh_bin git_name git_email tmp backup=''
   local name_was_set=0 email_was_set=0
   [[ ${GIT_NAME+x} ]] && name_was_set=1
   [[ ${GIT_EMAIL+x} ]] && email_was_set=1
@@ -705,7 +779,9 @@ stage_git_config() {
   git_name="${git_name:-Your Name}"
   git_email="${git_email:-you@example.com}"
 
-  if [[ -L "$dst" ]] && ! config_is_legacy_link "$dst" "$repo/setup.sh"; then
+  # Under CONFIG_ADOPT a link of any origin is detached like a legacy one.
+  if [[ -L "$dst" ]] && ! config_is_legacy_link "$dst" "$repo/setup.sh" \
+      && ! config_adopt_requested "$dst"; then
     config_record_conflict "$dst"
     warn "  refusing to write through a non-setup ~/.gitconfig symlink"
     return 0
@@ -749,6 +825,10 @@ stage_git_config() {
     return 0
   fi
 
+  if config_adopt_requested "$dst"; then
+    backup=$(config_backup_path "$dst")
+    cp -p "$dst" "$backup" || { warn "could not copy $dst before adopting setup's Git settings"; return 1; }
+  fi
   GIT_CONFIG_CHANGED=0
   if (( name_was_set )); then
     git_config_set_value "$dst" user.name "$git_name"
@@ -793,7 +873,7 @@ stage_git_config() {
     while IFS= read -r helper; do
       [[ -z "$helper" || "$helper" -ef "$gcm" ]] || other_helper=$helper
     done < <(git config -f "$dst" --get-all credential.helper 2>/dev/null || true)
-    if [[ -n "$other_helper" ]]; then
+    if [[ -n "$other_helper" ]] && ! config_adopt_requested "$dst"; then
       # Somebody chose this. Leave it and say so, rather than redirecting their
       # credentials to a different store behind their back.
       warn "keeping the configured credential.helper '$other_helper'; git-credential-manager is installed but not wired up"
@@ -837,12 +917,15 @@ stage_git_config() {
   fi
   if (( GIT_CONFIG_CHANGED )); then
     CONFIG_MERGED_COUNT=$((CONFIG_MERGED_COUNT + 1))
-    info "merged missing baseline settings into ~/.gitconfig"
+    info "merged missing baseline settings into ~/.gitconfig${backup:+ (previous content kept at $backup)}"
+  elif [[ -n "$backup" ]]; then
+    rm -f -- "$backup"
   fi
 }
 
 stage_dotfiles() {
-  local repo claude_home claude_overlay codex_home copilot_home antigravity_home opencode_config
+  local repo claude_home claude_overlay claude_src claude_combined='' codex_home copilot_home
+  local antigravity_home opencode_config
   repo=$(repo_dir)
   claude_home=$(claude_config_home)
   codex_home=$(agent_home codex)
@@ -934,26 +1017,24 @@ stage_dotfiles() {
     stage_container_config "$repo"
   fi
 
-  # Settings only one user wants, kept beside their manifest profiles. They
-  # start a new settings.json, so they outrank the shipped values there; after
-  # that, values already in the file are kept.
+  # Settings only one user wants, kept beside their manifest profiles, outrank
+  # the shipped values; values already in the file outrank both.
+  claude_src="$repo/dotfiles/claude/settings.json"
   claude_overlay="$(agents_user_dir)/claude-settings.json"
-  if [[ -f "$claude_overlay" && ! -e "$claude_home/settings.json" ]] && jq empty "$claude_overlay" 2>/dev/null; then
-    config_atomic_replace "$claude_overlay" "$claude_home/settings.json" 0644 \
-      || warn "could not start $claude_home/settings.json from $claude_overlay"
-  fi
-  install_repo_config "$repo" dotfiles/claude/settings.json \
-    "$claude_home/settings.json" 0644 merge_settings_json
-  install_repo_config "$repo" dotfiles/claude/statusline.sh "$claude_home/statusline.sh" 0755 \
-    keep_user_statusline
   if [[ -f "$claude_overlay" ]]; then
-    CONFIG_MERGE_ACTION=''
-    if merge_settings_json "$claude_overlay" "$claude_home/settings.json" 0644; then
-      [[ "$CONFIG_MERGE_ACTION" != merged ]] || info "merged your settings from $claude_overlay"
+    claude_combined=$(mktemp "${TMPDIR:-/tmp}/claude-settings.XXXXXX") || return 1
+    if jq empty "$claude_overlay" 2>/dev/null \
+        && settings_json_merge "$claude_src" "$claude_overlay" 1 > "$claude_combined"; then
+      claude_src=$claude_combined
     else
-      warn "could not merge $claude_overlay into $claude_home/settings.json"
+      warn "could not read $claude_overlay; applying the shipped Claude settings alone"
     fi
   fi
+  install_regular_file "$claude_src" "$claude_home/settings.json" dotfiles/claude/settings.json \
+    0644 merge_settings_json
+  [[ -z "$claude_combined" ]] || rm -f -- "$claude_combined"
+  install_repo_config "$repo" dotfiles/claude/statusline.sh "$claude_home/statusline.sh" 0755 \
+    keep_user_statusline
   install_repo_config "$repo" dotfiles/codex/rules/default.rules \
     "$codex_home/rules/default.rules"
   codex_allow_buildx_state

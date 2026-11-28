@@ -9,6 +9,7 @@
 #   exact known shipped version   -> upgrade atomically
 #   unknown/user-owned content    -> preserve unless a format-aware merge is
 #                                    supplied by the caller
+# CONFIG_ADOPT reverses the last rule: the shipped version wins, backup first.
 # shellcheck disable=SC2034 # action globals are consumed by separately sourced stages
 
 CONFIG_INSTALLED_COUNT=${CONFIG_INSTALLED_COUNT:-0}
@@ -23,6 +24,8 @@ CONFIG_LAST_ACTION=none
 # Why a merge callback refused. It runs before anything has named the file, so
 # printing from inside it would land the detail above its own heading.
 CONFIG_MERGE_REASON=${CONFIG_MERGE_REASON:-}
+# Where config_merge_commit copied a file before an adopting merge changed it.
+CONFIG_MERGE_BACKUP=${CONFIG_MERGE_BACKUP:-}
 
 # JSONC edits use Microsoft's parser, preserving comments and trailing commas.
 config_jsonc() {
@@ -199,12 +202,13 @@ config_is_legacy_link() {
 }
 
 # config_adopt_requested <destination> — true when the operator has asked for
-# the shipped version of this file to replace what is on the host.
+# the shipped configuration to win over what is on the host: a file setup ships
+# whole is replaced, and in a file it merges into, its keys take its values.
 #
 # Without this a conflict is permanent: the file is preserved on every run and
 # postflight reports the same failure forever, with no supported way to say "I
 # have read the difference, take yours". CONFIG_ADOPT holds either `all` or a
-# colon-separated list of destination paths.
+# colon-separated list of destination paths or basenames.
 config_adopt_requested() {
   local dst="$1" entry
   [[ -n "${CONFIG_ADOPT:-}" ]] || return 1
@@ -214,6 +218,69 @@ config_adopt_requested() {
     [[ "$entry" == "$dst" || "$entry" == "$(basename "$dst")" ]] && return 0
   done
   return 1
+}
+
+# config_backup_path <destination> — where adoption copies a file first. zsh
+# loads every `_*` file on fpath, so a copy of one is hidden from it.
+config_backup_path() {
+  local dir base
+  dir=$(dirname "$1")
+  base=$(basename "$1")
+  case "$base" in _*) base=".$base" ;; esac
+  printf '%s/%s.superseded.%s\n' "$dir" "$base" "$(date +%Y%m%d%H%M%S)"
+}
+
+# config_merge_commit <candidate> <destination> <mode> — finish a merge
+# callback: install the candidate when it differs and set CONFIG_MERGE_ACTION.
+# Under CONFIG_ADOPT a merge can replace values the user set, so the previous
+# file is first copied to CONFIG_MERGE_BACKUP.
+config_merge_commit() {
+  local candidate="$1" dst="$2" mode="$3"
+  if cmp -s "$candidate" "$dst"; then
+    CONFIG_MERGE_ACTION=unchanged
+    return 0
+  fi
+  if config_adopt_requested "$dst"; then
+    CONFIG_MERGE_BACKUP=$(config_backup_path "$dst")
+    cp -p "$dst" "$CONFIG_MERGE_BACKUP" || return 1
+  fi
+  config_atomic_replace "$candidate" "$dst" "$mode" || return 1
+  CONFIG_MERGE_ACTION=merged
+}
+
+# config_apply_keys <shipped> <file> — print <file> with each `key = value`
+# line of <shipped> in place of the same key in the same [section], adding the
+# keys and sections it lacks. For INI-style files such as ~/.npmrc and TOML.
+config_apply_keys() {
+  awk '
+    function keyof(line) { sub(/=.*/, "", line); gsub(/[[:space:]]/, "", line); return line }
+    function section(line) { gsub(/[[:space:]]/, "", line); return line }
+    function add_missing(s,   i, k) {
+      for (i = 1; i <= count[s]; i++) {
+        k = name[s, i]
+        if (!((s, k) in done)) { print want[s, k]; done[s, k] = 1 }
+      }
+    }
+    NR == FNR {
+      if ($0 ~ /^[[:space:]]*\[/) { sec = section($0); if (!(sec in listed)) { listed[sec] = 1; order[++sections] = sec }; next }
+      if ($0 ~ /^[[:space:]]*[^#;[:space:]][^=]*=/) { k = keyof($0); want[sec, k] = $0; name[sec, ++count[sec]] = k }
+      next
+    }
+    # Blank lines are held so missing keys join the end of their section.
+    /^[[:space:]]*$/ { blanks = blanks $0 "\n"; next }
+    /^[[:space:]]*\[/ { add_missing(cur); cur = section($0); seen[cur] = 1 }
+    { printf "%s", blanks; blanks = "" }
+    /^[[:space:]]*[^#;[:space:]][^=]*=/ {
+      k = keyof($0)
+      if ((cur, k) in want) { if (!((cur, k) in done)) print want[cur, k]; done[cur, k] = 1; next }
+    }
+    { print }
+    END {
+      add_missing(cur)
+      printf "%s", blanks
+      for (i = 1; i <= sections; i++) if (order[i] != "" && !(order[i] in seen)) { printf "\n%s\n", order[i]; add_missing(order[i]) }
+    }
+  ' "$1" "$2"
 }
 
 config_emit_merge_reason() {
@@ -228,7 +295,7 @@ config_emit_merge_reason() {
 # recoverable.
 config_adopt_shipped() {
   local src="$1" dst="$2" mode="${3:-0644}" backup
-  backup="${dst}.superseded.$(date +%Y%m%d%H%M%S)"
+  backup=$(config_backup_path "$dst")
   if ! cp -p "$dst" "$backup" 2>/dev/null || ! config_atomic_replace "$src" "$dst" "$mode"; then
     warn "could not adopt $dst; leaving what is there"
     return 1
@@ -274,7 +341,7 @@ config_atomic_replace() {
 # destination untouched and return non-zero when it cannot merge safely. When
 # it returns zero it sets CONFIG_MERGE_ACTION to "merged" or "unchanged".
 install_regular_file() {
-  local src="$1" dst="$2" key="$3" mode="${4:-0644}" merge_fn="${5:-}"
+  local src="$1" dst="$2" key="$3" mode="${4:-0644}" merge_fn="${5:-}" target
   CONFIG_LAST_ACTION=none
 
   if [[ ! -f "$src" ]]; then
@@ -318,12 +385,16 @@ install_regular_file() {
       if [[ -n "$merge_fn" ]]; then
         CONFIG_MERGE_ACTION=
         CONFIG_MERGE_REASON=
+        CONFIG_MERGE_BACKUP=
         if "$merge_fn" "$src" "$dst" "$mode"; then
           if [[ "${CONFIG_MERGE_ACTION:-unchanged}" == merged ]]; then
             CONFIG_MERGED_COUNT=$((CONFIG_MERGED_COUNT + 1))
             CONFIG_MIGRATED_COUNT=$((CONFIG_MIGRATED_COUNT + 1))
             CONFIG_LAST_ACTION=merged
-            info "merged and detached legacy config link: $dst"
+            info "merged and detached legacy config link: $dst${CONFIG_MERGE_BACKUP:+ (previous content kept at $CONFIG_MERGE_BACKUP)}"
+          elif [[ "$CONFIG_MERGE_ACTION" == kept ]] && config_adopt_requested "$dst" \
+              && config_adopt_shipped "$src" "$dst" "$mode"; then
+            :
           else
             # The callback confirmed semantic compliance without changing the
             # target. Copy through the link, then atomically replace the link.
@@ -340,11 +411,13 @@ install_regular_file() {
       # checkout. Postflight reports the ambiguity instead of losing edits.
       config_atomic_replace "$dst" "$dst" "$mode"
       CONFIG_MIGRATED_COUNT=$((CONFIG_MIGRATED_COUNT + 1))
-      config_record_conflict "$dst"
-      warn "  detached legacy link without replacing its user-edited content"
+      config_record_conflict "$dst" "$src"
+      [[ "$CONFIG_LAST_ACTION" != conflict ]] \
+        || warn "  detached legacy link without replacing its user-edited content"
     else
-      config_record_conflict "$dst"
-      warn "  non-setup symlink target: $(readlink "$dst")"
+      target=$(readlink "$dst")
+      config_record_conflict "$dst" "$src"
+      [[ "$CONFIG_LAST_ACTION" != conflict ]] || warn "  non-setup symlink target: $target"
     fi
     return 0
   fi
@@ -389,12 +462,13 @@ install_regular_file() {
   if [[ -n "$merge_fn" ]]; then
     CONFIG_MERGE_ACTION=
     CONFIG_MERGE_REASON=
+    CONFIG_MERGE_BACKUP=
     if "$merge_fn" "$src" "$dst" "$mode"; then
       case "${CONFIG_MERGE_ACTION:-unchanged}" in
         merged)
           CONFIG_MERGED_COUNT=$((CONFIG_MERGED_COUNT + 1))
           CONFIG_LAST_ACTION=merged
-          info "merged required settings into: $dst"
+          info "merged required settings into: $dst${CONFIG_MERGE_BACKUP:+ (previous content kept at $CONFIG_MERGE_BACKUP)}"
           ;;
         kept)
           # Works, but is not a shipped version, so no later run updates it

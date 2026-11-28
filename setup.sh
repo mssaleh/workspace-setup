@@ -45,12 +45,13 @@
 #                configured, and stopped for on-demand laptop use
 #   SKIP_LIBREOFFICE — set to 1 to skip LibreOffice (both platforms)
 #   PRESERVE_CLI_DUPLICATES — set to 1 to keep alternate CLI installations
-#   CONFIG_ADOPT — replace preserved conflicts and kept shell files with the
-#                shipped version. Either `all` or a colon-separated list of
-#                paths or basenames. The existing content is copied to
-#                <path>.superseded.<timestamp> first, never discarded.
-#                Naming AGENTS.md (not through `all`) also makes the shipped
-#                agent instructions the shared file for every agent.
+#   CONFIG_ADOPT — make the repository's configuration win over what is on
+#                the host: `all`, or a colon-separated list of paths or
+#                basenames. Files setup ships whole are replaced; in files it
+#                merges into, its keys take its values and other keys stay.
+#                `all` and AGENTS.md include the shared agent instructions.
+#                Each changed file is first copied to
+#                <path>.superseded.<timestamp>, never discarded.
 #   UPDATE_SYSTEM — set to 1 to also apply system updates (Linux only): apt
 #                full-upgrade, autoremove, snap, flatpak, uv. Off by default
 #                because full-upgrade may remove packages.
@@ -90,6 +91,8 @@ Usage: bash setup.sh [host | agents [OPTIONS]]
   --help        Show this help without changing the host.
 
 Set PRESERVE_CLI_DUPLICATES=1 to keep existing alternate CLI installations.
+Set CONFIG_ADOPT=all to make the repository's configuration replace the host's,
+keeping each previous file as <path>.superseded.<timestamp>.
 
 Agent options: --dry-run, --update, --only instructions|skills|mcp|plugins|verify,
                --prune-skills, --prune-plugin-cache, --prune-duplicate-mcp.
