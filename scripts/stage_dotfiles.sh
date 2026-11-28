@@ -244,6 +244,54 @@ zshrc_semantically_compliant() {
 # one that is not a shipped version is kept rather than reported as a conflict.
 keep_user_statusline() { CONFIG_MERGE_ACTION=kept; }
 
+# Codex's workspace-write sandbox leaves $HOME read-only, so `docker buildx`
+# cannot record builder activity in its state directory. That directory, and
+# nothing else under ~/.docker, whose config.json can hold registry
+# credentials, joins sandbox_workspace_write.writable_roots. The write goes
+# through Codex's app server (0.172: config/read, config/value/write), which
+# keeps the user's comments and other keys.
+codex_allow_buildx_state() (
+  local codex="$HOME/.local/bin/codex" dir scratch reply request
+  [[ -x "$codex" ]] && command -v docker >/dev/null 2>&1 || exit 0
+  dir="${BUILDX_CONFIG:-${DOCKER_CONFIG:-$HOME/.docker}/buildx}"
+  (umask 077 && mkdir -p "$dir") || { warn "could not create $dir"; exit 0; }
+  scratch=$(mktemp -d "${TMPDIR:-/tmp}/codex-config.XXXXXX") || exit 0
+  trap 'exec 3>&- 4<&-; kill "$server" 2>/dev/null; wait "$server" 2>/dev/null; rm -rf -- "$scratch"' EXIT
+  mkfifo "$scratch/in" "$scratch/out" || exit 0
+  "$codex" app-server < "$scratch/in" > "$scratch/out" 2>/dev/null &
+  server=$!
+  # The server opens its input first, so the writer end must open first.
+  exec 3> "$scratch/in" 4< "$scratch/out"
+  rpc() {
+    local line
+    printf '%s\n' "$2" >&3 || return 1
+    while IFS= read -r -t 30 line <&4; do
+      [[ "$(jq -r '.id // empty' <<< "$line" 2>/dev/null)" == "$1" ]] && { printf '%s\n' "$line"; return 0; }
+    done
+    return 1
+  }
+  if ! rpc 1 '{"id":1,"method":"initialize","params":{"clientInfo":{"name":"workspace-setup","version":"1"}}}' >/dev/null \
+      || ! printf '%s\n' '{"method":"initialized"}' >&3 \
+      || ! reply=$(rpc 2 '{"id":2,"method":"config/read","params":{"includeLayers":true}}'); then
+    warn "codex: could not read its configuration to let its sandbox write $dir"
+    exit 0
+  fi
+  jq -e --arg d "$dir" '.result.config.sandbox_workspace_write.writable_roots // [] | index($d)' \
+    <<< "$reply" >/dev/null && exit 0
+  request=$(jq -c --arg d "$dir" '
+    ([.result.layers[]? | select(.name.type == "user")][0] // {}) as $user
+    | {id: 3, method: "config/value/write", params: {
+        keyPath: "sandbox_workspace_write.writable_roots",
+        value: (($user.config.sandbox_workspace_write.writable_roots // []) + [$d]),
+        mergeStrategy: "replace", expectedVersion: ($user.version // null)}}' <<< "$reply")
+  reply=$(rpc 3 "$request") || { warn "codex: no answer to the configuration write for $dir"; exit 0; }
+  case "$(jq -r '.result.status // empty' <<< "$reply")" in
+    ok) info "codex: its workspace-write sandbox may now write $dir (sandbox_workspace_write.writable_roots)" ;;
+    okOverridden) warn "codex: added $dir to writable_roots, but another configuration layer overrides it" ;;
+    *) warn "codex: could not add $dir to writable_roots: $(jq -r '.error.message // "no status"' <<< "$reply")" ;;
+  esac
+)
+
 # Claude Code and Antigravity settings: shipped keys are added where the file
 # lacks them, values the file already holds are kept, and permissions.deny
 # becomes the union of both lists.
@@ -908,6 +956,7 @@ stage_dotfiles() {
   fi
   install_repo_config "$repo" dotfiles/codex/rules/default.rules \
     "$codex_home/rules/default.rules"
+  codex_allow_buildx_state
   # Copilot takes user deny rules only from organization policy
   # (`copilot help permissions`, 1.0.115), so a user hook applies them.
   install_repo_config "$repo" dotfiles/copilot/hooks/workspace-setup-guardrails.json \

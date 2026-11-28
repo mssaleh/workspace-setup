@@ -63,7 +63,7 @@ packages without their recommendations; each control still overrides it.
 | **packages** | Installs the cross-platform CLI toolbox: `eza`, `fd`, `bat`, `ripgrep` (`rg`), `fzf`, `zoxide`, `yazi`, `bun`, `rtk`, `git`, `git-delta` (`delta`), `lazygit`, `gh`, `zmx`, `rsync`, `rclone`, `nmap`, `jq`, `yq`, `pandoc`, `7zz` (`7z`), `cmake`, `ninja`, `node`, `uv`, `ruff`, `helm`, `kubectl`, `cosign`, `ffmpeg`, `poppler` (`poppler-utils`), `nano`, `himalaya`, `ncdu`, `shellcheck`, `pre-commit`, … It installs `xterm-kitty` terminfo as a non-GUI SSH capability on every host. Where a Linux release's apt has no `git-delta`, `eza` or `lazygit`, their upstream releases install into `~/.local/bin`. On Linux it registers **every** vendor archive before installing anything (see below), then installs the toolbox, the **Claude Desktop** app (skip with `SKIP_CLAUDE_DESKTOP=1`), the **Codex app** (skip with `SKIP_CODEX_APP=1`) and **Google Chrome** (skip with `SKIP_CHROME=1`). |
 | **docker** | Linux only: installs the official **Docker Engine** + **Docker Compose v2** from download.docker.com. Docker's documented pre-clean of the distribution's `docker.io`, `containerd` and `runc` names every package apt would take with them before it runs, since those runtimes carry reverse dependencies of their own. A complete, responsive official installation is a no-op on rerun. |
 | **toolchains** | Updates Rust stable through native rustup while preserving the selected default and other toolchains. Astral's installer owns uv. Coding and cloud CLIs use vendor-maintained Brew taps or practical vendor installers; Linux cloud CLIs also use official apt repositories. npm tracks the registry's stable release alongside Cloudflare CLI and Linux Bun. `markitdown[all]` and macOS Ruff use uv tools. |
-| **configuration** | Converges ordinary files under `$HOME`; repairs old links into temporary checkouts, atomically upgrades exact known historical versions, semantically merges supported JSON/TOML/Git/ssh formats and repairs a shell startup file that has lost the host-local environment loader, preserves ambiguous user-owned content, installs the coding-agent guardrails, removes the bundled-skill copies earlier runs placed in agent homes when they are unedited, and provisions the host-local environment directory `~/.config/shell/env.d/` that the supported shells source. |
+| **configuration** | Converges ordinary files under `$HOME`; repairs old links into temporary checkouts, atomically upgrades exact known historical versions, semantically merges supported JSON/TOML/Git/ssh formats and repairs a shell startup file that has lost the host-local environment loader, preserves ambiguous user-owned content, installs the coding-agent guardrails, lets Codex's sandbox write buildx state when Docker is installed, removes the bundled-skill copies earlier runs placed in agent homes when they are unedited, and provisions the host-local environment directory `~/.config/shell/env.d/` that the supported shells source. |
 | **completions** | macOS only: runs `brew completions link` when Homebrew reports that external-command completions are not linked, then generates and syntax-checks Bash/Zsh completions from the installed Codex, rustup/cargo, opencode, Container, and Container Compose binaries. Existing files without this setup's ownership marker are preserved. Linux retains its existing himalaya loader only. |
 | **containers** | macOS only: installs or updates Apple's signed Container package while stopped, ensures Rosetta, and writes only the stable build/registry defaults. The Container system remains stopped for on-demand laptop use unless `CONTAINER_START=1`; it is never stopped automatically. `container-compose` is supplied separately by Homebrew. |
 | **ssh** | Generates an ed25519 keypair if none exists, locks down `~/.ssh` permissions (700 dir, 600 files), and wires up the host-local SSH agent (macOS: Keychain; Linux: systemd user unit) without replacing an agent-forwarding socket supplied by `sshd`. Does **not** push to GitHub — run `gh auth login` manually. |
@@ -1073,6 +1073,17 @@ These are prefix rules that stop accidental package changes, not a boundary:
 and environment-prefixed commands do not match them. The Copilot hook needs
 `jq` and lets a command through when `jq` is missing, because Copilot denies
 every call whose hook fails.
+
+Codex's `workspace-write` sandbox makes everything outside the project and
+`/tmp` read-only, so `docker buildx build` fails to record builder activity in
+its state directory. When the `docker` CLI is installed, host setup adds that
+directory, `${BUILDX_CONFIG:-${DOCKER_CONFIG:-~/.docker}/buildx}`, to
+`sandbox_workspace_write.writable_roots` in `~/.codex/config.toml` through
+Codex's app server, keeping your other settings and comments. The rest of
+`~/.docker` stays read-only, because its `config.json` can hold registry
+credentials. Codex documents `writable_roots` for `sandbox_mode =
+"workspace-write"`; with `[permissions]` profiles instead, add the directory
+to your profile's filesystem table.
 
 ## Claude Code settings
 
